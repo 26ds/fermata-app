@@ -74,16 +74,16 @@ export function LoginForm({ initialError }: { initialError?: string }) {
           <p className="mt-3 text-sm leading-relaxed text-ink-300">
             在<span className="text-ink-100">这台设备</span>上点邮件里的登录按钮；
             如果邮件是在<span className="text-ink-100">别的设备</span>上打开的，
-            把邮件里的 6 位验证码填到下面。
+            把邮件里的数字验证码填到下面。
           </p>
         </div>
         <form onSubmit={verifyCode} className="flex flex-col gap-3">
           <input
             inputMode="numeric"
             pattern="[0-9]*"
-            maxLength={6}
+            maxLength={10}
             required
-            placeholder="6 位验证码"
+            placeholder="邮件里的验证码"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             className="rounded-xl border border-ink-700 bg-ink-700/40 px-4 py-3 text-center text-lg tracking-[0.4em] text-ink-100 placeholder:tracking-normal placeholder:text-ink-500 outline-none focus:border-teal-600"
