@@ -4,9 +4,15 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { envLiveModel } from "@/lib/live/models";
 
-// M0.5 — 列出当前 GEMINI_API_KEY 能用的所有 Live（双向实时语音）模型，
-// 供实验页下拉框选择。判定标准：supportedActions 含 bidiGenerateContent
-// （Live WebSocket 的方法名）。翻译专用 / TTS 专用模型不含此能力，天然被过滤。
+// M0.5 — 列出当前 GEMINI_API_KEY 能用的 Live（双向实时语音）对话模型，
+// 供实验页下拉框选择。两层过滤：
+//   1) supportedActions 含 bidiGenerateContent（Live WebSocket 的方法名）
+//   2) 白名单只留"对话"系模型（-flash-live / native-audio），挡掉同传
+//      （live translate）、TTS 朗读等专用模型 —— 创始人 2026-07 拍板。
+//      未来出 gemini-3.5-flash-live 之类会自动进入列表，无需改代码。
+
+const ALLOW = [/-flash-live(-|$)/, /native-audio/];
+const DENY = [/translate|tts/];
 
 export async function GET() {
   if (!supabaseConfigured) {
@@ -36,6 +42,9 @@ export async function GET() {
         continue;
       }
       const name = m.name.replace(/^models\//, "");
+      if (!ALLOW.some((r) => r.test(name)) || DENY.some((r) => r.test(name))) {
+        continue;
+      }
       models.push({ name, displayName: m.displayName || name });
     }
     // 名字倒序 ≈ 版本号大的排前面（gemini-3.x 排在 2.x 之前）

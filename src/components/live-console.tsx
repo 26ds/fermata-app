@@ -23,6 +23,19 @@ import {
 
 type Status = "idle" | "connecting" | "live" | "ended";
 
+// Live API 预置音色（完整 30 个可在 AI Studio 试听，这里精选 8 个）
+// 音色在一次会话内固定不变；换音色要重新开始对话。
+const VOICES = [
+  { name: "Puck", label: "Puck · 偏男声，活泼" },
+  { name: "Charon", label: "Charon · 偏男声，低沉" },
+  { name: "Fenrir", label: "Fenrir · 偏男声，带劲" },
+  { name: "Orus", label: "Orus · 偏男声，坚定" },
+  { name: "Kore", label: "Kore · 偏女声，沉稳" },
+  { name: "Aoede", label: "Aoede · 偏女声，轻快" },
+  { name: "Leda", label: "Leda · 偏女声，年轻" },
+  { name: "Zephyr", label: "Zephyr · 偏女声，明亮" },
+] as const;
+
 interface CaptionTurn {
   id: number;
   role: "user" | "model";
@@ -60,6 +73,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
   const [model, setModel] = useState("");
   const [models, setModels] = useState<{ name: string; displayName: string }[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
+  const [voice, setVoice] = useState<string>("Puck");
   const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
 
   const sessionRef = useRef<Session | null>(null);
@@ -75,6 +89,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const lastVoiceAtRef = useRef(0); // 用户最后一次出声的时刻（测响应耗时用）
   const modelSpeakingRef = useRef(false);
+  const orbRef = useRef<HTMLDivElement | null>(null); // 音量波动球，直改 DOM 不走 React 渲染
 
   // 字幕逐词上屏：同角色未定稿的气泡续写，否则起新气泡
   const appendCaption = useCallback(
@@ -219,6 +234,10 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
         responseModalities: [Modality.AUDIO],
         inputAudioTranscription: {},
         outputAudioTranscription: {},
+        // 音色整场固定（创始人需求：一次对话内声音一致）
+        speechConfig: {
+          voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } },
+        },
         // 语音对话追求秒回：native-audio 系模型默认边想边停顿，思考预算清零
         ...(model.includes("native-audio")
           ? { thinkingConfig: { thinkingBudget: 0 } }
@@ -241,7 +260,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
     });
     sessionRef.current = session;
     setNotice("");
-  }, [model, handleMessage, fetchToken]);
+  }, [model, voice, handleMessage, fetchToken]);
 
   useEffect(() => {
     openSessionRef.current = openSession;
@@ -314,8 +333,14 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
         // 粗略人声检测：记下用户最后一次出声的时刻，给"响应耗时"徽章用
         let sum = 0;
         for (let i = 0; i < pcm.length; i++) sum += pcm[i] * pcm[i];
-        if (Math.sqrt(sum / pcm.length) > 0.02) {
+        const rms = Math.sqrt(sum / pcm.length);
+        if (rms > 0.02) {
           lastVoiceAtRef.current = performance.now();
+        }
+        // 悬浮球随音量波动（每 ~40ms 一帧，直改 DOM，不触发 React 重渲染）
+        if (orbRef.current) {
+          orbRef.current.style.transform = `scale(${(1 + Math.min(rms * 5, 0.7)).toFixed(3)})`;
+          orbRef.current.style.opacity = rms > 0.02 ? "1" : "0.55";
         }
         s.sendRealtimeInput({
           audio: { data: floatToPcm16Base64(pcm), mimeType: "audio/pcm;rate=16000" },
@@ -383,6 +408,10 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
         const saved = localStorage.getItem("fermata-live-model");
         const names = (body.models ?? []).map((m) => m.name);
         setSelectedModel(saved && names.includes(saved) ? saved : body.default);
+        const savedVoice = localStorage.getItem("fermata-live-voice");
+        if (savedVoice && VOICES.some((v) => v.name === savedVoice)) {
+          setVoice(savedVoice);
+        }
       } catch {
         // 列表拿不到就用服务端默认模型，不挡对话
       }
@@ -391,6 +420,14 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
+
+  // 正在说的那句话跟着悬浮球走，说完（定稿）才汇入对话框
+  const lastTurn = turns[turns.length - 1];
+  const pendingUser =
+    status === "live" && lastTurn && lastTurn.role === "user" && !lastTurn.final
+      ? lastTurn
+      : null;
+  const listTurns = pendingUser ? turns.slice(0, -1) : turns;
 
   if (!geminiConfigured) {
     return (
@@ -443,6 +480,22 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
         )}
       </div>
 
+      {/* 悬浮球：用户说话时随音量波动，正在说的话逐词浮现在球下 */}
+      {status === "live" && (
+        <div className="flex flex-col items-center gap-2 pb-3">
+          <div
+            ref={orbRef}
+            className="h-14 w-14 rounded-full bg-teal-400/90 opacity-55 shadow-[0_0_28px_rgba(93,202,165,0.45)] transition-transform duration-100"
+            aria-hidden
+          />
+          {pendingUser && (
+            <p className="max-w-[85%] text-center text-sm leading-relaxed text-teal-200">
+              {pendingUser.text}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* 字幕区 */}
       <div
         ref={scrollRef}
@@ -455,7 +508,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
               : "点下面的按钮开始。需要允许麦克风权限，建议戴耳机。"}
           </p>
         )}
-        {turns.map((t) => (
+        {listTurns.map((t) => (
           <div
             key={t.id}
             className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
@@ -525,6 +578,23 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
                 ))}
               </select>
             )}
+            <select
+              value={voice}
+              onChange={(e) => {
+                setVoice(e.target.value);
+                localStorage.setItem("fermata-live-voice", e.target.value);
+              }}
+              className="rounded-xl border border-ink-700 bg-ink-700/40 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-teal-600"
+            >
+              {VOICES.map((v) => (
+                <option key={v.name} value={v.name}>
+                  {v.label}
+                </option>
+              ))}
+            </select>
+            <p className="rounded-xl border border-dashed border-ink-700 px-4 py-2.5 text-center text-xs text-ink-500">
+              🎙 上传自己喜欢的声音，让它来回复你（英文）— Coming soon
+            </p>
             <button
               type="button"
               onClick={connect}
