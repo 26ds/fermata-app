@@ -15,9 +15,6 @@ const eslintConfig = defineConfig([
     // Serwist 构建产物（机器生成的压缩文件，不参与 lint）
     "public/sw.js",
     "public/swe-worker-*.js",
-    // Serwist 生成的 service worker（压缩产物，不 lint）
-    "public/sw.js",
-    "public/swe-worker-*.js",
   ]),
 ]);
 

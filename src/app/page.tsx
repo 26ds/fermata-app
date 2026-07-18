@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
@@ -50,6 +51,14 @@ export default async function LibraryPage() {
             </p>
             <p className="mt-8 inline-block rounded-full border border-ink-700 px-4 py-1.5 text-xs text-ink-500">
               播放器将在 M1 上线
+            </p>
+            <p className="mt-4">
+              <Link
+                href="/lab/live"
+                className="inline-block rounded-full border border-teal-800 px-4 py-1.5 text-xs text-teal-300 transition-colors hover:bg-teal-950/40"
+              >
+                M0.5 实验：和 Gemini 语音对话 →
+              </Link>
             </p>
           </div>
         ) : (
