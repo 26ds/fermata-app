@@ -3,14 +3,14 @@ import { NextResponse } from "next/server";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 
+import { envLiveModel } from "@/lib/live/models";
+
 // M0.5 — 给浏览器发 Live API 的临时通行证（ephemeral token）。
 // D13 密钥纪律：真正的 GEMINI_API_KEY 只存在服务端环境变量，
 // 客户端拿到的是 30 分钟过期、只能开一次会话的一次性 token。
-// 模型名可用 GEMINI_LIVE_MODEL 覆盖（比如切到 gemini-3.1-flash-live-preview）。
+// 请求体可带 { model } 指定模型（实验页下拉框），否则用 GEMINI_LIVE_MODEL / 默认值。
 
-const DEFAULT_LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-12-2025";
-
-export async function POST() {
+export async function POST(request: Request) {
   if (!supabaseConfigured) {
     return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
   }
@@ -32,7 +32,15 @@ export async function POST() {
     );
   }
 
-  const model = process.env.GEMINI_LIVE_MODEL || DEFAULT_LIVE_MODEL;
+  let requested = "";
+  try {
+    const body = await request.json();
+    if (typeof body?.model === "string") requested = body.model.trim();
+  } catch {
+    // 没带 body 就用默认模型
+  }
+  const model =
+    requested && /^[\w./-]+$/.test(requested) ? requested : envLiveModel();
 
   try {
     // ephemeral token 走 v1alpha（官方要求）
@@ -40,10 +48,13 @@ export async function POST() {
     const now = Date.now();
     const token = await ai.authTokens.create({
       config: {
-        uses: 1, // 一张票只能开一次会话（断线重连不算新会话）
+        uses: 1, // 一张票只能开一次会话
         expireTime: new Date(now + 30 * 60 * 1000).toISOString(),
         newSessionExpireTime: new Date(now + 2 * 60 * 1000).toISOString(),
-        liveConnectConstraints: { model }, // 锁定模型，其余配置由客户端带上
+        // 注意：这里绝不能加 liveConnectConstraints —— 一旦 token 带了约束，
+        // 服务器会按 token 里锁定的配置建会话，浏览器端 config 里的字幕开关
+        // （in/outputAudioTranscription）、系统人设、VAD 调参全被无视。
+        // M0.5 第一版就是因为它字幕全无。M4 做正式功能时改为服务端锁"完整"配置。
       },
     });
     if (!token.name) {

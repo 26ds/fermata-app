@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  EndSensitivity,
   GoogleGenAI,
   Modality,
   type LiveServerMessage,
@@ -57,6 +58,9 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
   const [turns, setTurns] = useState<CaptionTurn[]>([]);
   const [draft, setDraft] = useState("");
   const [model, setModel] = useState("");
+  const [models, setModels] = useState<{ name: string; displayName: string }[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [lastLatencyMs, setLastLatencyMs] = useState<number | null>(null);
 
   const sessionRef = useRef<Session | null>(null);
   const playbackRef = useRef<PcmPlaybackQueue | null>(null);
@@ -69,6 +73,8 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
   const reconnectsRef = useRef(0);
   const nextIdRef = useRef(1);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const lastVoiceAtRef = useRef(0); // 用户最后一次出声的时刻（测响应耗时用）
+  const modelSpeakingRef = useRef(false);
 
   // 字幕逐词上屏：同角色未定稿的气泡续写，否则起新气泡
   const appendCaption = useCallback(
@@ -134,6 +140,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       // ③ 用户插话 → 模型立刻闭嘴：清空播放队列
       if (sc.interrupted) {
         playbackRef.current?.interrupt();
+        modelSpeakingRef.current = false;
         finalizeCaptions(true);
         setInterruptCount((n) => n + 1);
         return;
@@ -142,22 +149,46 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       if (sc.inputTranscription?.text) appendCaption("user", sc.inputTranscription.text);
       if (sc.outputTranscription?.text) appendCaption("model", sc.outputTranscription.text);
 
-      // 模型语音：逐块排进播放队列
+      // 模型语音：逐块排进播放队列。每轮的第一块顺便记一次响应耗时
       for (const part of sc.modelTurn?.parts ?? []) {
         const b64 = part.inlineData?.data;
         if (typeof b64 === "string" && b64.length > 0) {
+          if (!modelSpeakingRef.current) {
+            modelSpeakingRef.current = true;
+            const dt = performance.now() - lastVoiceAtRef.current;
+            if (lastVoiceAtRef.current > 0 && dt < 15000) setLastLatencyMs(dt);
+          }
           playbackRef.current?.enqueue(pcm16Base64ToFloat(b64));
         }
       }
-      if (sc.turnComplete) finalizeCaptions();
+      if (sc.turnComplete) {
+        modelSpeakingRef.current = false;
+        finalizeCaptions();
+      }
     },
     [appendCaption, finalizeCaptions],
   );
+
+  // 找服务端要一次性通行证（真钥匙不出服务器 — D13）
+  const fetchToken = useCallback(async (): Promise<{ token: string; model: string }> => {
+    const res = await fetch("/api/live-token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: selectedModel }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error ?? `token 接口返回 ${res.status}`);
+    return body;
+  }, [selectedModel]);
 
   // 断线重连要在 onclose 回调里调用 openSession 自己 —— 经 ref 转一手避免自引用
   const openSessionRef = useRef<(() => Promise<void>) | null>(null);
 
   const openSession = useCallback(async () => {
+    // uses:1 的票不保证第二次连接还能用，续接前先换一张新票
+    if (reconnectsRef.current > 0) {
+      tokenRef.current = (await fetchToken()).token;
+    }
     const ai = new GoogleGenAI({ apiKey: tokenRef.current, apiVersion: "v1alpha" });
     const session = await ai.live.connect({
       model,
@@ -188,6 +219,17 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
         responseModalities: [Modality.AUDIO],
         inputAudioTranscription: {},
         outputAudioTranscription: {},
+        // 语音对话追求秒回：native-audio 系模型默认边想边停顿，思考预算清零
+        ...(model.includes("native-audio")
+          ? { thinkingConfig: { thinkingBudget: 0 } }
+          : {}),
+        // "说完了"判定默认要等约 1 秒静音，压到 400ms 换更快的接话
+        realtimeInputConfig: {
+          automaticActivityDetection: {
+            endOfSpeechSensitivity: EndSensitivity.END_SENSITIVITY_HIGH,
+            silenceDurationMs: 400,
+          },
+        },
         // 官方超时缓解路径：滑动窗口压缩 + 会话续接
         contextWindowCompression: { slidingWindow: {} },
         sessionResumption: resumeHandleRef.current
@@ -199,7 +241,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
     });
     sessionRef.current = session;
     setNotice("");
-  }, [model, handleMessage]);
+  }, [model, handleMessage, fetchToken]);
 
   useEffect(() => {
     openSessionRef.current = openSession;
@@ -236,13 +278,14 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
     closedByUserRef.current = false;
     reconnectsRef.current = 0;
     resumeHandleRef.current = "";
+    lastVoiceAtRef.current = 0;
+    modelSpeakingRef.current = false;
+    setLastLatencyMs(null);
     setStatus("connecting");
 
     try {
-      // 1) 找服务端要一次性通行证（真钥匙不出服务器 — D13）
-      const res = await fetch("/api/live-token", { method: "POST" });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? `token 接口返回 ${res.status}`);
+      // 1) 领一次性通行证（带上下拉框选中的模型）
+      const body = await fetchToken();
       tokenRef.current = body.token;
 
       // 2) 播放通路（必须在用户点击的手势里创建，iOS 才出声）
@@ -267,8 +310,16 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       recorder.port.onmessage = (e: MessageEvent<Float32Array>) => {
         const s = sessionRef.current;
         if (!s) return;
-        const data = floatToPcm16Base64(downsampleTo16k(e.data, recCtx.sampleRate));
-        s.sendRealtimeInput({ audio: { data, mimeType: "audio/pcm;rate=16000" } });
+        const pcm = downsampleTo16k(e.data, recCtx.sampleRate);
+        // 粗略人声检测：记下用户最后一次出声的时刻，给"响应耗时"徽章用
+        let sum = 0;
+        for (let i = 0; i < pcm.length; i++) sum += pcm[i] * pcm[i];
+        if (Math.sqrt(sum / pcm.length) > 0.02) {
+          lastVoiceAtRef.current = performance.now();
+        }
+        s.sendRealtimeInput({
+          audio: { data: floatToPcm16Base64(pcm), mimeType: "audio/pcm;rate=16000" },
+        });
       };
       // 静音 gain 兜底：保证 worklet 在渲染图里被驱动，又不会自己听到自己
       const mute = recCtx.createGain();
@@ -303,6 +354,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       ...prev,
       { id: nextIdRef.current++, role: "user", text, final: true },
     ]);
+    lastVoiceAtRef.current = performance.now(); // 文字轮也计响应耗时
     s.sendClientContent({
       turns: [{ role: "user", parts: [{ text }] }],
       turnComplete: true,
@@ -315,6 +367,27 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [turns]);
+
+  // 拉取当前 API Key 可用的 Live 模型列表，恢复上次选择
+  useEffect(() => {
+    if (!geminiConfigured) return;
+    (async () => {
+      try {
+        const res = await fetch("/api/live-models");
+        if (!res.ok) return;
+        const body: {
+          models: { name: string; displayName: string }[];
+          default: string;
+        } = await res.json();
+        setModels(body.models ?? []);
+        const saved = localStorage.getItem("fermata-live-model");
+        const names = (body.models ?? []).map((m) => m.name);
+        setSelectedModel(saved && names.includes(saved) ? saved : body.default);
+      } catch {
+        // 列表拿不到就用服务端默认模型，不挡对话
+      }
+    })();
+  }, [geminiConfigured]);
 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
@@ -361,6 +434,11 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
         {interruptCount > 0 && (
           <span className="rounded-full border border-ink-700 px-3 py-1 text-xs text-ink-300">
             打断 {interruptCount} 次
+          </span>
+        )}
+        {lastLatencyMs !== null && (
+          <span className="rounded-full border border-ink-700 px-3 py-1 text-xs text-ink-300">
+            响应 {(lastLatencyMs / 1000).toFixed(1)}s
           </span>
         )}
       </div>
@@ -430,18 +508,36 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
             </button>
           </>
         ) : (
-          <button
-            type="button"
-            onClick={connect}
-            disabled={status === "connecting"}
-            className="rounded-xl bg-teal-400 px-4 py-3 font-semibold text-teal-950 transition-opacity disabled:opacity-60"
-          >
-            {status === "connecting"
-              ? "连接中…"
-              : status === "ended"
-                ? "重新开始"
-                : "开始语音对话"}
-          </button>
+          <>
+            {models.length > 0 && (
+              <select
+                value={selectedModel}
+                onChange={(e) => {
+                  setSelectedModel(e.target.value);
+                  localStorage.setItem("fermata-live-model", e.target.value);
+                }}
+                className="rounded-xl border border-ink-700 bg-ink-700/40 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-teal-600"
+              >
+                {models.map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {m.displayName}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              type="button"
+              onClick={connect}
+              disabled={status === "connecting"}
+              className="rounded-xl bg-teal-400 px-4 py-3 font-semibold text-teal-950 transition-opacity disabled:opacity-60"
+            >
+              {status === "connecting"
+                ? "连接中…"
+                : status === "ended"
+                  ? "重新开始"
+                  : "开始语音对话"}
+            </button>
+          </>
         )}
         {model && (
           <p className="text-center text-xs text-ink-500">{model}</p>
