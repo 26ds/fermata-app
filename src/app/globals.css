@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+/*
+ * Fermata design tokens — WORKORDER §7
+ * 底色族 ink（暗色影院底）+ accent 电光青 teal 单一强调色。
+ * 彩底上的文字一律用同族最深色（青底 teal-400 上文字用 teal-950）。
+ */
+@theme {
+  --color-ink-900: #2c2c2a;
+  --color-ink-700: #444441;
+  --color-ink-500: #888780;
+  --color-ink-300: #b4b2a9;
+  --color-ink-100: #f1efe8;
+
+  --color-teal-100: #e1f5ee;
+  --color-teal-300: #9fe1cb;
+  --color-teal-400: #5dcaa5;
+  --color-teal-600: #1d9e75;
+  --color-teal-800: #0f6e56;
+  --color-teal-950: #04342c;
+
+  /* UI 无衬线：系统栈；台词引用与 AI 问句：衬线 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-quote: Georgia, "Songti SC", "Noto Serif SC", serif;
+}
+
+body {
+  background: var(--color-ink-900);
+  color: var(--color-ink-100);
+  font-family: var(--font-sans);
+}
+
+/* 玻璃材质：只允许用于悬浮操作层（悬浮球/打断面板/底部 tab/访谈控制条）——见 §7 */
+.glass {
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  background: color-mix(in srgb, var(--color-ink-900) 62%, transparent);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--color-ink-700);
+  }
+}
