@@ -11,9 +11,9 @@ export function SignOutButton() {
   return (
     <button
       onClick={onClick}
-      className="rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-ink-300 transition-colors hover:border-ink-500 hover:text-ink-100"
+      className="min-h-10 rounded-xl border border-ink-500/50 px-3 text-xs font-medium text-ink-300 hover:border-ink-300 hover:text-ink-100"
     >
-      退出
+      退出登录
     </button>
   );
 }

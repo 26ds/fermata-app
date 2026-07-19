@@ -68,10 +68,17 @@ export function LoginForm({ initialError }: { initialError?: string }) {
   if (status === "sent" || status === "verifying") {
     return (
       <div className="flex flex-col gap-3">
-        <div className="rounded-2xl border border-teal-800 bg-ink-700/50 p-5 text-center">
-          <p className="text-teal-300">邮件已发送至</p>
-          <p className="mt-1 font-medium break-all">{email}</p>
-          <p className="mt-3 text-sm leading-relaxed text-ink-300">
+        <div className="rounded-2xl border border-teal-600/60 bg-teal-950 p-4">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-teal-400 text-sm font-bold text-teal-950" aria-hidden>
+              ✓
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-teal-100">确认邮件已出发</p>
+              <p className="mt-1 break-all text-sm text-teal-300">{email}</p>
+            </div>
+          </div>
+          <p className="mt-4 text-sm leading-6 text-teal-300">
             在<span className="text-ink-100">这台设备</span>上点邮件里的登录按钮；
             如果邮件是在<span className="text-ink-100">别的设备</span>上打开的，
             把邮件里的数字验证码填到下面。
@@ -86,14 +93,15 @@ export function LoginForm({ initialError }: { initialError?: string }) {
             placeholder="邮件里的验证码"
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            className="rounded-xl border border-ink-700 bg-ink-700/40 px-4 py-3 text-center text-lg tracking-[0.4em] text-ink-100 placeholder:tracking-normal placeholder:text-ink-500 outline-none focus:border-teal-600"
+            className="h-14 rounded-xl border border-ink-500/70 bg-ink-900 px-4 text-center text-lg tracking-[0.4em] text-ink-100 placeholder:tracking-normal placeholder:text-ink-500 outline-none focus:border-teal-400"
           />
           <button
             type="submit"
             disabled={status === "verifying" || code.trim().length < 6}
-            className="rounded-xl bg-teal-400 px-4 py-3 font-semibold text-teal-950 transition-opacity disabled:opacity-60"
+            className="flex h-14 items-center justify-center gap-2 rounded-xl bg-teal-400 px-4 font-semibold text-teal-950 disabled:opacity-50"
           >
-            {status === "verifying" ? "验证中…" : "用验证码登录"}
+            {status === "verifying" ? "确认中…" : "用验证码登录"}
+            {status !== "verifying" && <span aria-hidden>→</span>}
           </button>
         </form>
         {error && (
@@ -108,7 +116,7 @@ export function LoginForm({ initialError }: { initialError?: string }) {
             setCode("");
             setError("");
           }}
-          className="text-sm text-ink-500 underline-offset-4 hover:text-ink-300 hover:underline"
+          className="min-h-11 text-sm text-ink-500 underline-offset-4 hover:text-ink-100 hover:underline"
         >
           换个邮箱 / 重新发送
         </button>
@@ -118,8 +126,8 @@ export function LoginForm({ initialError }: { initialError?: string }) {
 
   return (
     <form onSubmit={sendLink} className="flex flex-col gap-3">
-      <label htmlFor="email" className="text-sm text-ink-300">
-        邮箱登录，无需密码
+      <label htmlFor="email" className="text-xs font-semibold tracking-wide text-ink-300">
+        你的邮箱
       </label>
       <input
         id="email"
@@ -129,14 +137,15 @@ export function LoginForm({ initialError }: { initialError?: string }) {
         placeholder="you@example.com"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        className="rounded-xl border border-ink-700 bg-ink-700/40 px-4 py-3 text-ink-100 placeholder:text-ink-500 outline-none focus:border-teal-600"
+        className="h-14 rounded-xl border border-ink-500/70 bg-ink-900 px-4 text-ink-100 placeholder:text-ink-500 outline-none focus:border-teal-400"
       />
       <button
         type="submit"
         disabled={status === "sending"}
-        className="rounded-xl bg-teal-400 px-4 py-3 font-semibold text-teal-950 transition-opacity disabled:opacity-60"
+        className="mt-1 flex h-14 items-center justify-center gap-2 rounded-xl bg-teal-400 px-4 font-semibold text-teal-950 disabled:opacity-50"
       >
-        {status === "sending" ? "发送中…" : "发送登录邮件"}
+        {status === "sending" ? "正在发送…" : "发送登录邮件"}
+        {status !== "sending" && <span aria-hidden>→</span>}
       </button>
       {error && (
         <p className="text-sm text-red-400" role="alert">

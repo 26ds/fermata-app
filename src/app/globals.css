@@ -26,9 +26,83 @@
 }
 
 body {
-  background: var(--color-ink-900);
+  min-width: 320px;
+  background:
+    radial-gradient(circle at 50% -12%, rgba(29, 158, 117, 0.11), transparent 31rem),
+    var(--color-ink-900);
   color: var(--color-ink-100);
   font-family: var(--font-sans);
+}
+
+::selection {
+  background: var(--color-teal-400);
+  color: var(--color-teal-950);
+}
+
+button,
+a,
+select,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a {
+  transition: border-color 180ms ease, background-color 180ms ease, color 180ms ease,
+    opacity 180ms ease, transform 180ms ease;
+}
+
+button:active,
+a:active {
+  transform: scale(0.98);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--color-teal-400);
+  outline-offset: 3px;
+}
+
+/* Scrollbars stay quiet so the transcript remains the visual focus. */
+* {
+  scrollbar-color: var(--color-ink-500) transparent;
+  scrollbar-width: thin;
+}
+
+.display-serif {
+  font-family: var(--font-quote);
+  text-wrap: balance;
+}
+
+.eyebrow {
+  color: var(--color-ink-500);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.ambient-grid {
+  background-image: linear-gradient(
+      rgba(180, 178, 169, 0.045) 1px,
+      transparent 1px
+    ),
+    linear-gradient(90deg, rgba(180, 178, 169, 0.045) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(to bottom, black, transparent 72%);
+}
+
+.teal-halo {
+  box-shadow: 0 0 0 1px rgba(93, 202, 165, 0.12),
+    0 0 34px rgba(29, 158, 117, 0.2);
+}
+
+.caption-copy {
+  max-width: 65ch;
+  text-wrap: pretty;
 }
 
 /* 玻璃材质：只允许用于悬浮操作层（悬浮球/打断面板/底部 tab/访谈控制条）——见 §7 */
@@ -36,6 +110,7 @@ body {
   backdrop-filter: blur(18px) saturate(160%);
   -webkit-backdrop-filter: blur(18px) saturate(160%);
   background: color-mix(in srgb, var(--color-ink-900) 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-ink-300) 16%, transparent);
 }
 
 @media (prefers-reduced-transparency: reduce) {

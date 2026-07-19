@@ -431,187 +431,120 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
 
   if (!geminiConfigured) {
     return (
-      <main className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-        <p className="text-lg text-ink-100">还差一把钥匙</p>
-        <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-ink-300">
-          服务器还没配置 <code className="text-teal-300">GEMINI_API_KEY</code>。
-          去 aistudio.google.com 免费创建一个 API Key，填到 Vercel 的
-          Environment Variables 里再 Redeploy 即可。
-        </p>
+      <main className="relative flex flex-1 flex-col items-center justify-center px-6 text-center">
+        <div className="w-full max-w-sm rounded-[1.75rem] border border-ink-500/50 bg-ink-700 p-6 shadow-[0_24px_70px_rgba(0,0,0,0.2)]">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-teal-600/60 text-3xl text-teal-300 teal-halo" aria-hidden>⌁</div>
+          <p className="mt-6 text-lg font-semibold text-ink-100">Live 还在准备中</p>
+          <p className="mt-3 text-sm leading-6 text-ink-300">
+            服务器还没配置 <code className="rounded-md bg-ink-900 px-1.5 py-0.5 text-teal-300">GEMINI_API_KEY</code>。配置完成后，就可以在这里和学习伙伴自然地说话。
+          </p>
+          <p className="mt-5 border-t border-ink-500/30 pt-4 text-xs leading-5 text-ink-500">
+            去 Google AI Studio 创建 API Key，填入 Vercel 的 Environment Variables 后重新部署。
+          </p>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col px-5 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      {/* 状态条：计时 + 验收徽章 */}
-      <div className="flex flex-wrap items-center gap-2 py-3">
-        <span
-          className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${
-            status === "live"
-              ? "border-teal-800 text-teal-300"
-              : "border-ink-700 text-ink-500"
-          }`}
-        >
-          <span
-            className={`h-1.5 w-1.5 rounded-full ${
-              status === "live" ? "animate-pulse bg-teal-400" : "bg-ink-500"
-            }`}
-          />
-          {status === "idle" && "未连接"}
-          {status === "connecting" && "连接中…"}
-          {status === "live" && `通话中 ${mm}:${ss}`}
-          {status === "ended" && `已结束 ${mm}:${ss}`}
-        </span>
-        {elapsed >= 120 && (
-          <span className="rounded-full border border-teal-800 bg-teal-950/40 px-3 py-1 text-xs text-teal-300">
-            ✓ 已满 2 分钟
+    <main className="relative flex min-h-0 flex-1 flex-col px-5 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-8">
+      <div className="flex items-center justify-between gap-3 py-2">
+        <div>
+          <p className="eyebrow mb-2">conversation deck</p>
+          <h1 className="display-serif text-xl text-ink-100">和你的学习伙伴聊聊。</h1>
+        </div>
+        <div className="flex flex-wrap justify-end gap-1.5 text-[0.68rem]">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 ${status === "live" ? "border-teal-600/70 bg-teal-950 text-teal-300" : "border-ink-500/50 text-ink-500"}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${status === "live" ? "animate-pulse bg-teal-400" : "bg-ink-500"}`} />
+            {status === "idle" && "待机"}
+            {status === "connecting" && "连接中"}
+            {status === "live" && `${mm}:${ss}`}
+            {status === "ended" && `结束 ${mm}:${ss}`}
           </span>
-        )}
-        {interruptCount > 0 && (
-          <span className="rounded-full border border-ink-700 px-3 py-1 text-xs text-ink-300">
-            打断 {interruptCount} 次
-          </span>
-        )}
-        {lastLatencyMs !== null && (
-          <span className="rounded-full border border-ink-700 px-3 py-1 text-xs text-ink-300">
-            响应 {(lastLatencyMs / 1000).toFixed(1)}s
-          </span>
-        )}
+          {interruptCount > 0 && <span className="rounded-full border border-ink-500/50 px-2.5 py-1 text-ink-300">打断 {interruptCount}</span>}
+          {lastLatencyMs !== null && <span className="rounded-full border border-ink-500/50 px-2.5 py-1 text-ink-300">响应 {(lastLatencyMs / 1000).toFixed(1)}s</span>}
+          {elapsed >= 120 && <span className="rounded-full border border-teal-600/70 bg-teal-950 px-2.5 py-1 text-teal-300">✓ 2 min</span>}
+        </div>
       </div>
 
-      {/* 悬浮球：用户说话时随音量波动，正在说的话逐词浮现在球下 */}
       {status === "live" && (
-        <div className="flex flex-col items-center gap-2 pb-3">
-          <div
-            ref={orbRef}
-            className="h-14 w-14 rounded-full bg-teal-400/90 opacity-55 shadow-[0_0_28px_rgba(93,202,165,0.45)] transition-transform duration-100"
-            aria-hidden
-          />
-          {pendingUser && (
-            <p className="max-w-[85%] text-center text-sm leading-relaxed text-teal-200">
-              {pendingUser.text}
-            </p>
+        <div className="flex flex-col items-center gap-2 py-3">
+          <div className="relative flex h-20 w-20 items-center justify-center" aria-label="正在聆听">
+            <div className="absolute inset-0 rounded-full border border-teal-600/40 animate-pulse" />
+            <div ref={orbRef} className="teal-halo h-12 w-12 rounded-full bg-teal-400 opacity-55 transition-transform duration-100" aria-hidden />
+          </div>
+          {pendingUser ? (
+            <p className="caption-copy max-w-[85%] text-center text-sm leading-6 text-teal-300">{pendingUser.text}<span className="animate-pulse">▍</span></p>
+          ) : (
+            <p className="text-xs text-ink-500">正在聆听 · 随时可以插话</p>
           )}
         </div>
       )}
 
-      {/* 字幕区 */}
-      <div
-        ref={scrollRef}
-        className="min-h-0 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-ink-700 bg-ink-700/20 p-4"
-      >
-        {turns.length === 0 && (
-          <p className="pt-10 text-center text-sm leading-relaxed text-ink-500">
-            {status === "live"
-              ? "开口说话吧 —— 中文英文随意混，双方字幕会逐词出现在这里。想验证打断，就在它说话说到一半时插话。"
-              : "点下面的按钮开始。需要允许麦克风权限，建议戴耳机。"}
-          </p>
-        )}
-        {listTurns.map((t) => (
-          <div
-            key={t.id}
-            className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-              t.role === "user"
-                ? "ml-auto bg-teal-900/50 text-teal-100"
-                : "mr-auto bg-ink-700/60 text-ink-100"
-            }`}
-          >
-            {t.text}
-            {!t.final && <span className="animate-pulse text-teal-400">▍</span>}
-            {t.interrupted && (
-              <span className="ml-2 text-xs text-ink-500">（被打断）</span>
-            )}
-          </div>
-        ))}
-      </div>
+      <section className="flex min-h-0 flex-1 flex-col" aria-labelledby="caption-title">
+        <div className="mb-2 flex items-center justify-between px-1">
+          <p id="caption-title" className="eyebrow">live captions / 双向字幕</p>
+          <span className="text-[0.68rem] text-ink-500">{turns.length ? `${turns.length} turns` : "等待第一句话"}</span>
+        </div>
+        <div ref={scrollRef} className="min-h-[11rem] min-w-0 flex-1 space-y-3 overflow-y-auto rounded-[1.5rem] border border-ink-500/50 bg-ink-700 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.16)] sm:p-5">
+          {turns.length === 0 && (
+            <div className="flex h-full min-h-[13rem] flex-col items-center justify-center px-3 text-center">
+              <span className="mb-4 text-2xl text-teal-300" aria-hidden>⌁</span>
+              <p className="max-w-sm text-sm leading-6 text-ink-300">
+                {status === "live" ? "开口说话吧，中英文随意混用。字幕会在这里逐词出现；它说到一半时插话，就能感受打断。" : "点下面的按钮开始，允许麦克风权限后，戴上耳机效果最好。"}
+              </p>
+            </div>
+          )}
+          {listTurns.map((t) => (
+            <div key={t.id} className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-6 ${t.role === "user" ? "ml-auto bg-teal-950 text-teal-100" : "mr-auto bg-ink-900 text-ink-100"}`}>
+              <div className="mb-1 text-[0.65rem] font-semibold uppercase tracking-wider text-ink-500">{t.role === "user" ? "you / 你" : "fermata / 学习伙伴"}</div>
+              <span className="caption-copy">{t.text}</span>
+              {!t.final && <span className="animate-pulse text-teal-400">▍</span>}
+              {t.interrupted && <span className="ml-2 text-xs text-ink-500">（被打断）</span>}
+            </div>
+          ))}
+        </div>
+      </section>
 
-      {notice && <p className="mt-2 text-xs text-ink-300">{notice}</p>}
-      {error && (
-        <p className="mt-2 text-sm text-red-400" role="alert">
-          {error}
-        </p>
-      )}
+      {notice && <p className="mt-2 px-1 text-xs leading-5 text-ink-300">↻ {notice}</p>}
+      {error && <p className="mt-2 rounded-xl border border-ink-500/50 bg-ink-700 px-3 py-2 text-sm leading-5 text-teal-300" role="alert">{error}</p>}
 
-      {/* 控制区 */}
-      <div className="mt-3 flex flex-col gap-2">
+      <div className="glass mt-3 rounded-[1.5rem] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.28)]">
         {status === "live" ? (
           <>
             <form onSubmit={sendText} className="flex gap-2">
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder="文字调试通道（可选，说话即可）"
-                className="min-w-0 flex-1 rounded-xl border border-ink-700 bg-ink-700/40 px-4 py-2.5 text-sm text-ink-100 placeholder:text-ink-500 outline-none focus:border-teal-600"
-              />
-              <button
-                type="submit"
-                disabled={!draft.trim()}
-                className="rounded-xl border border-ink-700 px-4 py-2.5 text-sm text-ink-300 transition-colors hover:border-teal-600 hover:text-teal-300 disabled:opacity-40"
-              >
-                发送
-              </button>
+              <label htmlFor="debug-message" className="sr-only">发送文字</label>
+              <input id="debug-message" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="也可以输入文字…" className="min-w-0 flex-1 rounded-xl border border-ink-500/60 bg-ink-900 px-4 py-3 text-sm text-ink-100 placeholder:text-ink-500 outline-none focus:border-teal-400" />
+              <button type="submit" disabled={!draft.trim()} className="min-h-11 rounded-xl border border-ink-500/60 px-4 text-sm font-medium text-ink-300 hover:border-teal-400 hover:text-teal-300 disabled:opacity-40">发送</button>
             </form>
-            <button
-              type="button"
-              onClick={disconnect}
-              className="rounded-xl border border-red-900/60 px-4 py-3 font-medium text-red-400 transition-colors hover:bg-red-950/30"
-            >
-              结束对话
-            </button>
+            <button type="button" onClick={disconnect} className="mt-2 min-h-11 w-full rounded-xl border border-ink-500/60 text-sm font-medium text-ink-300 hover:border-teal-400 hover:text-teal-300">结束这次对话</button>
           </>
         ) : (
           <>
-            {models.length > 0 && (
-              <select
-                value={selectedModel}
-                onChange={(e) => {
-                  setSelectedModel(e.target.value);
-                  localStorage.setItem("fermata-live-model", e.target.value);
-                }}
-                className="rounded-xl border border-ink-700 bg-ink-700/40 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-teal-600"
-              >
-                {models.map((m) => (
-                  <option key={m.name} value={m.name}>
-                    {m.displayName}
-                  </option>
-                ))}
-              </select>
-            )}
-            <select
-              value={voice}
-              onChange={(e) => {
-                setVoice(e.target.value);
-                localStorage.setItem("fermata-live-voice", e.target.value);
-              }}
-              className="rounded-xl border border-ink-700 bg-ink-700/40 px-3 py-2.5 text-sm text-ink-100 outline-none focus:border-teal-600"
-            >
-              {VOICES.map((v) => (
-                <option key={v.name} value={v.name}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
-            <p className="rounded-xl border border-dashed border-ink-700 px-4 py-2.5 text-center text-xs text-ink-500">
-              🎙 上传自己喜欢的声音，让它来回复你（英文）— Coming soon
-            </p>
-            <button
-              type="button"
-              onClick={connect}
-              disabled={status === "connecting"}
-              className="rounded-xl bg-teal-400 px-4 py-3 font-semibold text-teal-950 transition-opacity disabled:opacity-60"
-            >
-              {status === "connecting"
-                ? "连接中…"
-                : status === "ended"
-                  ? "重新开始"
-                  : "开始语音对话"}
+            <div className="grid grid-cols-2 gap-2">
+              {models.length > 0 && (
+                <label className="min-w-0">
+                  <span className="mb-1.5 block px-1 text-[0.65rem] uppercase tracking-wider text-ink-500">model</span>
+                  <select value={selectedModel} onChange={(e) => { setSelectedModel(e.target.value); localStorage.setItem("fermata-live-model", e.target.value); }} className="h-11 w-full min-w-0 rounded-xl border border-ink-500/60 bg-ink-900 px-3 text-xs text-ink-100 outline-none focus:border-teal-400">
+                    {models.map((m) => <option key={m.name} value={m.name}>{m.displayName}</option>)}
+                  </select>
+                </label>
+              )}
+              <label className={models.length > 0 ? "min-w-0" : "col-span-2 min-w-0"}>
+                <span className="mb-1.5 block px-1 text-[0.65rem] uppercase tracking-wider text-ink-500">voice / 音色</span>
+                <select value={voice} onChange={(e) => { setVoice(e.target.value); localStorage.setItem("fermata-live-voice", e.target.value); }} className="h-11 w-full min-w-0 rounded-xl border border-ink-500/60 bg-ink-900 px-3 text-xs text-ink-100 outline-none focus:border-teal-400">
+                  {VOICES.map((v) => <option key={v.name} value={v.name}>{v.label}</option>)}
+                </select>
+              </label>
+            </div>
+            <p className="mt-2 rounded-xl border border-dashed border-ink-500/50 px-3 py-2.5 text-center text-xs text-ink-500">自定义声音 · coming soon</p>
+            <button type="button" onClick={connect} disabled={status === "connecting"} className="mt-2 flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-teal-400 px-4 font-semibold text-teal-950 hover:bg-teal-300 disabled:opacity-50">
+              <span className="flex h-6 w-6 items-center justify-center rounded-full border border-teal-950/30 text-sm" aria-hidden>◉</span>
+              {status === "connecting" ? "正在连接…" : status === "ended" ? "重新开始这次对话" : "开始语音对话"}
             </button>
           </>
         )}
-        {model && (
-          <p className="text-center text-xs text-ink-500">{model}</p>
-        )}
+        {model && <p className="mt-2 truncate px-1 text-center text-[0.65rem] text-ink-500">{model}</p>}
       </div>
     </main>
   );

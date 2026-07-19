@@ -17,14 +17,17 @@ export default async function LiveLabPage() {
   if (!user) redirect("/login");
 
   return (
-    <div className="flex h-dvh flex-col">
-      <header className="flex items-center justify-between px-5 py-4 pt-[max(1rem,env(safe-area-inset-top))]">
-        <Link href="/" className="text-sm text-ink-500 hover:text-ink-300">
-          ← 知识库
+    <div className="relative flex h-dvh flex-col overflow-hidden">
+      <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-64 opacity-60" />
+      <header className="relative flex items-center justify-between px-5 pb-4 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8">
+        <Link href="/" className="group flex min-h-11 items-center gap-2 text-sm text-ink-300 hover:text-ink-100">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-ink-500/60 text-base transition-colors group-hover:border-teal-400 group-hover:text-teal-300" aria-hidden>←</span>
+          <span>知识库</span>
         </Link>
-        <p className="text-sm font-medium text-ink-300">
-          Live 实验室 <span className="text-ink-500">· M0.5</span>
-        </p>
+        <div className="text-right">
+          <p className="eyebrow text-teal-300">live / voice lab</p>
+          <p className="mt-1 text-xs text-ink-500">M0.5 · {user.email?.split("@")[0]}</p>
+        </div>
       </header>
       <LiveConsole geminiConfigured={Boolean(process.env.GEMINI_API_KEY)} />
     </div>
