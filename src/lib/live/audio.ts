@@ -114,6 +114,17 @@ export class PcmPlaybackQueue {
     if (this.ctx.state === "suspended") await this.ctx.resume();
   }
 
+  /** 还有声音在排队/播放吗（本地抢闭嘴的触发条件之一） */
+  get playing(): boolean {
+    return this.active.size > 0;
+  }
+
+  /** 会话结束：静音并挂起。不销毁 —— Context 跨会话复用，iOS 反复重建音频通路会抽风 */
+  async suspend() {
+    this.interrupt();
+    if (this.ctx.state === "running") await this.ctx.suspend();
+  }
+
   enqueue(samples: Float32Array) {
     const buffer = this.ctx.createBuffer(
       1,
