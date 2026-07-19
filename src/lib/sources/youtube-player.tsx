@@ -60,7 +60,7 @@ function whenYouTubeApiReady(callback: () => void): () => void {
   };
 }
 
-export function YouTubePlayer({ source, onReady, onPlayingChange }: PlayerProps) {
+export function YouTubePlayer({ source, onReady, onPlayingChange, onPause }: PlayerProps) {
   // React 只拥有这个 host div；真正给 YT 的挂载点是我们手动 append 的子节点。
   // 因为 new YT.Player(el) 会把 el 整个替换成 iframe —— 如果那是 React 渲染的节点，
   // 卸载时 React 会去找一个已经不存在的孩子，直接抛 removeChild 错误。
@@ -72,9 +72,11 @@ export function YouTubePlayer({ source, onReady, onPlayingChange }: PlayerProps)
   // 不这样做的话 boot 的依赖会变，播放器被反复销毁重建。
   const onReadyRef = useRef(onReady);
   const onPlayingChangeRef = useRef(onPlayingChange);
+  const onPauseRef = useRef(onPause);
   useEffect(() => {
     onReadyRef.current = onReady;
     onPlayingChangeRef.current = onPlayingChange;
+    onPauseRef.current = onPause;
   });
 
   const videoId = source.external_id ?? "";
@@ -115,6 +117,9 @@ export function YouTubePlayer({ source, onReady, onPlayingChange }: PlayerProps)
           },
           onStateChange: (e) => {
             onPlayingChangeRef.current(e.data === YT.PlayerState.PLAYING);
+            // 只有 PAUSED 才算"用户按了暂停"。BUFFERING / ENDED / CUED 同样会让
+            // playing 变 false，但那不是求助信号，不能拿来弹打断面板。
+            if (e.data === YT.PlayerState.PAUSED) onPauseRef.current?.();
           },
         },
       });

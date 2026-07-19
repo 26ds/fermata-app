@@ -2,33 +2,58 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CaptureOrb } from "@/components/capture-orb";
+import { DotBar, type InterruptPoint } from "@/components/dot-bar";
+import { InterruptPanel } from "@/components/interrupt-panel";
 import { adapterFor } from "@/lib/sources/registry";
 import type { PlayerHandle } from "@/lib/sources/types";
-import type { SourceRow } from "@/lib/types";
-
-function mmss(seconds: number): string {
-  const s = Math.max(0, Math.floor(seconds));
-  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-}
+import { mmss } from "@/lib/time";
+import type { QuestionMode, SourceRow } from "@/lib/types";
 
 /** 进度回写节流：播放中最快 10 秒存一次，别把网络当秒表用 */
 const SAVE_EVERY_MS = 10_000;
 
 /**
  * M1 的中枢：拿到 PlayerHandle，持续知道"现在播到第几秒"。
- * 1b 的悬浮球、1c 的点点条都会挂在这里。
+ * 悬浮球（1b）、点点条 + 打断面板（1c）都挂在这里。
+ * 它只认 SourceRow + PlayerHandle —— 底下播的是 YouTube 还是播客，这里不知道也不该知道。
  */
-export function WatchStage({ source }: { source: SourceRow }) {
+export function WatchStage({
+  source,
+  interrupts,
+}: {
+  source: SourceRow;
+  interrupts: InterruptPoint[];
+}) {
   const adapter = adapterFor(source.kind);
 
   const handleRef = useRef<PlayerHandle | null>(null);
   const currentTimeRef = useRef(0);
   const durationSentRef = useRef(source.duration_s != null);
+  const durationKnownRef = useRef((source.duration_s ?? 0) > 0);
   const lastSavedAtRef = useRef(0);
   const lastSavedValueRef = useRef(source.last_position_s ?? 0);
   const clockRef = useRef<HTMLSpanElement>(null);
   const totalRef = useRef<HTMLSpanElement>(null);
+  // 这两个走 ref：暂停回调可能比 state 更新更快，判断必须同步
+  const playingRef = useRef(false);
+  const panelOpenRef = useRef(false);
+  const resumeOnCloseRef = useRef(false);
+
   const [playing, setPlaying] = useState(false);
+  const [durationS, setDurationS] = useState(source.duration_s ?? 0);
+  const [points, setPoints] = useState<InterruptPoint[]>(interrupts);
+  const [panel, setPanel] = useState<{ open: boolean; tS: number; id: string | null }>({
+    open: false,
+    tS: 0,
+    id: null,
+  });
+
+  // 服务端数据变了（router.refresh 之后）就跟着换。渲染期校正，不用 effect
+  const [seen, setSeen] = useState(interrupts);
+  if (interrupts !== seen) {
+    setSeen(interrupts);
+    setPoints(interrupts);
+  }
 
   const handleReady = useCallback((handle: PlayerHandle) => {
     handleRef.current = handle;
@@ -56,12 +81,108 @@ export function WatchStage({ source }: { source: SourceRow }) {
 
   const handlePlayingChange = useCallback(
     (next: boolean) => {
+      playingRef.current = next;
       setPlaying(next);
       // 暂停的那一刻是最该记住的位置
       if (!next) savePosition();
     },
     [savePosition],
   );
+
+  // ── 打断面板的开关 ──
+  const openPanel = useCallback((tS: number, id: string | null) => {
+    // 同步置位：紧接着的 pause 回调要靠它判断"这是我们自己按停的"
+    panelOpenRef.current = true;
+    if (playingRef.current) {
+      // 是我们把它按停的 → 关面板时恢复播放
+      resumeOnCloseRef.current = true;
+      handleRef.current?.pause();
+    } else {
+      // 用户自己停的 → 关面板时别擅自续播
+      resumeOnCloseRef.current = false;
+    }
+    setPanel({ open: true, tS, id });
+  }, []);
+
+  const closePanel = useCallback(() => {
+    panelOpenRef.current = false;
+    setPanel((p) => ({ ...p, open: false }));
+    if (resumeOnCloseRef.current) {
+      resumeOnCloseRef.current = false;
+      handleRef.current?.play();
+    }
+  }, []);
+
+  /** 用户真的按了暂停（缓冲/播放结束不算，见 PlayerProps.onPause） */
+  const handlePause = useCallback(() => {
+    if (panelOpenRef.current) return; // 面板已经开着（多半是我们自己按停的）
+    openPanel(currentTimeRef.current, null);
+  }, [openPanel]);
+
+  const postInterrupt = useCallback(
+    async (tS: number, mode: QuestionMode | null): Promise<InterruptPoint> => {
+      const res = await fetch("/api/interrupts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sourceId: source.id, tS, questionMode: mode }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "没记下来，请重试");
+      return body as InterruptPoint;
+    },
+    [source.id],
+  );
+
+  /** 轻点悬浮球 = 记下这一刻。点先画上去，落库回来再换真 id */
+  const captureNow = useCallback(() => {
+    const t = currentTimeRef.current;
+    openPanel(t, null);
+    const tempId = `temp-${Date.now()}`;
+    setPoints((prev) => [...prev, { id: tempId, t_s: t, question_mode: null }]);
+    void postInterrupt(t, null)
+      .then((saved) => {
+        setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+        // 落库成功 → 面板从"还没记"切成"已记下"，chip 改走 PATCH
+        setPanel((p) => (p.open && p.id === null ? { ...p, id: saved.id } : p));
+      })
+      .catch(() => {
+        // 没存上就把这个假点撤掉，别留一个点不回去的点。
+        // 面板仍开着且 id 还是 null，用户可以在里面重试。
+        setPoints((prev) => prev.filter((p) => p.id !== tempId));
+      });
+  }, [openPanel, postInterrupt]);
+
+  /** 面板里选了一个类型：已落库就补类型，没落库就带着类型落库 */
+  async function handlePick(mode: QuestionMode) {
+    const { id, tS } = panel;
+    if (id) {
+      const res = await fetch(`/api/interrupts/${id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ questionMode: mode }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error ?? "没记下来，请重试");
+      setPoints((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, question_mode: mode } : p)),
+      );
+    } else {
+      const saved = await postInterrupt(tS, mode);
+      setPoints((prev) => [...prev, saved]);
+    }
+    closePanel();
+  }
+
+  /** 不选类型，只记下这一刻 */
+  async function handleJustCapture() {
+    const saved = await postInterrupt(panel.tS, null);
+    setPoints((prev) => [...prev, saved]);
+    closePanel();
+  }
+
+  const handleSeek = useCallback((t: number) => {
+    handleRef.current?.seekTo(t);
+  }, []);
 
   useEffect(() => {
     // 每 250ms 读一次位置。刻意写进 ref + 直改 DOM，不走 setState ——
@@ -76,6 +197,12 @@ export function WatchStage({ source }: { source: SourceRow }) {
 
       const duration = handle.getDuration();
       if (duration > 0 && totalRef.current) totalRef.current.textContent = mmss(duration);
+
+      // 时长只 setState 一次 —— 点点条要用它算百分比
+      if (!durationKnownRef.current && duration > 0) {
+        durationKnownRef.current = true;
+        setDurationS(duration);
+      }
 
       // 时长只回写一次：oEmbed 拿不到，只有播放器就绪后才知道真实秒数
       if (!durationSentRef.current && duration > 0) {
@@ -121,7 +248,12 @@ export function WatchStage({ source }: { source: SourceRow }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Player source={source} onReady={handleReady} onPlayingChange={handlePlayingChange} />
+      <Player
+        source={source}
+        onReady={handleReady}
+        onPlayingChange={handlePlayingChange}
+        onPause={handlePause}
+      />
 
       <div className="flex items-center justify-between rounded-2xl border border-ink-700 px-4 py-3">
         <div className="flex items-center gap-2.5">
@@ -140,20 +272,29 @@ export function WatchStage({ source }: { source: SourceRow }) {
         </p>
       </div>
 
+      <DotBar points={points} durationS={durationS} onSeek={handleSeek} />
+
       {/* 悬浮捕获球（position:fixed，挂在树里即可，位置与页面布局无关）。
-          1b：拖动 + 长按聆听 + 音量脉动。轻点 / 长按的下游动作留给后续片子：
-          1c 轻点开打断面板、落点点条；M3 长按接真实语音。state 先写死 ready。 */}
+          轻点 = 记下这一刻并开面板；长按聆听的下游（真实语音）是 M3。
+          state 先写死 ready，真状态源是 M2 的 transcript_status。 */}
       <CaptureOrb
         state="ready"
-        onTap={() => {
-          // 1c：轻点 → 在当前秒记一个打断点 + 打开打断面板
-        }}
+        onTap={captureNow}
         onLongPressStart={() => {
-          // M3：长按 → 接 Live 语音提问。1b 只有球自己的视觉 + 占位字幕
+          // M3：长按 → 接 Live 语音提问。现在只有球自己的视觉 + 占位字幕
         }}
         onLongPressEnd={() => {
           // M3：松手结束语音轮
         }}
+      />
+
+      <InterruptPanel
+        open={panel.open}
+        tS={panel.tS}
+        captured={panel.id !== null}
+        onPick={handlePick}
+        onJustCapture={handleJustCapture}
+        onClose={closePanel}
       />
     </div>
   );

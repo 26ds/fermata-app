@@ -21,8 +21,17 @@ export interface PlayerProps {
   source: SourceRow;
   /** 播放器可用时回调，把句柄交给上层 */
   onReady(handle: PlayerHandle): void;
-  /** 播放/暂停状态变化。M1c 的打断面板靠它在暂停时弹出 */
+  /** 是否正在播放。只用来显示状态灯，别拿它当"用户暂停了"的信号 —— 见下 */
   onPlayingChange(playing: boolean): void;
+  /**
+   * 用户**真的**按了暂停时才触发。缓冲、播放结束一律不触发。
+   *
+   * 为什么不能用 `onPlayingChange(false)` 代替：那个信号是有损的 ——
+   * YouTube 的 BUFFERING / ENDED / CUED 都会让 playing 变 false，网络卡一下
+   * 打断面板就自己弹出来了。各 adapter 自己有能力区分（YT 有 PlayerState.PAUSED，
+   * `<audio>` 有原生 pause 事件），所以把这个区分放进契约，而不是让上层猜。
+   */
+  onPause?(): void;
 }
 
 /** 一条链接解析出来的最小标识 */

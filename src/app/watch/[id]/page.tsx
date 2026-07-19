@@ -4,6 +4,7 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/setup-notice";
 import { WatchStage } from "@/components/watch-stage";
+import type { InterruptPoint } from "@/components/dot-bar";
 import type { SourceRow } from "@/lib/types";
 
 // M1a — 观看页。RLS 保证只能查到自己的 source，查不到就是 404。
@@ -31,6 +32,14 @@ export default async function WatchDetailPage({
   if (!data) notFound();
   const source = data as SourceRow;
 
+  // 点点条首屏就该有历史点，所以顺手一起取（RLS 保证只查得到自己的）
+  const { data: interruptRows } = await supabase
+    .from("interrupts")
+    .select("id, t_s, question_mode")
+    .eq("source_id", id)
+    .order("t_s", { ascending: true });
+  const interrupts = (interruptRows ?? []) as InterruptPoint[];
+
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-48 opacity-50" />
@@ -48,7 +57,7 @@ export default async function WatchDetailPage({
         <h1 className="mb-4 text-base font-semibold leading-6 text-ink-100">
           {source.title ?? "未命名内容"}
         </h1>
-        <WatchStage source={source} />
+        <WatchStage source={source} interrupts={interrupts} />
       </main>
     </div>
   );

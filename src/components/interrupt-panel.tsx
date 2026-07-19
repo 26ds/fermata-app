@@ -1,0 +1,157 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { mmss } from "@/lib/time";
+import type { QuestionMode } from "@/lib/types";
+
+// M1c — 打断面板（壳）。三个 chip 只把"卡在哪一类"记下来，**不请求 AI**。
+// AI 回答是 M3：那时拿这一行的 window_start_s / window_end_s 去截转写就行，不用改表。
+
+const CHIPS: { mode: QuestionMode; label: string; hint: string }[] = [
+  { mode: "word", label: "这个词啥意思", hint: "有个词没听懂" },
+  { mode: "concept", label: "解释这个概念", hint: "整段没跟上" },
+  { mode: "voice", label: "语音提问", hint: "想直接开口问（语音稍后接上）" },
+];
+
+interface InterruptPanelProps {
+  open: boolean;
+  /** 这一刻是第几秒 */
+  tS: number;
+  /** 这一刻是否已经落库：点球触发 = 已记下；暂停触发 = 还没 */
+  captured: boolean;
+  onPick(mode: QuestionMode): Promise<void>;
+  /** 不选类型，只把这一刻记下来（仅未落库时出现） */
+  onJustCapture(): Promise<void>;
+  onClose(): void;
+}
+
+export function InterruptPanel({
+  open,
+  tS,
+  captured,
+  onPick,
+  onJustCapture,
+  onClose,
+}: InterruptPanelProps) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  // 每次重新打开都清掉上一轮的报错/忙碌态。
+  // 用"渲染期校正"而不是 effect —— 免得先渲染出一帧旧状态（也绕开 set-state-in-effect）
+  const [seenOpen, setSeenOpen] = useState(open);
+  if (open !== seenOpen) {
+    setSeenOpen(open);
+    setError("");
+    setBusy(false);
+  }
+
+  // 打开时锁住背景滚动 + Esc 关闭
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    setError("");
+    try {
+      await action();
+      // 成功后由父组件关闭面板
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "没记下来，请重试");
+      setBusy(false);
+    }
+  }
+
+  return (
+    // z-60：要盖住 z-50 的悬浮球
+    <div className="fixed inset-0 z-[60] flex flex-col justify-end">
+      <button
+        type="button"
+        aria-label="关闭"
+        onClick={onClose}
+        className="absolute inset-0 h-full w-full bg-black/55"
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="interrupt-title"
+        className="glass relative rounded-t-3xl px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4"
+      >
+        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-ink-500/60" aria-hidden />
+
+        <p id="interrupt-title" className="text-base font-semibold text-ink-100">
+          卡在 <span className="ui-mono text-teal-300">{mmss(tS)}</span>
+        </p>
+        <p className="mt-1 text-xs leading-5 text-ink-500">
+          {captured
+            ? "这一刻已经记下了。选一个类型，之后好帮你回答。"
+            : "选一个类型，就把这一刻记下来。"}
+        </p>
+
+        <div className="mt-4 flex flex-col gap-2">
+          {CHIPS.map((c) => (
+            <button
+              key={c.mode}
+              type="button"
+              disabled={busy}
+              onClick={() => run(() => onPick(c.mode))}
+              className="flex min-h-14 items-center justify-between gap-3 rounded-2xl border border-ink-500/60 px-4 text-left transition-colors hover:border-teal-400 disabled:opacity-50"
+            >
+              <span className="min-w-0">
+                <span className="block text-sm font-semibold text-ink-100">{c.label}</span>
+                <span className="block text-xs text-ink-500">{c.hint}</span>
+              </span>
+              <span className="shrink-0 text-teal-300" aria-hidden>
+                →
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {!captured && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => run(onJustCapture)}
+            className="mt-2 min-h-12 w-full rounded-2xl border border-dashed border-ink-500/60 text-sm text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+          >
+            只记下这一刻
+          </button>
+        )}
+
+        {error && (
+          <p
+            role="alert"
+            className="mt-3 rounded-xl border border-ink-500/50 bg-ink-700 px-3 py-2 text-sm leading-5 text-teal-300"
+          >
+            {error}
+          </p>
+        )}
+
+        <p className="mt-3 text-center text-[0.68rem] text-ink-500">
+          现在只是记下来 · AI 回答稍后接上
+        </p>
+
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-2 min-h-12 w-full rounded-2xl border border-ink-500/60 text-sm font-semibold text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
+        >
+          取消
+        </button>
+      </div>
+    </div>
+  );
+}
