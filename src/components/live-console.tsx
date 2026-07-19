@@ -16,6 +16,7 @@ import {
   pcm16Base64ToFloat,
   recorderWorkletUrl,
 } from "@/lib/live/audio";
+import { MIC_ACTIVE_RMS, computeRms, micLevelToScale } from "@/lib/live/use-mic-level";
 
 // M0.5 Live 通路 spike — 验收三条硬标准：
 //   ① 与 Live 完成 2 分钟中英混说对话（计时器满 2:00 亮绿牌）
@@ -172,10 +173,9 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
     const recCtx = recCtxRef.current;
     if (!recCtx) return;
     const pcm = downsampleTo16k(e.data, recCtx.sampleRate);
-    let sum = 0;
-    for (let i = 0; i < pcm.length; i++) sum += pcm[i] * pcm[i];
-    const rms = Math.sqrt(sum / pcm.length);
-    if (rms > 0.02) {
+    // 音量口径（RMS + 静息门限 + 放大曲线）抽到 use-mic-level，与悬浮球共用一份
+    const rms = computeRms(pcm);
+    if (rms > MIC_ACTIVE_RMS) {
       lastVoiceAtRef.current = performance.now();
     }
     // 本地抢闭嘴：模型正在出声时，用户连续 ~130ms 出声就立刻静音，
@@ -194,8 +194,8 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
     // 球径 56px、外圈 96px：静息小一圈（创始人 2026-07-19：球太大了），
     // 但摆幅按绝对像素保住 —— 放大到 1.7 倍（约 95px）仍是 ~39px 的涨落。
     if (orbRef.current) {
-      orbRef.current.style.transform = `scale(${(1 + Math.min(rms * 8, 0.7)).toFixed(3)})`;
-      orbRef.current.style.opacity = rms > 0.02 ? "1" : "0.55";
+      orbRef.current.style.transform = `scale(${micLevelToScale(rms).toFixed(3)})`;
+      orbRef.current.style.opacity = rms > MIC_ACTIVE_RMS ? "1" : "0.55";
     }
     const s = sessionRef.current;
     if (!s) return;

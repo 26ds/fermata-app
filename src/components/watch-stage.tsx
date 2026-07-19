@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CaptureOrb } from "@/components/capture-orb";
 import { adapterFor } from "@/lib/sources/registry";
 import type { PlayerHandle } from "@/lib/sources/types";
 import type { SourceRow } from "@/lib/types";
@@ -138,6 +139,22 @@ export function WatchStage({ source }: { source: SourceRow }) {
           </span>
         </p>
       </div>
+
+      {/* 悬浮捕获球（position:fixed，挂在树里即可，位置与页面布局无关）。
+          1b：拖动 + 长按聆听 + 音量脉动。轻点 / 长按的下游动作留给后续片子：
+          1c 轻点开打断面板、落点点条；M3 长按接真实语音。state 先写死 ready。 */}
+      <CaptureOrb
+        state="ready"
+        onTap={() => {
+          // 1c：轻点 → 在当前秒记一个打断点 + 打开打断面板
+        }}
+        onLongPressStart={() => {
+          // M3：长按 → 接 Live 语音提问。1b 只有球自己的视觉 + 占位字幕
+        }}
+        onLongPressEnd={() => {
+          // M3：松手结束语音轮
+        }}
+      />
     </div>
   );
 }
