@@ -16,12 +16,28 @@ export default async function WatchPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data } = await supabase
+  const BASE_COLUMNS = "id, kind, title, url, duration_s";
+  const { data, error } = await supabase
     .from("sources")
-    .select("id, kind, title, url, duration_s, last_position_s")
+    .select(`${BASE_COLUMNS}, last_position_s`)
     .order("created_at", { ascending: false })
     .limit(20);
-  const sources = (data ?? []) as SourceListItem[];
+
+  // 迁移 0002 还没跑时，last_position_s 这一列不存在，整个查询会失败 ——
+  // 那样列表会变成空的，看着像内容全丢了。降级成只查老字段，进度先不显示。
+  let sources = (data ?? []) as SourceListItem[];
+  const needsMigration = Boolean(error);
+  if (needsMigration) {
+    const { data: fallback } = await supabase
+      .from("sources")
+      .select(BASE_COLUMNS)
+      .order("created_at", { ascending: false })
+      .limit(20);
+    sources = ((fallback ?? []) as Omit<SourceListItem, "last_position_s">[]).map((s) => ({
+      ...s,
+      last_position_s: null,
+    }));
+  }
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
@@ -59,6 +75,13 @@ export default async function WatchPage() {
             </span>
           </div>
 
+          {needsMigration && (
+            <p className="mt-3 rounded-xl border border-ink-500/50 px-3 py-2 text-xs leading-5 text-ink-300">
+              「看到第几秒」还没启用：去 Supabase → SQL Editor 跑一次
+              <code className="text-ink-100"> supabase/migrations/0002_watch_progress.sql</code>
+              。其余功能不受影响。
+            </p>
+          )}
           <SourceList items={sources} />
         </section>
       </main>
