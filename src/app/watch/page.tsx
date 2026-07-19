@@ -6,9 +6,19 @@ import { SetupNotice } from "@/components/setup-notice";
 import { ImportForm } from "@/components/import-form";
 import { SourceList, type SourceListItem } from "@/components/source-list";
 
-// M1a — 播放器入口：贴链接导入 + 已导入内容列表。
-export default async function WatchPage() {
+const BASE_COLUMNS = "id, kind, title, url, duration_s";
+
+// M1a — 播放器入口：贴链接导入 + 已导入内容列表（全部 ｜ 收藏，见 D16）。
+export default async function WatchPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   if (!supabaseConfigured) return <SetupNotice />;
+
+  // Next 16：searchParams 是 Promise，必须 await
+  const { tab } = await searchParams;
+  const onlyFavorites = tab === "favorites";
 
   const supabase = await createClient();
   const {
@@ -16,28 +26,59 @@ export default async function WatchPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const BASE_COLUMNS = "id, kind, title, url, duration_s";
-  const { data, error } = await supabase
-    .from("sources")
-    .select(`${BASE_COLUMNS}, last_position_s`)
-    .order("created_at", { ascending: false })
-    .limit(20);
+  // 迁移没跑时，那些列并不存在，整个查询会失败 —— 那样列表会变成空的，
+  // 看着像内容全丢了。所以从"全都要"开始逐级降级，能拿多少是多少。
+  let sources: SourceListItem[] = [];
+  let progressEnabled = true;
+  let flagsEnabled = true;
 
-  // 迁移 0002 还没跑时，last_position_s 这一列不存在，整个查询会失败 ——
-  // 那样列表会变成空的，看着像内容全丢了。降级成只查老字段，进度先不显示。
-  let sources = (data ?? []) as SourceListItem[];
-  const needsMigration = Boolean(error);
-  if (needsMigration) {
-    const { data: fallback } = await supabase
+  const full = await supabase
+    .from("sources")
+    .select(`${BASE_COLUMNS}, last_position_s, pinned_at, favorited_at`)
+    .order("pinned_at", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: false })
+    .limit(30);
+
+  if (!full.error) {
+    sources = (full.data ?? []) as SourceListItem[];
+  } else {
+    flagsEnabled = false;
+    const withProgress = await supabase
       .from("sources")
-      .select(BASE_COLUMNS)
+      .select(`${BASE_COLUMNS}, last_position_s`)
       .order("created_at", { ascending: false })
-      .limit(20);
-    sources = ((fallback ?? []) as Omit<SourceListItem, "last_position_s">[]).map((s) => ({
-      ...s,
-      last_position_s: null,
-    }));
+      .limit(30);
+
+    if (!withProgress.error) {
+      sources = ((withProgress.data ?? []) as Omit<
+        SourceListItem,
+        "pinned_at" | "favorited_at"
+      >[]).map((s) => ({ ...s, pinned_at: null, favorited_at: null }));
+    } else {
+      progressEnabled = false;
+      const base = await supabase
+        .from("sources")
+        .select(BASE_COLUMNS)
+        .order("created_at", { ascending: false })
+        .limit(30);
+      sources = ((base.data ?? []) as Omit<
+        SourceListItem,
+        "last_position_s" | "pinned_at" | "favorited_at"
+      >[]).map((s) => ({
+        ...s,
+        last_position_s: null,
+        pinned_at: null,
+        favorited_at: null,
+      }));
+    }
   }
+
+  const visible =
+    onlyFavorites && flagsEnabled ? sources.filter((s) => s.favorited_at) : sources;
+  const pendingMigrations = [
+    progressEnabled ? null : "0002_watch_progress.sql",
+    flagsEnabled ? null : "0003_source_flags.sql",
+  ].filter(Boolean);
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
@@ -69,20 +110,41 @@ export default async function WatchPage() {
 
         <section className="mt-8" aria-labelledby="recent-title">
           <div className="flex items-center justify-between border-b border-ink-500/30 pb-3">
-            <p id="recent-title" className="text-sm font-semibold text-ink-100">最近导入</p>
+            <div className="flex items-center gap-1" id="recent-title">
+              <Link
+                href="/watch"
+                aria-current={onlyFavorites ? undefined : "page"}
+                className={`min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ${
+                  onlyFavorites ? "text-ink-500 hover:text-ink-100" : "bg-ink-700 text-teal-300"
+                }`}
+              >
+                全部
+              </Link>
+              <Link
+                href="/watch?tab=favorites"
+                aria-current={onlyFavorites ? "page" : undefined}
+                className={`min-h-11 rounded-xl px-3 py-2 text-sm font-semibold ${
+                  onlyFavorites ? "bg-ink-700 text-teal-300" : "text-ink-500 hover:text-ink-100"
+                }`}
+              >
+                ★ 收藏
+              </Link>
+            </div>
             <span className="rounded-full border border-ink-500/50 px-2.5 py-1 text-xs tabular-nums text-ink-300">
-              {String(sources.length).padStart(2, "0")}
+              {String(visible.length).padStart(2, "0")}
             </span>
           </div>
 
-          {needsMigration && (
+          {pendingMigrations.length > 0 && (
             <p className="mt-3 rounded-xl border border-ink-500/50 px-3 py-2 text-xs leading-5 text-ink-300">
-              「看到第几秒」还没启用：去 Supabase → SQL Editor 跑一次
-              <code className="text-ink-100"> supabase/migrations/0002_watch_progress.sql</code>
+              有功能还没启用：去 Supabase → SQL Editor 跑一次
+              {pendingMigrations.map((f) => (
+                <code key={f} className="text-ink-100"> {f}</code>
+              ))}
               。其余功能不受影响。
             </p>
           )}
-          <SourceList items={sources} />
+          <SourceList items={visible} flagsEnabled={flagsEnabled} />
         </section>
       </main>
     </div>

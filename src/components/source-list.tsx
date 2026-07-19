@@ -1,7 +1,8 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export interface SourceListItem {
   id: string;
@@ -10,138 +11,131 @@ export interface SourceListItem {
   url: string | null;
   duration_s: number | null;
   last_position_s: number | null;
+  pinned_at: string | null;
+  favorited_at: string | null;
 }
 
 function mmss(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  const mm = String(h > 0 ? m : m).padStart(2, "0");
-  return `${h > 0 ? `${h}:` : ""}${mm}:${String(sec).padStart(2, "0")}`;
+  return `${h > 0 ? `${h}:` : ""}${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
-/** 露出删除键的宽度（px） */
-const REVEAL = 88;
-/** 超过这个位移才算"有意横滑"，否则判定为想上下滚页面 */
-const AXIS_LOCK = 8;
+/** 与服务端排序保持一致：置顶的在前（按置顶时间倒序），其余保持原顺序 */
+function sortRows(rows: SourceListItem[]): SourceListItem[] {
+  return rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => {
+      const pa = a.row.pinned_at;
+      const pb = b.row.pinned_at;
+      if (pa && !pb) return -1;
+      if (!pa && pb) return 1;
+      if (pa && pb) return pa < pb ? 1 : -1;
+      return a.index - b.index;
+    })
+    .map(({ row }) => row);
+}
 
-export function SourceList({ items }: { items: SourceListItem[] }) {
+export function SourceList({
+  items,
+  flagsEnabled,
+}: {
+  items: SourceListItem[];
+  /** 迁移 0003 跑过了吗。没跑就只留删除，置顶/收藏点了也没用 */
+  flagsEnabled: boolean;
+}) {
+  const router = useRouter();
   const [rows, setRows] = useState(items);
-  const [openId, setOpenId] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  // 手势状态放 ref：pointermove 每秒几十次，走 state 会把整个列表重渲染
-  const startRef = useRef({ x: 0, y: 0 });
-  const axisRef = useRef<"none" | "x" | "y">("none");
-  const movedRef = useRef(false);
-  const nodeRef = useRef<HTMLDivElement | null>(null);
-  const baseRef = useRef(0);
-  const offsetRef = useRef(0);
-
-  /** 收尾：把行停在开或关，并把状态交还给 React */
-  function settle(id: string, open: boolean) {
-    const node = nodeRef.current;
-    nodeRef.current = null;
-    axisRef.current = "none";
-    if (node) {
-      node.style.transition = "";
-      node.style.transform = open ? `translateX(${REVEAL}px)` : "translateX(0px)";
-    }
-    setOpenId(open ? id : null);
+  // 服务端数据变了（切筛选、router.refresh 之后）就以服务端为准。
+  // React 官方的"props 变化时调整 state"写法：在渲染中比对，不用 effect ——
+  // 放进 effect 会先渲染一遍旧数据再闪一下。
+  const [seen, setSeen] = useState(items);
+  if (items !== seen) {
+    setSeen(items);
+    setRows(items);
   }
 
-  function onPointerDown(e: React.PointerEvent<HTMLDivElement>, id: string) {
-    if (busyId) return;
-    startRef.current = { x: e.clientX, y: e.clientY };
-    axisRef.current = "none";
-    movedRef.current = false;
-    nodeRef.current = e.currentTarget;
-    baseRef.current = openId === id ? REVEAL : 0;
-    offsetRef.current = baseRef.current;
-    // 别的行开着就先合上
-    if (openId && openId !== id) setOpenId(null);
-  }
+  // 打开面板时锁住背景滚动，并支持 Esc 关闭
+  useEffect(() => {
+    if (!menuId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuId(null);
+    };
+    document.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [menuId]);
 
-  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
-    const node = nodeRef.current;
-    if (!node) return;
-    const dx = e.clientX - startRef.current.x;
-    const dy = e.clientY - startRef.current.y;
+  const active = rows.find((r) => r.id === menuId) ?? null;
 
-    // 先判方向：竖着划就彻底放手，让页面正常滚动
-    if (axisRef.current === "none") {
-      if (Math.abs(dy) > AXIS_LOCK && Math.abs(dy) > Math.abs(dx)) {
-        axisRef.current = "y";
-        return;
-      }
-      if (Math.abs(dx) > AXIS_LOCK) {
-        axisRef.current = "x";
-        node.style.transition = "none";
-        try {
-          e.currentTarget.setPointerCapture(e.pointerId);
-        } catch {
-          // 指针已经不活跃了（极少数情况）。抓不到就算了，别让整个手势卡死
-        }
-      } else {
-        return;
-      }
-    }
-    if (axisRef.current !== "x") return;
-
-    movedRef.current = true;
-    // 只允许往右拉，拉到头就不动了
-    offsetRef.current = Math.max(0, Math.min(REVEAL, baseRef.current + dx));
-    node.style.transform = `translateX(${offsetRef.current}px)`;
-  }
-
-  function onPointerUp(id: string) {
-    if (axisRef.current !== "x") {
-      nodeRef.current = null;
-      return;
-    }
-    // 用手势过程中记下的位移判断，而不是重新拿事件坐标算
-    settle(id, offsetRef.current > REVEAL / 2);
-  }
-
-  function onPointerCancel(id: string) {
-    if (axisRef.current !== "x") {
-      nodeRef.current = null;
-      return;
-    }
-    // 系统把手势收走了（来电、iOS 边缘侧滑、切后台）。
-    // cancel 事件的坐标是无意义的 0,0 —— 拿它算位移会把行错误地弹回去，
-    // 所以这里只回到手势开始前的状态。
-    settle(id, baseRef.current === REVEAL);
-  }
-
-  async function remove(id: string) {
-    setBusyId(id);
+  async function toggleFlag(row: SourceListItem, flag: "pinned" | "favorited") {
+    const field = flag === "pinned" ? "pinned_at" : "favorited_at";
+    const next = row[field] ? null : new Date().toISOString();
+    setBusy(true);
     setError("");
+    setMenuId(null);
+    const snapshot = rows;
+    setRows((prev) =>
+      sortRows(prev.map((r) => (r.id === row.id ? { ...r, [field]: next } : r))),
+    );
+    try {
+      const res = await fetch(`/api/sources/${row.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ [flag]: next !== null }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setRows(snapshot);
+        setError(data?.error ?? "改不动，请重试");
+      } else {
+        router.refresh();
+      }
+    } catch {
+      setRows(snapshot);
+      setError("网络不通，没改成");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove(row: SourceListItem) {
+    setBusy(true);
+    setError("");
+    setMenuId(null);
     const snapshot = rows;
     // 先从界面拿掉，失败再放回来 —— 手机上等一个网络往返太难受
-    setRows((prev) => prev.filter((r) => r.id !== id));
-    setOpenId(null);
+    setRows((prev) => prev.filter((r) => r.id !== row.id));
     try {
-      const res = await fetch(`/api/sources/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/sources/${row.id}`, { method: "DELETE" });
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         setRows(snapshot);
         setError(data?.error ?? "删除失败，请重试");
+      } else {
+        router.refresh();
       }
     } catch {
       setRows(snapshot);
       setError("网络不通，没能删掉");
     } finally {
-      setBusyId(null);
+      setBusy(false);
     }
   }
 
   if (rows.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-ink-500">
-        还没有导入过内容。上面贴一条链接试试。
+        这里还是空的。上面贴一条链接试试。
       </p>
     );
   }
@@ -153,68 +147,127 @@ export function SourceList({ items }: { items: SourceListItem[] }) {
           {error}
         </p>
       )}
-      <ul className="mt-2 flex flex-col">
-        {rows.map((s) => {
-          const open = openId === s.id;
-          return (
-            <li key={s.id} className="relative overflow-hidden border-b border-ink-700/80">
-              <button
-                type="button"
-                onClick={() => remove(s.id)}
-                disabled={busyId === s.id}
-                aria-label={`删除 ${s.title ?? "这条内容"}`}
-                tabIndex={open ? 0 : -1}
-                className="absolute inset-y-0 left-0 flex w-[5.5rem] items-center justify-center bg-red-500/90 text-sm font-semibold text-ink-100"
-              >
-                删除
-              </button>
 
-              <div
-                data-row-id={s.id}
-                onPointerDown={(e) => onPointerDown(e, s.id)}
-                onPointerMove={onPointerMove}
-                onPointerUp={() => onPointerUp(s.id)}
-                onPointerCancel={() => onPointerCancel(s.id)}
-                style={{ transform: open ? `translateX(${REVEAL}px)` : "translateX(0px)" }}
-                // pan-y：竖向滚动交还给浏览器，横向留给我们自己处理
-                className="relative touch-pan-y bg-ink-900 transition-transform duration-200 ease-out"
-              >
-                <Link
-                  href={`/watch/${s.id}`}
-                  onClick={(e) => {
-                    // 刚划完手指，那不是想点开
-                    if (movedRef.current || open) {
-                      e.preventDefault();
-                      if (open) setOpenId(null);
-                    }
-                  }}
-                  className="flex min-h-14 items-center gap-3 py-3 text-sm hover:text-teal-300"
-                >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ink-700 text-ink-300" aria-hidden>
-                    ▷
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-ink-100">
-                      {s.title ?? s.url ?? "未命名内容"}
+      <ul className="mt-2 flex flex-col">
+        {rows.map((s) => (
+          <li
+            key={s.id}
+            className="flex items-center gap-1 border-b border-ink-700/80"
+          >
+            <Link
+              href={`/watch/${s.id}`}
+              className="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-3 text-sm hover:text-teal-300"
+            >
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ink-700 text-ink-300" aria-hidden>
+                ▷
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5">
+                  {s.pinned_at && (
+                    <span className="shrink-0 text-xs text-teal-300" title="已置顶" aria-label="已置顶">
+                      ↑
                     </span>
-                    <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
-                      <span>{s.kind}</span>
-                      {s.duration_s ? <span>{mmss(s.duration_s)}</span> : null}
-                      {s.last_position_s && s.last_position_s > 5 ? (
-                        <span className="ui-mono text-teal-300">
-                          watched to {mmss(s.last_position_s)}
-                        </span>
-                      ) : null}
+                  )}
+                  {s.favorited_at && (
+                    <span className="shrink-0 text-xs text-teal-300" title="已收藏" aria-label="已收藏">
+                      ★
                     </span>
+                  )}
+                  <span className="truncate text-ink-100">
+                    {s.title ?? s.url ?? "未命名内容"}
                   </span>
-                  <span className="text-ink-500" aria-hidden>›</span>
-                </Link>
-              </div>
-            </li>
-          );
-        })}
+                </span>
+                <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
+                  <span>{s.kind}</span>
+                  {s.duration_s ? <span>{mmss(s.duration_s)}</span> : null}
+                  {s.last_position_s && s.last_position_s > 5 ? (
+                    <span className="ui-mono text-teal-300">
+                      watched to {mmss(s.last_position_s)}
+                    </span>
+                  ) : null}
+                </span>
+              </span>
+            </Link>
+
+            {/* 「⋯」必须在 Link 外面，否则点它会先跳转 */}
+            <button
+              type="button"
+              onClick={() => setMenuId(s.id)}
+              disabled={busy}
+              aria-label={`${s.title ?? "这条内容"} 的更多操作`}
+              aria-haspopup="dialog"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg text-ink-500 hover:bg-ink-700 hover:text-ink-100 disabled:opacity-40"
+            >
+              ⋯
+            </button>
+          </li>
+        ))}
       </ul>
-      <p className="mt-3 text-center text-xs text-ink-500">往右滑一条可以删除</p>
+
+      {active && (
+        <div
+          className="fixed inset-0 z-50 flex flex-col justify-end"
+          role="dialog"
+          aria-modal="true"
+          aria-label="内容操作"
+        >
+          <button
+            type="button"
+            aria-label="关闭"
+            onClick={() => setMenuId(null)}
+            className="absolute inset-0 bg-black/55"
+          />
+          <div className="glass relative mx-2 mb-[max(0.5rem,env(safe-area-inset-bottom))] overflow-hidden rounded-3xl">
+            <p className="truncate border-b border-ink-500/25 px-5 py-3.5 text-xs text-ink-300">
+              {active.title ?? active.url ?? "未命名内容"}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => toggleFlag(active, "pinned")}
+              disabled={!flagsEnabled}
+              className="flex min-h-14 w-full items-center gap-3 border-b border-ink-500/20 px-5 text-left text-sm text-ink-100 disabled:opacity-40"
+            >
+              <span className="w-5 text-center text-base text-teal-300" aria-hidden>↑</span>
+              {active.pinned_at ? "取消置顶" : "置顶"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => toggleFlag(active, "favorited")}
+              disabled={!flagsEnabled}
+              className="flex min-h-14 w-full items-center gap-3 border-b border-ink-500/20 px-5 text-left text-sm text-ink-100 disabled:opacity-40"
+            >
+              <span className="w-5 text-center text-base text-teal-300" aria-hidden>★</span>
+              {active.favorited_at ? "取消收藏" : "加入收藏"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => remove(active)}
+              className="flex min-h-14 w-full items-center gap-3 px-5 text-left text-sm text-red-400"
+            >
+              <span className="w-5 text-center text-base" aria-hidden>✕</span>
+              删除
+            </button>
+
+            {!flagsEnabled && (
+              <p className="border-t border-ink-500/20 px-5 py-3 text-xs leading-5 text-ink-500">
+                置顶和收藏需要先在 Supabase 跑一次
+                <code className="text-ink-300"> 0003_source_flags.sql</code>
+              </p>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setMenuId(null)}
+            className="glass relative mx-2 mb-[max(0.75rem,env(safe-area-inset-bottom))] mt-2 min-h-14 rounded-3xl text-sm font-semibold text-ink-100"
+          >
+            取消
+          </button>
+        </div>
+      )}
     </>
   );
 }

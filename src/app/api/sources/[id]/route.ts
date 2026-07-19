@@ -11,8 +11,10 @@ const patchSchema = z
   .object({
     durationS: z.number().positive().max(24 * 3600).optional(),
     lastPositionS: z.number().min(0).max(24 * 3600).optional(),
+    pinned: z.boolean().optional(),
+    favorited: z.boolean().optional(),
   })
-  .refine((v) => v.durationS !== undefined || v.lastPositionS !== undefined, {
+  .refine((v) => Object.values(v).some((x) => x !== undefined), {
     message: "没有要更新的字段",
   });
 
@@ -40,7 +42,12 @@ export async function PATCH(
     return NextResponse.json({ error: "请先登录" }, { status: 401 });
   }
 
-  let patch: { duration_s?: number; last_position_s?: number };
+  let patch: {
+    duration_s?: number;
+    last_position_s?: number;
+    pinned_at?: string | null;
+    favorited_at?: string | null;
+  };
   try {
     const result = patchSchema.safeParse(await request.json());
     if (!result.success) {
@@ -52,6 +59,13 @@ export async function PATCH(
     }
     if (result.data.lastPositionS !== undefined) {
       patch.last_position_s = Math.round(result.data.lastPositionS);
+    }
+    // 时间戳而不是布尔：取消就写 null，置上就写"此刻"（见 D16）
+    if (result.data.pinned !== undefined) {
+      patch.pinned_at = result.data.pinned ? new Date().toISOString() : null;
+    }
+    if (result.data.favorited !== undefined) {
+      patch.favorited_at = result.data.favorited ? new Date().toISOString() : null;
     }
   } catch {
     return NextResponse.json({ error: "请求格式不对" }, { status: 400 });
