@@ -191,9 +191,10 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       playbackRef.current.interrupt();
     }
     // 悬浮球随音量波动（每 ~40ms 一帧，直改 DOM，不触发 React 重渲染）
-    // 球径 80px、外圈 128px：放大到 1.55 倍（约 124px）刚好贴住外圈不溢出。
+    // 球径 56px、外圈 96px：静息小一圈（创始人 2026-07-19：球太大了），
+    // 但摆幅按绝对像素保住 —— 放大到 1.7 倍（约 95px）仍是 ~39px 的涨落。
     if (orbRef.current) {
-      orbRef.current.style.transform = `scale(${(1 + Math.min(rms * 6, 0.55)).toFixed(3)})`;
+      orbRef.current.style.transform = `scale(${(1 + Math.min(rms * 8, 0.7)).toFixed(3)})`;
       orbRef.current.style.opacity = rms > 0.02 ? "1" : "0.55";
     }
     const s = sessionRef.current;
@@ -521,10 +522,10 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
   return (
     <main className="relative flex min-h-0 flex-1 flex-col px-5 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-8">
       {/* 抬头 + 状态徽章 */}
-      <div className="flex items-center justify-between gap-3 py-2">
+      <div className="flex items-center justify-between gap-3 py-1.5">
         <div>
-          <p className="eyebrow mb-2">conversation deck</p>
-          <h1 className="display-serif text-xl text-ink-100">和你的学习伙伴聊聊。</h1>
+          <p className="eyebrow mb-1">conversation deck</p>
+          <h1 className="display-serif text-lg text-ink-100 sm:text-xl">和你的学习伙伴聊聊。</h1>
         </div>
         <div className="flex flex-wrap justify-end gap-1.5 text-[0.68rem]">
           <span className={`ui-mono inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 ${status === "live" ? "border-teal-600/70 bg-teal-950 text-teal-300" : "border-ink-500/50 text-ink-500"}`}>
@@ -543,12 +544,12 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       {/* 悬浮球：说话时随音量波动；正在说的话逐词长在球下 —— 用户青色
           靠右、模型灰色靠左，各自说完才汇入下面的对话框 */}
       {status === "live" && (
-        <div className="flex flex-col items-center gap-3 py-3">
-          <div className="relative flex h-32 w-32 items-center justify-center" aria-label="正在聆听">
+        <div className="flex flex-col items-center gap-2 py-2">
+          <div className="relative flex h-24 w-24 items-center justify-center" aria-label="正在聆听">
             <div className="absolute inset-0 animate-pulse rounded-full border border-teal-600/40" />
             <div
               ref={orbRef}
-              className="teal-halo h-20 w-20 rounded-full bg-teal-400 opacity-55 transition-transform duration-100"
+              className="teal-halo h-14 w-14 rounded-full bg-teal-400 opacity-55 transition-transform duration-100"
               aria-hidden
             />
           </div>
@@ -581,12 +582,13 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
             {captions.turns.length ? `${captions.turns.length} turns` : "等待第一句话"}
           </span>
         </div>
+        {/* 手机上聊天框吃满至少 55vh —— 它是主角，其余部件让位（创始人 2026-07-19） */}
         <div
           ref={scrollRef}
-          className="min-h-[11rem] min-w-0 flex-1 space-y-3 overflow-y-auto rounded-[1.5rem] border border-ink-500/50 bg-ink-700 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.16)] sm:p-5"
+          className="min-h-[55svh] min-w-0 flex-1 space-y-3 overflow-y-auto rounded-[1.5rem] border border-ink-500/50 bg-ink-700 p-4 shadow-[0_18px_55px_rgba(0,0,0,0.16)] sm:min-h-[11rem] sm:p-5"
         >
           {captions.turns.length === 0 && (
-            <div className="flex h-full min-h-[13rem] flex-col items-center justify-center px-3 text-center">
+            <div className="flex h-full flex-col items-center justify-center px-3 text-center">
               <span className="mb-4 text-2xl text-teal-300" aria-hidden>⌁</span>
               <p className="max-w-sm text-sm leading-6 text-ink-300">
                 {status === "live"
@@ -618,7 +620,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       )}
 
       {/* 控制区 */}
-      <div className="glass mt-3 rounded-[1.5rem] p-3 shadow-[0_12px_40px_rgba(0,0,0,0.28)]">
+      <div className="glass mt-2 rounded-[1.5rem] p-2.5 shadow-[0_12px_40px_rgba(0,0,0,0.28)] sm:mt-3 sm:p-3">
         {status === "live" ? (
           <>
             <form onSubmit={sendText} className="flex gap-2">
@@ -658,7 +660,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
                       setSelectedModel(e.target.value);
                       localStorage.setItem("fermata-live-model", e.target.value);
                     }}
-                    className="picker h-11 w-full min-w-0 rounded-xl border border-ink-500/60 bg-ink-900 px-3 text-ink-100 outline-none focus:border-teal-400"
+                    className="picker h-10 w-full min-w-0 rounded-xl border border-ink-500/60 bg-ink-900 px-3 text-ink-100 outline-none focus:border-teal-400"
                   >
                     {models.map((m) => (
                       <option key={m.name} value={m.name}>{m.displayName}</option>
@@ -674,7 +676,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
                     setVoice(e.target.value);
                     localStorage.setItem("fermata-live-voice", e.target.value);
                   }}
-                  className="picker h-11 w-full min-w-0 rounded-xl border border-ink-500/60 bg-ink-900 px-3 text-ink-100 outline-none focus:border-teal-400"
+                  className="picker h-10 w-full min-w-0 rounded-xl border border-ink-500/60 bg-ink-900 px-3 text-ink-100 outline-none focus:border-teal-400"
                 >
                   {VOICES.map((v) => (
                     <option key={v.name} value={v.name}>{v.label}</option>
@@ -682,14 +684,14 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
                 </select>
               </label>
             </div>
-            <p className="mt-2 rounded-xl border border-dashed border-ink-500/50 px-3 py-2.5 text-center text-xs text-ink-500">
+            <p className="mt-1.5 rounded-xl border border-dashed border-ink-500/50 px-3 py-1.5 text-center text-[0.7rem] text-ink-500">
               Upload your favorite voice — coming soon
             </p>
             <button
               type="button"
               onClick={connect}
               disabled={status === "connecting"}
-              className="mt-2 flex min-h-14 w-full items-center justify-center gap-2 rounded-xl bg-teal-400 px-4 font-semibold text-teal-950 hover:bg-teal-300 disabled:opacity-50"
+              className="mt-1.5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-teal-400 px-4 font-semibold text-teal-950 hover:bg-teal-300 disabled:opacity-50"
             >
               <span className="flex h-6 w-6 items-center justify-center rounded-full border border-teal-950/30 text-sm" aria-hidden>◉</span>
               {status === "connecting" ? "正在连接…" : status === "ended" ? "重新开始这次对话" : "开始语音对话"}
