@@ -3,12 +3,26 @@ import { z } from "zod";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 
-// M1a — 回写真实时长。oEmbed 给不了时长，只有播放器就绪后 getDuration() 才知道。
-// 点点条（1c）要靠 duration 把打断点摆到正确的百分比位置。
+// M1a — 单条内容源的更新与删除。
+// PATCH：回写真实时长（oEmbed 给不了，只有播放器就绪后才知道）与"看到第几秒"。
+// DELETE：从列表里移除。
 
-const bodySchema = z.object({
-  durationS: z.number().positive().max(24 * 3600),
-});
+const patchSchema = z
+  .object({
+    durationS: z.number().positive().max(24 * 3600).optional(),
+    lastPositionS: z.number().min(0).max(24 * 3600).optional(),
+  })
+  .refine((v) => v.durationS !== undefined || v.lastPositionS !== undefined, {
+    message: "没有要更新的字段",
+  });
+
+async function requireUser() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return { supabase, user };
+}
 
 export async function PATCH(
   request: Request,
@@ -21,21 +35,24 @@ export async function PATCH(
   // Next 16：params 是 Promise，必须 await（同步访问已被彻底移除）
   const { id } = await params;
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { supabase, user } = await requireUser();
   if (!user) {
     return NextResponse.json({ error: "请先登录" }, { status: 401 });
   }
 
-  let durationS: number;
+  let patch: { duration_s?: number; last_position_s?: number };
   try {
-    const result = bodySchema.safeParse(await request.json());
+    const result = patchSchema.safeParse(await request.json());
     if (!result.success) {
-      return NextResponse.json({ error: "时长不合法" }, { status: 400 });
+      return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
     }
-    durationS = Math.round(result.data.durationS);
+    patch = {};
+    if (result.data.durationS !== undefined) {
+      patch.duration_s = Math.round(result.data.durationS);
+    }
+    if (result.data.lastPositionS !== undefined) {
+      patch.last_position_s = Math.round(result.data.lastPositionS);
+    }
   } catch {
     return NextResponse.json({ error: "请求格式不对" }, { status: 400 });
   }
@@ -43,10 +60,58 @@ export async function PATCH(
   // RLS 已经把范围锁死在本人行上，这里再显式带 user_id 是双保险
   const { error } = await supabase
     .from("sources")
-    .update({ duration_s: durationS })
+    .update(patch)
     .eq("id", id)
     .eq("user_id", user.id);
 
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  if (!supabaseConfigured) {
+    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  }
+
+  const { id } = await params;
+
+  const { supabase, user } = await requireUser();
+  if (!user) {
+    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  }
+
+  // 外键顺序不能乱，而且有一条原则：删内容不能连累知识。
+  // ① 知识原子是用户攒下来的资产，只切断它与来源的关联，绝不删除
+  const { error: atomError } = await supabase
+    .from("atoms")
+    .update({ source_id: null, interrupt_id: null })
+    .eq("source_id", id)
+    .eq("user_id", user.id);
+  if (atomError) {
+    return NextResponse.json({ error: atomError.message }, { status: 500 });
+  }
+
+  // ② 打断点离开这条内容就没有意义了，跟着删
+  const { error: interruptError } = await supabase
+    .from("interrupts")
+    .delete()
+    .eq("source_id", id)
+    .eq("user_id", user.id);
+  if (interruptError) {
+    return NextResponse.json({ error: interruptError.message }, { status: 500 });
+  }
+
+  const { error } = await supabase
+    .from("sources")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id);
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

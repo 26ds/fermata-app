@@ -38,7 +38,7 @@ export default async function LibraryPage() {
         </div>
       </header>
 
-      <main className="relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-28 sm:px-8">
+      <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-28 sm:px-8">
         <section className="pt-7 sm:pt-12">
           <div className="flex items-end justify-between gap-4">
             <div>

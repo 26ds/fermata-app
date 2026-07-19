@@ -28,6 +28,8 @@ export interface SourceRow {
   title: string | null;
   content_lang: string;
   duration_s: number | null;
+  /** 上次退出前播放到第几秒（迁移 0002） */
+  last_position_s: number | null;
   transcript: TranscriptSegment[] | null;
   transcript_status: TranscriptStatus;
   created_at: string;

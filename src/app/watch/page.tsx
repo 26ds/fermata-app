@@ -4,12 +4,7 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/setup-notice";
 import { ImportForm } from "@/components/import-form";
-import type { SourceRow } from "@/lib/types";
-
-function mmss(seconds: number): string {
-  const s = Math.floor(seconds);
-  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-}
+import { SourceList, type SourceListItem } from "@/components/source-list";
 
 // M1a — 播放器入口：贴链接导入 + 已导入内容列表。
 export default async function WatchPage() {
@@ -23,13 +18,10 @@ export default async function WatchPage() {
 
   const { data } = await supabase
     .from("sources")
-    .select("id, kind, title, url, duration_s, created_at")
+    .select("id, kind, title, url, duration_s, last_position_s")
     .order("created_at", { ascending: false })
     .limit(20);
-  const sources = (data ?? []) as Pick<
-    SourceRow,
-    "id" | "kind" | "title" | "url" | "duration_s" | "created_at"
-  >[];
+  const sources = (data ?? []) as SourceListItem[];
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
@@ -45,7 +37,7 @@ export default async function WatchPage() {
         </div>
       </header>
 
-      <main className="relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
+      <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
         <section className="pt-4">
           <h1 className="display-serif text-[2rem] leading-tight tracking-[-0.04em] text-ink-100">
             看点什么？
@@ -67,36 +59,7 @@ export default async function WatchPage() {
             </span>
           </div>
 
-          {sources.length === 0 ? (
-            <p className="py-8 text-center text-sm text-ink-500">
-              还没有导入过内容。上面贴一条链接试试。
-            </p>
-          ) : (
-            <ul className="mt-2 flex flex-col">
-              {sources.map((s) => (
-                <li key={s.id}>
-                  <Link
-                    href={`/watch/${s.id}`}
-                    className="flex min-h-14 items-center gap-3 border-b border-ink-700/80 py-3 text-sm hover:text-teal-300"
-                  >
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ink-700 text-ink-300" aria-hidden>
-                      ▷
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-ink-100">
-                        {s.title ?? s.url ?? "未命名内容"}
-                      </span>
-                      <span className="mt-0.5 block text-xs text-ink-500">
-                        {s.kind}
-                        {s.duration_s ? ` · ${mmss(s.duration_s)}` : ""}
-                      </span>
-                    </span>
-                    <span className="text-ink-500" aria-hidden>›</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
+          <SourceList items={sources} />
         </section>
       </main>
     </div>

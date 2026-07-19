@@ -44,7 +44,7 @@ export default async function WatchDetailPage({
         </p>
       </header>
 
-      <main className="relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
+      <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
         <h1 className="mb-4 text-base font-semibold leading-6 text-ink-100">
           {source.title ?? "未命名内容"}
         </h1>

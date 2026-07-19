@@ -141,6 +141,43 @@ select:focus-visible {
   font-weight: 500;
 }
 
+/* ── 页面切换的"衔接" ──
+   骨架屏（loading.tsx）负责让跳转立刻发生，这两段负责让它看起来是连着的。
+   只动内容区，不动 header —— 头部是用户的空间锚点，它一动就晕。 */
+@keyframes fermata-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.page-enter {
+  animation: fermata-rise 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes fermata-breathe {
+  50% {
+    opacity: 0.4;
+  }
+}
+
+/* 骨架块：呼吸而不是闪，配合影院底色 */
+.skeleton {
+  background: color-mix(in srgb, var(--color-ink-300) 11%, transparent);
+  animation: fermata-breathe 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter,
+  .skeleton {
+    animation: none;
+  }
+}
+
 /* 玻璃材质：只允许用于悬浮操作层（悬浮球/打断面板/底部 tab/访谈控制条）——见 §7 */
 .glass {
   backdrop-filter: blur(18px) saturate(160%);
