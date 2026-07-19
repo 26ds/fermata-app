@@ -95,10 +95,10 @@ export default async function LibraryPage() {
               <span>开始一次对话</span>
               <span className="text-lg transition-transform group-hover:translate-x-0.5" aria-hidden>→</span>
             </Link>
-            <div className="flex min-h-14 items-center justify-between rounded-2xl border border-ink-500/50 px-4 text-sm text-ink-500">
+            <Link href="/watch" className="group flex min-h-14 items-center justify-between rounded-2xl border border-ink-500/50 px-4 text-sm text-ink-100 hover:border-teal-400 hover:text-teal-300">
               <span>播放器</span>
-              <span className="text-[0.65rem] uppercase tracking-wider">M1 soon</span>
-            </div>
+              <span className="text-lg transition-transform group-hover:translate-x-0.5" aria-hidden>→</span>
+            </Link>
           </div>
         </section>
 
