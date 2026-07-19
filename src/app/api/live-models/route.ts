@@ -7,11 +7,14 @@ import { envLiveModel } from "@/lib/live/models";
 // M0.5 — 列出当前 GEMINI_API_KEY 能用的 Live（双向实时语音）对话模型，
 // 供实验页下拉框选择。两层过滤：
 //   1) supportedActions 含 bidiGenerateContent（Live WebSocket 的方法名）
-//   2) 白名单只留"对话"系模型（-flash-live / native-audio），挡掉同传
-//      （live translate）、TTS 朗读等专用模型 —— 创始人 2026-07 拍板。
-//      未来出 gemini-3.5-flash-live 之类会自动进入列表，无需改代码。
+//   2) 白名单（创始人 2026-07-18 拍板）：3.x flash-live 全放行（3.1 保留、
+//      未来 3.5 之类自动进入）；2.5 只留 native-audio-preview-12-2025 一个；
+//      同传（live translate）、TTS 朗读等专用模型继续挡掉。
 
-const ALLOW = [/-flash-live(-|$)/, /native-audio/];
+const ALLOW = [
+  /^gemini-[3-9](?:\.\d+)?-flash-live(?:-|$)/,
+  /^gemini-2\.5-flash-native-audio-preview-12-2025$/,
+];
 const DENY = [/translate|tts/];
 
 export async function GET() {

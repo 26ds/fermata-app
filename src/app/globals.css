@@ -19,10 +19,14 @@
   --color-teal-800: #0f6e56;
   --color-teal-950: #04342c;
 
-  /* UI 无衬线：系统栈；台词引用与 AI 问句：衬线 */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --font-quote: Georgia, "Songti SC", "Noto Serif SC", serif;
+  /* UI 无衬线：Inter 打头，中文交给系统字体；标题衬线：Instrument Serif；
+     技术字段（模型名/计时/徽章）：JetBrains Mono，等宽不跳动。
+     三个 --font-* 变量由 layout.tsx 的 next/font 注入。 */
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-quote: var(--font-instrument), Georgia, "Songti SC", "Noto Serif SC", serif;
+  --font-mono-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
 }
 
 body {
@@ -32,6 +36,17 @@ body {
     var(--color-ink-900);
   color: var(--color-ink-100);
   font-family: var(--font-sans);
+  /* 深色底上细字发虚，整体压实一档（创始人 2026-07-19：字要粗一点） */
+  font-weight: 450;
+  letter-spacing: 0.005em;
+}
+
+h1,
+h2,
+h3,
+strong,
+b {
+  font-weight: 650;
 }
 
 ::selection {
@@ -103,6 +118,27 @@ select:focus-visible {
 .caption-copy {
   max-width: 65ch;
   text-wrap: pretty;
+}
+
+/* 技术字段：模型名、计时、响应耗时徽章 —— 等宽，数字跳动时不抖 */
+.ui-mono {
+  font-family: var(--font-mono-ui);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 模型 / 音色下拉框：换等宽字重、字号加大，让 "3.1" 这类型号一眼可辨
+   （创始人 2026-07-19 指定） */
+.picker {
+  font-family: var(--font-mono-ui);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.picker option {
+  font-family: var(--font-sans);
+  font-weight: 500;
 }
 
 /* 玻璃材质：只允许用于悬浮操作层（悬浮球/打断面板/底部 tab/访谈控制条）——见 §7 */
