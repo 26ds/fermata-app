@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, MediaResolution } from "@google/genai";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
 import { TranscribeError, type TranscribeContext, type TranscribeResult, type TranscriptProvider } from "./types";
 
@@ -13,14 +13,34 @@ import { TranscribeError, type TranscribeContext, type TranscribeResult, type Tr
 // 真正的墙**不是「视频超过 1 小时」，是上下文 100 万 token** —— 一支 2 小时的
 // 片子整支喂进去直接 400；**切成 10 分钟一段就完全正常**（实测一段 46 秒、146 行）。
 
-/** 一片 10 分钟。实测这个尺寸一次约 46 秒，且离 100 万 token 的墙很远 */
+/**
+ * **首片只切 2 分钟**，为的是让字幕尽快上屏。
+ *
+ * 实测（M2a-fix，创始人反馈"等一分钟才见字幕"之后做的）：
+ * 耗时跟**输出行数**走，不跟输入量走 —— 10 分钟一片要 20 秒（145 行），
+ * 2 分钟一片只要 10 秒（35 行）。用户永远是从 0 秒开始看的，
+ * 所以先把开头两分钟送上屏，剩下的边看边补。
+ */
+const FIRST_CHUNK_S = 120;
+
+/** 其余每片 10 分钟。再大没意义（耗时线性涨），再小则调用次数变多 */
 const CHUNK_S = 600;
 
 /**
- * 每秒只取 0.2 帧。我们要的是**话**，不是画面 ——
- * 帧率是 Gemini 视频 token 的主要来源，压到 0.2 等于把画面 token 砍掉八成。
+ * 同时开几片。各片互不相干，本来就该并行 ——
+ * 一支 53 分钟的视频排队跑要两分钟，并行只要一分钟出头。
+ * 不敢开太多：免费层有每分钟 token 上限，3 路是实测下来稳的档位。
  */
-const FPS = 0.2;
+const CONCURRENCY = 3;
+
+/**
+ * 每秒 0.05 帧 + 低媒体分辨率。
+ *
+ * **不是为了快**（实测反而慢 7 秒，因为瓶颈在输出不在输入），
+ * **是为了能并行** —— 它把一片的输入从 5 万 token 压到 2 万，
+ * 三路同时跑才不会撞上免费层每分钟 25 万 token 的天花板。
+ */
+const FPS = 0.05;
 
 /** 一片 10 分钟实测约 1 万字符（≈3 千 token），给到 32k 足够宽裕 */
 const MAX_OUTPUT_TOKENS = 32_768;
@@ -138,6 +158,8 @@ async function transcribeChunk(
       maxOutputTokens: MAX_OUTPUT_TOKENS,
       // 转写不需要推理，思考预算全砍掉 —— 省时间也省 token（M0.5 同款）
       thinkingConfig: { thinkingBudget: 0 },
+      // 画面压到最低档：我们要的是话，不是画面。为并行腾出 token 预算
+      mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW,
       abortSignal: AbortSignal.timeout(CHUNK_TIMEOUT_MS),
     },
   });
@@ -147,12 +169,29 @@ async function transcribeChunk(
   return linesToSegments(parseTimestampedLines(text), startS, endS);
 }
 
-/** 已有片段覆盖到哪儿了 → 换算成"从第几片接着转" */
-function nextChunkIndex(existing: TranscriptSegment[]): number {
-  if (existing.length === 0) return 0;
-  const covered = existing[existing.length - 1].end;
-  // 只有整片转完才算数：落在片中间说明那一片没转完，重转它
-  return Math.floor(covered / CHUNK_S);
+export interface Chunk {
+  startS: number;
+  endS: number;
+}
+
+/**
+ * 切片表：首片 2 分钟（抢首屏），其余每片 10 分钟。
+ * 边界是**确定的** —— 同一支视频每次算出来都一样，断点续传才对得上。
+ */
+export function planChunks(totalS: number): Chunk[] {
+  const chunks: Chunk[] = [];
+  if (totalS <= 0) return chunks;
+  const first = Math.min(FIRST_CHUNK_S, totalS);
+  chunks.push({ startS: 0, endS: first });
+  for (let s = first; s < totalS; s += CHUNK_S) {
+    chunks.push({ startS: s, endS: Math.min(s + CHUNK_S, totalS) });
+  }
+  return chunks;
+}
+
+/** 已经转到哪一秒了。空片段 = 一秒都没转 */
+function coveredUntil(segments: TranscriptSegment[]): number {
+  return segments.length === 0 ? 0 : segments[segments.length - 1].end;
 }
 
 export const geminiYoutubeProvider: TranscriptProvider = {
@@ -165,52 +204,90 @@ export const geminiYoutubeProvider: TranscriptProvider = {
   async transcribe({ source, existing, onPartial, remainingMs }: TranscribeContext): Promise<TranscribeResult> {
     const url = source.url;
     if (!url) throw new TranscribeError("这条内容没有可用的视频地址");
-
     const totalS = source.duration_s && source.duration_s > 0 ? source.duration_s : null;
+    if (!totalS) throw new TranscribeError("还不知道这条内容有多长，稍等一下再点一次。");
+
     const ai = clientFor();
+    const plan = planChunks(totalS);
 
-    // 已经转好的那部分原样保留，只往后接
-    const startIndex = nextChunkIndex(existing);
-    const segments = existing.filter((s) => s.start < startIndex * CHUNK_S);
+    // 断点续传：已经转过的片子原样留着，只排没转过的
+    const done = coveredUntil(existing);
+    const segments = existing.filter((s) => s.start < done);
+    const todo = plan.filter((c) => c.endS > done);
+    if (todo.length === 0) return { segments, complete: true };
 
-    // 时长未知时也能干活：一直往后转，直到某一片彻底没内容（就是到头了）
-    const lastIndex = totalS ? Math.ceil(totalS / CHUNK_S) - 1 : Number.MAX_SAFE_INTEGER;
-
-    for (let i = startIndex; i <= lastIndex; i++) {
-      const startS = i * CHUNK_S;
-      const endS = totalS ? Math.min(startS + CHUNK_S, totalS) : startS + CHUNK_S;
-      if (endS - startS < 1) break;
-
-      // 一片实测约 46 秒；剩余预算不够就干净收尾，别撞 300 秒硬墙吃 504
-      if (remainingMs() < 60_000) {
-        return { segments, complete: false };
+    /** 连续覆盖到第几秒：从头数，遇到第一个没转完的片就停 —— 进度条不能虚报 */
+    const finished = new Set<number>();
+    const contiguous = () => {
+      let covered = done;
+      for (const c of plan) {
+        if (c.endS <= done || finished.has(c.startS)) covered = Math.max(covered, c.endS);
+        else break;
       }
+      return covered;
+    };
 
-      let chunk: TranscriptSegment[];
+    let failure: string | null = null;
+    let stopped = false;
+
+    /**
+     * **并行**跑，不排队 —— 各片之间没有任何依赖关系。
+     * 一支 53 分钟的视频排队要两分钟，三路并行一分钟出头。
+     * 首片（2 分钟那片）单独先跑，好让字幕尽快上屏，别被大片挡在后面。
+     */
+    const queue = [...todo];
+
+    const runOne = async (chunk: Chunk) => {
       try {
-        chunk = await transcribeChunk(ai, url, startS, endS);
+        const got = await transcribeChunk(ai, url, chunk.startS, chunk.endS);
+        finished.add(chunk.startS);
+        segments.push(...got);
+        segments.sort((a, b) => a.start - b.start); // 并行回来的顺序是乱的
+        await onPartial({ segments, coveredS: contiguous(), totalS });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        // 第一片就炸 = 这条内容根本读不了，得说清楚；后面的片子炸 = 已转的仍算数
-        if (i === startIndex) {
+        // 第一片就炸 = 这条内容根本读不了，得把原因说清楚；
+        // 后面的片子炸 = 已转的仍然算数，留 partial 让用户接着来
+        if (chunk.startS === 0) {
           if (/quota|RESOURCE_EXHAUSTED|429/i.test(msg)) {
-            throw new TranscribeError("今天的免费额度用完了（每天 8 小时视频），明天再试。");
+            failure = "今天的免费额度用完了（每天 8 小时视频），明天再试。";
+          } else if (/not found|private|unavailable|403|permission/i.test(msg)) {
+            failure = "这支视频读不了 —— 私享 / 会员 / 地区限制的视频拿不到内容。";
+          } else {
+            failure = `读这支视频时出错了：${msg.slice(0, 120)}`;
           }
-          if (/not found|private|unavailable|403|permission/i.test(msg)) {
-            throw new TranscribeError("这支视频读不了 —— 私享 / 会员 / 地区限制的视频拿不到内容。");
-          }
-          throw new TranscribeError(`读这支视频时出错了：${msg.slice(0, 120)}`);
+          return;
         }
-        return { segments, complete: false };
+        stopped = true;
       }
+    };
 
-      // 时长未知时，空的一片就是到头了
-      if (chunk.length === 0 && !totalS) break;
+    const worker = async () => {
+      for (;;) {
+        if (stopped || failure) return;
+        // 预算不够再开一片就收手：已转的都算数，剩下的留给"继续生成"
+        if (remainingMs() < 45_000) {
+          stopped = true;
+          return;
+        }
+        const chunk = queue.shift();
+        if (!chunk) return;
+        await runOne(chunk);
+      }
+    };
 
-      segments.push(...chunk);
-      await onPartial({ segments, coveredS: endS, totalS });
+    // 首片（2 分钟那片）单独先跑完 —— 约 10 秒字幕就上屏了，
+    // 别让它跟后面的大片挤在一起，那样首屏又要等半分钟
+    const first = queue.shift();
+    if (first) await runOne(first);
+    if (failure) throw new TranscribeError(failure);
+
+    // 剩下的并行铺开
+    if (!stopped && queue.length > 0) {
+      await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
     }
+    if (failure) throw new TranscribeError(failure);
 
-    return { segments, complete: true };
+    return { segments, complete: queue.length === 0 && !stopped && finished.size === todo.length };
   },
 };

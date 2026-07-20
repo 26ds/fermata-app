@@ -332,23 +332,26 @@ export function CaptionLayer({
             </ul>
           </div>
 
-          {/* 转到一半停了（预算用完 / 中途出错）—— 字幕已经有一截，但别让用户
-              以为"就这么多了"。给一句话说清楚 + 一个接着来的按钮 */}
-          {generation && !generation.running && (generation.resumable || generation.error) && (
-            <div className="mt-2 flex items-center gap-2 rounded-xl border border-ink-700 px-3 py-2">
-              <p className="flex-1 text-[0.68rem] leading-4 text-ink-500">
-                {generation.error || "后面还有没转完的部分。"}
-              </p>
-              <button
-                type="button"
-                onClick={generation.onRun}
-                className="min-h-9 shrink-0 rounded-lg border border-teal-400/50 px-3 text-xs text-teal-300"
-              >
-                {generation.error ? "重试" : "继续生成"}
-              </button>
-            </div>
-          )}
         </>
+      )}
+
+      {/* 转到一半停了（预算用完 / 中途出错）—— 字幕已经有一截，但别让用户
+          以为"就这么多了"。给一句话说清楚 + 一个接着来的按钮。
+          **刻意放在开关之外**：创始人真机撞到过 —— 把字幕收起来之后，
+          这个按钮跟着一起没了，于是"生成了一半"就成了一个走不出去的死角。 */}
+      {hasCaptions && generation && !generation.running && (generation.resumable || generation.error) && (
+        <div className="mt-2 flex items-center gap-2 rounded-xl border border-ink-700 px-3 py-2">
+          <p className="flex-1 text-[0.68rem] leading-4 text-ink-500">
+            {generation.error || "后面还有没转完的部分。"}
+          </p>
+          <button
+            type="button"
+            onClick={generation.onRun}
+            className="min-h-9 shrink-0 rounded-lg border border-teal-400/50 px-3 text-xs text-teal-300"
+          >
+            {generation.error ? "重试" : "继续生成"}
+          </button>
+        </div>
       )}
     </section>
   );

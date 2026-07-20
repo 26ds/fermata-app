@@ -52,6 +52,12 @@ export function WatchStage({
     error: string;
   }>({ running: false, coveredS: null, error: "" });
   const runningRef = useRef(false);
+  // 字幕盖到第几秒。热路径要读，所以走 ref
+  const coveredRef = useRef(
+    source.transcript?.length ? source.transcript[source.transcript.length - 1].end : 0,
+  );
+  const orbReadyRef = useRef(false);
+  const [orbReady, setOrbReady] = useState(false);
   const [points, setPoints] = useState<InterruptPoint[]>(interrupts);
   const [panel, setPanel] = useState<{ open: boolean; tS: number; id: string | null }>({
     open: false,
@@ -265,10 +271,14 @@ export function WatchStage({
 
           if (event.type === "partial" && event.segments) {
             setTranscript(event.segments);
+            coveredRef.current = event.segments.at(-1)?.end ?? 0;
             setGen((g) => ({ ...g, coveredS: event.coveredS ?? g.coveredS }));
             setStatus("partial");
           } else if (event.type === "done") {
-            if (event.segments) setTranscript(event.segments);
+            if (event.segments) {
+              setTranscript(event.segments);
+              coveredRef.current = event.segments.at(-1)?.end ?? 0;
+            }
             complete = Boolean(event.complete);
             setStatus(complete ? "ready" : "partial");
           } else if (event.type === "error") {
@@ -291,9 +301,12 @@ export function WatchStage({
   }, [source.id]);
 
   useEffect(() => {
-    // 只有"从没转过"的才自动开工。失败的不自动重来 —— 私享视频这类
-    // 每开一次页面重试一次，只是白烧额度再报同一句错，让用户自己按重试。
-    if (source.transcript_status !== "pending") return;
+    // 没转过的（pending）和转了一半的（partial）都自动接着干 ——
+    // 创始人真机撞到的就是这个：转到一半退出页面，再进来它就那么僵着，
+    // 得手动去点"继续生成"。**没转完的东西不该等人来催。**
+    // 失败的（failed）仍然不自动重来：私享视频那类是永久性失败，
+    // 每开一次页面重试一次只是白烧额度再报同一句错。
+    if (source.transcript_status !== "pending" && source.transcript_status !== "partial") return;
 
     let cancelled = false;
     let tries = 0;
@@ -354,6 +367,16 @@ export function WatchStage({
       if (!durationKnownRef.current && duration > 0) {
         durationKnownRef.current = true;
         setDurationS(duration);
+      }
+
+      // 球色（D5）：**字幕盖到了当前这一刻**才算就绪。
+      // 只看 transcript_status 是不诚实的 —— 字幕才转到第 10 分钟、
+      // 人已经拖到第 40 分钟，那里根本没有字幕可用，球不该是青的。
+      // 跨越边界才 setState，不是每秒四次（M1 经验第 1 条）。
+      const ready = coveredRef.current > t;
+      if (ready !== orbReadyRef.current) {
+        orbReadyRef.current = ready;
+        setOrbReady(ready);
       }
 
       // 时长只回写一次：oEmbed 拿不到，只有播放器就绪后才知道真实秒数
@@ -466,10 +489,10 @@ export function WatchStage({
 
       {/* 悬浮捕获球（position:fixed，挂在树里即可，位置与页面布局无关）。
           轻点 = 记下这一刻并开面板；长按聆听的下游（真实语音）是 M3。
-          M2a：球色接上真状态 —— 灰=字幕还没好，青=字幕就绪（D5 的双态色）。
-          这条线 1b 就埋好了，今天才通电。 */}
+          M2a：球色接上真状态 —— 灰=这一刻还没字幕，青=这一刻有字幕（D5 的双态色）。
+          判据是"盖没盖住当前播放位置"，不是"整片转完没有"。 */}
       <CaptureOrb
-        state={status === "ready" ? "ready" : "pending"}
+        state={orbReady ? "ready" : "pending"}
         onTap={captureNow}
         onLongPressStart={() => {
           // M3：长按 → 接 Live 语音提问。现在只有球自己的视觉 + 占位字幕
