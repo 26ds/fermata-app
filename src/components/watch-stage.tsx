@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { activeSegmentIndex } from "@/lib/captions";
 import { CaptionLayer } from "@/components/caption-layer";
 import { CaptureOrb } from "@/components/capture-orb";
 import { DotBar, type InterruptPoint } from "@/components/dot-bar";
@@ -52,10 +53,8 @@ export function WatchStage({
     error: string;
   }>({ running: false, coveredS: null, error: "" });
   const runningRef = useRef(false);
-  // 字幕盖到第几秒。热路径要读，所以走 ref
-  const coveredRef = useRef(
-    source.transcript?.length ? source.transcript[source.transcript.length - 1].end : 0,
-  );
+  // 字幕本体。热路径（250ms 那一轮）要查"这一刻有没有字幕"，所以走 ref
+  const segmentsRef = useRef<TranscriptSegment[]>(source.transcript ?? []);
   const orbReadyRef = useRef(false);
   const [orbReady, setOrbReady] = useState(false);
   const [points, setPoints] = useState<InterruptPoint[]>(interrupts);
@@ -271,13 +270,13 @@ export function WatchStage({
 
           if (event.type === "partial" && event.segments) {
             setTranscript(event.segments);
-            coveredRef.current = event.segments.at(-1)?.end ?? 0;
+            segmentsRef.current = event.segments;
             setGen((g) => ({ ...g, coveredS: event.coveredS ?? g.coveredS }));
             setStatus("partial");
           } else if (event.type === "done") {
             if (event.segments) {
               setTranscript(event.segments);
-              coveredRef.current = event.segments.at(-1)?.end ?? 0;
+              segmentsRef.current = event.segments;
             }
             complete = Boolean(event.complete);
             setStatus(complete ? "ready" : "partial");
@@ -369,11 +368,14 @@ export function WatchStage({
         setDurationS(duration);
       }
 
-      // 球色（D5）：**字幕盖到了当前这一刻**才算就绪。
-      // 只看 transcript_status 是不诚实的 —— 字幕才转到第 10 分钟、
-      // 人已经拖到第 40 分钟，那里根本没有字幕可用，球不该是青的。
-      // 跨越边界才 setState，不是每秒四次（M1 经验第 1 条）。
-      const ready = coveredRef.current > t;
+      // 球色（D5）：**这一刻有没有字幕**，而不是"整片转完没有"。
+      // 只看 transcript_status 不诚实 —— 字幕才转到第 10 分钟、人已经拖到
+      // 第 40 分钟，那儿根本没字幕可用，球不该是青的。
+      // 也不能只看"转到第几秒"：并行之后各片乱序回来，中间可能是空的。
+      // 只有真去查一下这一刻落没落在某一句上，才算数。
+      const segs = segmentsRef.current;
+      const i = activeSegmentIndex(segs, t);
+      const ready = i >= 0 && segs[i].end >= t - 2;
       if (ready !== orbReadyRef.current) {
         orbReadyRef.current = ready;
         setOrbReady(ready);

@@ -216,16 +216,19 @@ export const geminiYoutubeProvider: TranscriptProvider = {
     const todo = plan.filter((c) => c.endS > done);
     if (todo.length === 0) return { segments, complete: true };
 
-    /** 连续覆盖到第几秒：从头数，遇到第一个没转完的片就停 —— 进度条不能虚报 */
+    /**
+     * 已经转出来的**总秒数**（不是"连续覆盖到第几秒"）。
+     *
+     * 并行之后各片回来的顺序是乱的：可能第 3 片先好、第 2 片还在跑。
+     * 按"连续覆盖"算，进度会卡在 8% 然后突然跳到 100%，看着像卡死了。
+     * 按总量算才是用户心里的那个"转了多少了"。
+     */
     const finished = new Set<number>();
-    const contiguous = () => {
-      let covered = done;
-      for (const c of plan) {
-        if (c.endS <= done || finished.has(c.startS)) covered = Math.max(covered, c.endS);
-        else break;
-      }
-      return covered;
-    };
+    const transcribedS = () =>
+      plan.reduce(
+        (sum, c) => (c.endS <= done || finished.has(c.startS) ? sum + (c.endS - c.startS) : sum),
+        0,
+      );
 
     let failure: string | null = null;
     let stopped = false;
@@ -243,7 +246,7 @@ export const geminiYoutubeProvider: TranscriptProvider = {
         finished.add(chunk.startS);
         segments.push(...got);
         segments.sort((a, b) => a.start - b.start); // 并行回来的顺序是乱的
-        await onPartial({ segments, coveredS: contiguous(), totalS });
+        await onPartial({ segments, coveredS: transcribedS(), totalS });
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         // 第一片就炸 = 这条内容根本读不了，得把原因说清楚；
