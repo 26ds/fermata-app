@@ -37,7 +37,7 @@ export function ImportForm() {
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
       <label htmlFor="source-url" className="text-xs font-semibold tracking-wide text-ink-300">
-        贴一条 YouTube 链接
+        贴一条 YouTube 链接 / 播客 RSS
       </label>
       <input
         id="source-url"
@@ -45,7 +45,7 @@ export function ImportForm() {
         required
         inputMode="url"
         autoComplete="off"
-        placeholder="https://www.youtube.com/watch?v=…"
+        placeholder="https://www.youtube.com/watch?v=… 或 …/feed.xml"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         className="h-14 rounded-xl border border-ink-500/70 bg-ink-900 px-4 text-ink-100 placeholder:text-ink-500 outline-none focus:border-teal-400"
@@ -58,6 +58,9 @@ export function ImportForm() {
         {busy ? "正在导入…" : "开始看"}
         {!busy && <span aria-hidden>→</span>}
       </button>
+      <p className="text-xs leading-5 text-ink-500">
+        播客贴订阅源地址（播客 App 里的「复制 RSS」），会导入最新一集；一条 .mp3 直链也认。
+      </p>
       {error && (
         <p className="text-sm text-red-400" role="alert">
           {error}

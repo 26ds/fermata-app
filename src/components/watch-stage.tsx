@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CaptionLayer } from "@/components/caption-layer";
 import { CaptureOrb } from "@/components/capture-orb";
 import { DotBar, type InterruptPoint } from "@/components/dot-bar";
 import { InterruptPanel } from "@/components/interrupt-panel";
-import { adapterFor } from "@/lib/sources/registry";
+import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
 import { mmss } from "@/lib/time";
 import type { QuestionMode, SourceRow } from "@/lib/types";
@@ -24,7 +25,8 @@ export function WatchStage({
   source: SourceRow;
   interrupts: InterruptPoint[];
 }) {
-  const adapter = adapterFor(source.kind);
+  // 只问"用哪个壳"。这条链接是什么平台、叫什么名字，是服务端 registry 的活（M1d）
+  const shell = playerFor(source.kind);
 
   const handleRef = useRef<PlayerHandle | null>(null);
   const currentTimeRef = useRef(0);
@@ -191,6 +193,10 @@ export function WatchStage({
     handleRef.current?.seekTo(t);
   }, []);
 
+  /** 字幕层自己按 250ms 来取时间。给它 ref 的读法，而不是把秒数灌进 state ——
+      灌进去就是每秒 4 次整页重渲染，M0.5 栽过的那个坑 */
+  const getCurrentTime = useCallback(() => currentTimeRef.current, []);
+
   /** 1c-fix / D19：删掉一个误点的捕获点。先从条上撤下来，失败再放回去 */
   const handleDelete = useCallback(async (id: string) => {
     const snapshot = pointsRef.current;
@@ -259,7 +265,7 @@ export function WatchStage({
     };
   }, [savePosition]);
 
-  if (!adapter) {
+  if (!shell) {
     return (
       <div className="rounded-2xl border border-ink-700 p-5 text-sm text-ink-300">
         这类内容（{source.kind}）的播放器还没做。
@@ -267,7 +273,7 @@ export function WatchStage({
     );
   }
 
-  const { Player } = adapter;
+  const { Player } = shell;
 
   return (
     <div className="flex flex-col gap-3">
@@ -307,6 +313,14 @@ export function WatchStage({
         durationS={durationS}
         onSeek={handleSeek}
         onDelete={handleDelete}
+      />
+
+      {/* D4：字幕可开关、字号可调、行宽自适应 —— 视频与播客共用同一层 */}
+      <CaptionLayer
+        sourceId={source.id}
+        transcript={source.transcript}
+        getCurrentTime={getCurrentTime}
+        onSeek={handleSeek}
       />
 
       {/* 悬浮捕获球（position:fixed，挂在树里即可，位置与页面布局无关）。

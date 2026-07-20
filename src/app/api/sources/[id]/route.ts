@@ -7,12 +7,22 @@ import { createClient } from "@/lib/supabase/server";
 // PATCH：回写真实时长（oEmbed 给不了，只有播放器就绪后才知道）与"看到第几秒"。
 // DELETE：从列表里移除。
 
+// M1d：手动贴进来的字幕。段的形状就是 TranscriptSegment —— M2 的自动转写
+// 产出同一个形状写同一个字段，到时候不用改这里，也不用改渲染层。
+const segmentSchema = z.object({
+  start: z.number().min(0).max(24 * 3600),
+  end: z.number().min(0).max(24 * 3600),
+  text: z.string().min(1).max(2000),
+  speaker: z.string().max(120).optional(),
+});
+
 const patchSchema = z
   .object({
     durationS: z.number().positive().max(24 * 3600).optional(),
     lastPositionS: z.number().min(0).max(24 * 3600).optional(),
     pinned: z.boolean().optional(),
     favorited: z.boolean().optional(),
+    transcript: z.array(segmentSchema).min(1).max(5000).optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), {
     message: "没有要更新的字段",
@@ -47,6 +57,8 @@ export async function PATCH(
     last_position_s?: number;
     pinned_at?: string | null;
     favorited_at?: string | null;
+    transcript?: z.infer<typeof segmentSchema>[];
+    transcript_status?: string;
   };
   try {
     const result = patchSchema.safeParse(await request.json());
@@ -66,6 +78,12 @@ export async function PATCH(
     }
     if (result.data.favorited !== undefined) {
       patch.favorited_at = result.data.favorited ? new Date().toISOString() : null;
+    }
+    if (result.data.transcript !== undefined) {
+      patch.transcript = result.data.transcript;
+      // 有字幕了就是 ready —— 悬浮球的双态色、字幕层的开关都读这一个字段，
+      // 手贴的和 M2 自动转写的在下游没有区别
+      patch.transcript_status = "ready";
     }
   } catch {
     return NextResponse.json({ error: "请求格式不对" }, { status: 400 });

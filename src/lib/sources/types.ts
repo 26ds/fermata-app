@@ -44,7 +44,22 @@ export interface ParsedSource {
 export interface ResolvedMeta {
   title: string | null;
   durationS: number | null;
+  /**
+   * M1d 新增：resolve 期间才能确定的**更精确的指针**，缺省沿用 parse 的结果。
+   *
+   * 为什么需要：播客贴进来的是**订阅源**，而能播的是源里**某一集**。
+   * 「哪一集」只有把 RSS 拉下来才知道，parse（纯函数、不发网络）做不到。
+   * YouTube 不用这一档 —— videoId 在链接里就写着。
+   */
+  externalId?: string;
+  url?: string;
 }
+
+/**
+ * resolve 失败且**原因该讲给用户听**时抛这个（→ 400 + 中文原文）。
+ * 其余异常一律当成"网络抽风"，走 502。
+ */
+export class SourceResolveError extends Error {}
 
 export interface SourceAdapter {
   kind: SourceKind;
