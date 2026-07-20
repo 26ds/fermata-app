@@ -2,6 +2,14 @@ import Parser from "rss-parser";
 import type { ParsedSource, ResolvedMeta, SourceAdapter } from "./types";
 import { SourceResolveError } from "./types";
 import { PodcastPlayer } from "./podcast-player";
+import {
+  extractEpisodeFromHtml,
+  extractFeedLink,
+  lookupApple,
+  normalizePageUrl,
+  parseAppleUrl,
+  readPageBody,
+} from "./podcast-web";
 
 // M1d — 播客 adapter。D2/D4：只存指针（feed + 这一集的 guid + 音频直链），
 // 永不下载媒体 —— 播的就是发布方自己公开的 enclosure，跟任何播客客户端一样。
@@ -128,12 +136,68 @@ function upgradeToHttps(url: string): string {
 
 const parser = new Parser({ timeout: 10_000 });
 
+/** 列表里每条内容只有一行，标题得同时回答"哪个节目 / 哪一集" */
+function joinTitle(episode: string | null, show: string | null): string | null {
+  return [episode?.trim(), show?.trim()].filter(Boolean).join(" · ") || null;
+}
+
+async function get(url: string, accept: string): Promise<Response> {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(10_000),
+    // 有些托管方会挡掉没有 UA 的请求
+    headers: { "user-agent": "Fermata/1.0 (+podcast client)", accept },
+  });
+  if (!res.ok) {
+    throw new SourceResolveError(`这条链接打不开（${res.status}），检查一下再试`);
+  }
+  return res;
+}
+
+/** 从一条订阅源里取**最新一集**（D4/D23 的口径）。选集是 M7 的事 */
+async function episodeFromFeed(feedUrl: string, xml: string): Promise<ResolvedMeta> {
+  let feed: Awaited<ReturnType<Parser["parseString"]>>;
+  try {
+    feed = await parser.parseString(xml);
+  } catch {
+    throw new SourceResolveError(
+      "这条链接不是播客订阅源（RSS）。在播客 App 里找「复制 RSS 地址」，或直接贴一条 .mp3 链接。",
+    );
+  }
+
+  const item = feed.items?.[0];
+  const audioRaw = item?.enclosure?.url;
+  if (!item || !audioRaw) {
+    throw new SourceResolveError("这个订阅源里没找到可播放的音频（没有 enclosure）");
+  }
+  const audio = upgradeToHttps(audioRaw);
+  // guid 缺失就退回音频直链当身份 —— 同一集重复导入仍能被去重
+  const guid = (typeof item.guid === "string" && item.guid.trim()) || audio;
+
+  return {
+    title: joinTitle(
+      typeof item.title === "string" ? item.title : null,
+      typeof feed.title === "string" ? feed.title : null,
+    ),
+    durationS: parseItunesDuration(item.itunes?.duration),
+    externalId: episodePointer(feedUrl, guid),
+    url: audio,
+  };
+}
+
+async function fetchFeed(feedUrl: string): Promise<ResolvedMeta> {
+  const res = await get(
+    feedUrl,
+    "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+  );
+  return episodeFromFeed(feedUrl, await readFeedHead(res));
+}
+
 export const podcastAdapter: SourceAdapter = {
   kind: "podcast",
 
   // 注意 registry 的询问顺序：YouTube 先问，所以 YT 链接轮不到这里。
-  // 剩下的 http(s) 链接一律先当 feed 收下 —— 认不认得出，resolve 说了算，
-  // 那里能给出「读到了但没有音频」这类具体原因，比笼统一句"认不出来"有用。
+  // 剩下的 http(s) 链接一律先收下 —— 到底是订阅源、单集网页还是音频直链，
+  // 由 resolve 去分辨，那里能给出具体原因，比笼统一句"认不出来"有用。
   parse(input: string): ParsedSource | null {
     const url = normalizeUrl(input);
     if (!url) return null;
@@ -142,8 +206,10 @@ export const podcastAdapter: SourceAdapter = {
   },
 
   async resolve(parsed): Promise<ResolvedMeta> {
-    // ① 贴的就是一条音频直链：没有 feed 可读，直接拿它当一集
-    if (AUDIO_EXT.test(new URL(parsed.url).pathname)) {
+    const pageUrl = new URL(parsed.url);
+
+    // ① 音频直链：没有 feed 可读，直接拿它当一集
+    if (AUDIO_EXT.test(pageUrl.pathname)) {
       const audio = upgradeToHttps(parsed.url);
       const name = decodeURIComponent(new URL(audio).pathname.split("/").pop() ?? "");
       return {
@@ -154,57 +220,68 @@ export const podcastAdapter: SourceAdapter = {
       };
     }
 
-    // ② 当成 RSS 订阅源来读
-    let xml: string;
-    try {
-      const res = await fetch(parsed.url, {
-        signal: AbortSignal.timeout(10_000),
-        headers: {
-          // 有些托管方会挡掉没有 UA 的请求
-          "user-agent": "Fermata/1.0 (+podcast client)",
-          accept: "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
-        },
-      });
-      if (!res.ok) {
-        throw new SourceResolveError(`这条链接打不开（${res.status}），检查一下再试`);
+    // ② Apple Podcasts 的分享链接 —— iPhone 上最常见的一种。
+    // 它的页面是 JS 渲染的，扒 HTML 扒不到音频，只能走苹果的公开查询接口。
+    const apple = parseAppleUrl(pageUrl);
+    if (apple) {
+      const { episode, feedUrl, tooOld } = await lookupApple(apple);
+      if (episode?.audioUrl) {
+        return {
+          title: joinTitle(episode.title, episode.showTitle),
+          durationS: episode.durationS,
+          // 拿得到 feed 就仍按 D23 编成组合指针，M2 还能回到 feed 找字幕。
+          // 苹果不给 feed 里的 guid，所以用它自己的 trackId，并标上来源免得跟真 guid 混淆
+          externalId: feedUrl
+            ? episodePointer(feedUrl, `apple:${episode.trackId ?? apple.episodeId}`)
+            : episode.audioUrl,
+          url: upgradeToHttps(episode.audioUrl),
+        };
       }
-      xml = await readFeedHead(res);
-    } catch (e) {
-      if (e instanceof SourceResolveError) throw e;
-      throw new SourceResolveError("这条链接读不出来：既不是 YouTube 视频，也拉不到播客订阅源");
-    }
-
-    let feed: Awaited<ReturnType<Parser["parseString"]>>;
-    try {
-      feed = await parser.parseString(xml);
-    } catch {
+      if (tooOld) {
+        throw new SourceResolveError(
+          "这一期太旧了，苹果的接口翻不到（它只回最近两百期）。贴这档节目的 RSS 地址就能导入。",
+        );
+      }
+      // 贴的是节目主页（链接里没有 ?i=）→ 按老规矩取最新一集
+      if (feedUrl) return fetchFeed(feedUrl);
       throw new SourceResolveError(
-        "这条链接不是播客订阅源（RSS）。在播客 App 里找「复制 RSS 地址」，或直接贴一条 .mp3 链接。",
+        "这条 Apple Podcasts 链接查不到内容。确认一下链接是不是完整的，或者贴这档节目的 RSS 地址。",
       );
     }
 
-    // D4 的口径是"一集就是一条内容"：feed 里最新的那集。
-    // 想听旧的怎么办 —— 那是选集界面的事（M7），M1 不做。
-    const item = feed.items?.[0];
-    const audioRaw = item?.enclosure?.url;
-    if (!item || !audioRaw) {
-      throw new SourceResolveError("这个订阅源里没找到可播放的音频（没有 enclosure）");
+    // ③ 剩下的：可能是订阅源，也可能是一个单集网页
+    const res = await get(
+      parsed.url,
+      "application/rss+xml, application/atom+xml, application/xml, text/xml, text/html, */*",
+    );
+    const contentType = res.headers.get("content-type") ?? "";
+    const isHtml = /text\/html|application\/xhtml/i.test(contentType);
+
+    if (!isHtml) {
+      return episodeFromFeed(parsed.url, await readFeedHead(res));
     }
-    const audio = upgradeToHttps(audioRaw);
 
-    // guid 缺失就退回音频直链当身份 —— 同一集重复导入仍能被去重
-    const guid = (typeof item.guid === "string" && item.guid.trim()) || audio;
+    // 网页：按 JSON-LD → og:audio → 页面声明的 RSS 依次试（见 podcast-web.ts）
+    const html = await readPageBody(res);
+    const episode = extractEpisodeFromHtml(html, parsed.url);
+    if (episode) {
+      const identity = normalizePageUrl(episode.canonicalUrl ?? parsed.url);
+      return {
+        title: joinTitle(episode.title, episode.showTitle),
+        durationS: episode.durationS,
+        // 网页这一档没有 feed 可回，身份就用规范化后的页面地址（不带 # → M2 会知道
+        // 这条源没有 feed 可查字幕，走 Whisper 那条 fallback）
+        externalId: identity,
+        url: upgradeToHttps(episode.audioUrl),
+      };
+    }
 
-    const episodeTitle = typeof item.title === "string" ? item.title.trim() : "";
-    const showTitle = typeof feed.title === "string" ? feed.title.trim() : "";
+    const feedLink = extractFeedLink(html, parsed.url);
+    if (feedLink) return fetchFeed(feedLink);
 
-    return {
-      // 列表里只显示一行，所以标题要能同时回答"哪个节目/哪一集"
-      title: [episodeTitle, showTitle].filter(Boolean).join(" · ") || null,
-      durationS: parseItunesDuration(item.itunes?.duration),
-      externalId: episodePointer(parsed.url, guid),
-      url: audio,
-    };
+    throw new SourceResolveError(
+      "这个页面里没找到能播的单集。如果它是节目主页，请打开**某一期**再复制链接；或者贴这档节目的 RSS 地址。",
+    );
   },
 
   Player: PodcastPlayer,

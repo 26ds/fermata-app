@@ -37,7 +37,7 @@ export function ImportForm() {
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
       <label htmlFor="source-url" className="text-xs font-semibold tracking-wide text-ink-300">
-        贴一条 YouTube 链接 / 播客 RSS
+        贴一条链接
       </label>
       <input
         id="source-url"
@@ -45,7 +45,7 @@ export function ImportForm() {
         required
         inputMode="url"
         autoComplete="off"
-        placeholder="https://www.youtube.com/watch?v=… 或 …/feed.xml"
+        placeholder="YouTube / 小宇宙 / Apple Podcasts…"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         className="h-14 rounded-xl border border-ink-500/70 bg-ink-900 px-4 text-ink-100 placeholder:text-ink-500 outline-none focus:border-teal-400"
@@ -59,7 +59,8 @@ export function ImportForm() {
         {!busy && <span aria-hidden>→</span>}
       </button>
       <p className="text-xs leading-5 text-ink-500">
-        播客贴订阅源地址（播客 App 里的「复制 RSS」），会导入最新一集；一条 .mp3 直链也认。
+        播客直接从 App 里**分享这一集**、把链接贴过来就行（小宇宙、Apple Podcasts 等）。
+        贴节目主页或 RSS 也认，那会导入最新一集。
       </p>
       {error && (
         <p className="text-sm text-red-400" role="alert">
