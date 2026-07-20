@@ -75,39 +75,43 @@ export function InterruptPanel({
   }
 
   return (
+    // D18：**最多占屏幕下半，绝不遮住视频**。所以这里没有全屏遮罩 ——
+    // 遮罩会把画面压暗，而"卡在这一帧上"正是提问的前提，把那一帧盖掉问题就问不出来了。
+    // 代价是失去"点空白处关闭"（那需要一层全屏热区，会挡住 YouTube 官方控件），
+    // 改由抓手 / 取消 / Esc 三个明确入口关闭。
     // z-60：要盖住 z-50 的悬浮球
-    <div className="fixed inset-0 z-[60] flex flex-col justify-end">
-      <button
-        type="button"
-        aria-label="关闭"
-        onClick={onClose}
-        className="absolute inset-0 h-full w-full bg-black/55"
-      />
+    <div className="fixed inset-x-0 bottom-0 z-[60] max-h-[50dvh]">
       <div
         role="dialog"
-        aria-modal="true"
         aria-labelledby="interrupt-title"
-        className="glass relative rounded-t-3xl px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-4"
+        className="glass flex max-h-[50dvh] flex-col overflow-y-auto rounded-t-3xl px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.6)]"
       >
-        <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-ink-500/60" aria-hidden />
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="收起"
+          className="mx-auto mb-3 flex h-6 w-16 shrink-0 items-center justify-center"
+        >
+          <span className="h-1 w-10 rounded-full bg-ink-500/60" aria-hidden />
+        </button>
 
         <p id="interrupt-title" className="text-base font-semibold text-ink-100">
           卡在 <span className="ui-mono text-teal-300">{mmss(tS)}</span>
         </p>
         <p className="mt-1 text-xs leading-5 text-ink-500">
           {captured
-            ? "这一刻已经记下了。选一个类型，之后好帮你回答。"
-            : "选一个类型，就把这一刻记下来。"}
+            ? "这一刻已经记下了。选一个类型，之后好帮你回答（AI 回答稍后接上）。"
+            : "选一个类型，就把这一刻记下来（AI 回答稍后接上）。"}
         </p>
 
-        <div className="mt-4 flex flex-col gap-2">
+        <div className="mt-3 flex shrink-0 flex-col gap-2">
           {CHIPS.map((c) => (
             <button
               key={c.mode}
               type="button"
               disabled={busy}
               onClick={() => run(() => onPick(c.mode))}
-              className="flex min-h-14 items-center justify-between gap-3 rounded-2xl border border-ink-500/60 px-4 text-left transition-colors hover:border-teal-400 disabled:opacity-50"
+              className="flex min-h-14 shrink-0 items-center justify-between gap-3 rounded-2xl border border-ink-500/60 px-4 text-left transition-colors hover:border-teal-400 disabled:opacity-50"
             >
               <span className="min-w-0">
                 <span className="block text-sm font-semibold text-ink-100">{c.label}</span>
@@ -125,7 +129,7 @@ export function InterruptPanel({
             type="button"
             disabled={busy}
             onClick={() => run(onJustCapture)}
-            className="mt-2 min-h-12 w-full rounded-2xl border border-dashed border-ink-500/60 text-sm text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+            className="mt-2 min-h-12 w-full shrink-0 rounded-2xl border border-dashed border-ink-500/60 text-sm text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
           >
             只记下这一刻
           </button>
@@ -140,14 +144,10 @@ export function InterruptPanel({
           </p>
         )}
 
-        <p className="mt-3 text-center text-[0.68rem] text-ink-500">
-          现在只是记下来 · AI 回答稍后接上
-        </p>
-
         <button
           type="button"
           onClick={onClose}
-          className="mt-2 min-h-12 w-full rounded-2xl border border-ink-500/60 text-sm font-semibold text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
+          className="mt-3 min-h-12 w-full shrink-0 rounded-2xl border border-ink-500/60 text-sm font-semibold text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
         >
           取消
         </button>

@@ -43,20 +43,19 @@ export default async function WatchDetailPage({
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-48 opacity-50" />
-      <header className="relative flex items-center justify-between gap-3 px-5 pb-4 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8">
-        <Link href="/watch" className="group flex min-h-11 shrink-0 items-center gap-2 text-sm text-ink-300 hover:text-ink-100">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-ink-500/60 text-base transition-colors group-hover:border-teal-400 group-hover:text-teal-300" aria-hidden>←</span>
-          <span>播放器</span>
+      {/* D18：页头压到最薄，标题并进这一行 —— 原本"返回 / 字幕状态"一行 + 标题一行
+          白占掉约 44px 的纵向空间，而那正是视频画面想要的。字幕状态挪进了播放器
+          下方的状态条（WatchStage 里），不再单占位置。 */}
+      <header className="relative flex items-center gap-3 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-8">
+        <Link href="/watch" aria-label="返回播放器列表" className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300">
+          <span aria-hidden>←</span>
         </Link>
-        <p className="min-w-0 truncate text-right text-xs text-ink-500">
-          {source.transcript_status === "ready" ? "字幕就绪" : "字幕待生成"}
-        </p>
+        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-ink-100">
+          {source.title ?? "未命名内容"}
+        </h1>
       </header>
 
       <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
-        <h1 className="mb-4 text-base font-semibold leading-6 text-ink-100">
-          {source.title ?? "未命名内容"}
-        </h1>
         <WatchStage source={source} interrupts={interrupts} />
       </main>
     </div>

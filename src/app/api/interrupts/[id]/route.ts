@@ -61,3 +61,54 @@ export async function PATCH(
 
   return NextResponse.json(data);
 }
+
+/**
+ * 1c-fix / D19 —— 删掉一个误点的捕获点。
+ * atoms.interrupt_id 是外键，直接删会被数据库拦下；照 1a 删 source 的规矩：
+ * **先把知识原子解绑，再删点** —— 点是误记的，从它长出来的知识不是。
+ */
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  if (!supabaseConfigured) {
+    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  }
+
+  // Next 16：params 是 Promise，必须 await
+  const { id } = await params;
+
+  const { error: detachError } = await supabase
+    .from("atoms")
+    .update({ interrupt_id: null })
+    .eq("interrupt_id", id)
+    .eq("user_id", user.id);
+  if (detachError) {
+    return NextResponse.json({ error: detachError.message }, { status: 500 });
+  }
+
+  const { data, error } = await supabase
+    .from("interrupts")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", user.id) // RLS 之外再加一道
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!data) {
+    return NextResponse.json({ error: "这个打断点不存在" }, { status: 404 });
+  }
+
+  return NextResponse.json({ id: data.id });
+}

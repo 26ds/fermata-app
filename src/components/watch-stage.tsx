@@ -55,6 +55,13 @@ export function WatchStage({
     setPoints(interrupts);
   }
 
+  // 删除失败要回滚到"删之前"，但 handleDelete 得保持稳定身份（点点条按 props 记回调），
+  // 所以快照走 ref 而不是把 points 塞进依赖数组
+  const pointsRef = useRef(points);
+  useEffect(() => {
+    pointsRef.current = points;
+  }, [points]);
+
   const handleReady = useCallback((handle: PlayerHandle) => {
     handleRef.current = handle;
   }, []);
@@ -184,6 +191,22 @@ export function WatchStage({
     handleRef.current?.seekTo(t);
   }, []);
 
+  /** 1c-fix / D19：删掉一个误点的捕获点。先从条上撤下来，失败再放回去 */
+  const handleDelete = useCallback(async (id: string) => {
+    const snapshot = pointsRef.current;
+    setPoints((prev) => prev.filter((p) => p.id !== id));
+    try {
+      const res = await fetch(`/api/interrupts/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "没删掉，请重试");
+      }
+    } catch (e) {
+      setPoints(snapshot); // 回滚到删之前，别让点凭空消失
+      throw e;
+    }
+  }, []);
+
   useEffect(() => {
     // 每 250ms 读一次位置。刻意写进 ref + 直改 DOM，不走 setState ——
     // 每秒 4 次 setState 会把整页重渲染，M0.5 已经在这上面栽过一次。
@@ -247,21 +270,28 @@ export function WatchStage({
   const { Player } = adapter;
 
   return (
-    <div className="flex flex-col gap-4">
-      <Player
-        source={source}
-        onReady={handleReady}
-        onPlayingChange={handlePlayingChange}
-        onPause={handlePause}
-      />
+    <div className="flex flex-col gap-3">
+      {/* D18：画面越大越好 —— 手机上让播放器顶掉页面左右内边距，整整宽出 40px。
+          sm 以上回到圆角卡片（桌面宽度富余，全出血反而失衡） */}
+      <div className="-mx-5 sm:mx-0">
+        <Player
+          source={source}
+          onReady={handleReady}
+          onPlayingChange={handlePlayingChange}
+          onPause={handlePause}
+        />
+      </div>
 
-      <div className="flex items-center justify-between rounded-2xl border border-ink-700 px-4 py-3">
+      <div className="flex items-center justify-between rounded-2xl border border-ink-700 px-4 py-2.5">
         <div className="flex items-center gap-2.5">
           <span
             className={`h-2 w-2 rounded-full ${playing ? "bg-teal-400" : "bg-ink-500"}`}
             aria-hidden
           />
           <span className="text-sm text-ink-300">{playing ? "播放中" : "已暂停"}</span>
+          <span className="text-xs text-ink-500">
+            · {source.transcript_status === "ready" ? "字幕就绪" : "字幕待生成"}
+          </span>
         </div>
         <p className="ui-mono text-sm text-ink-100" aria-label="播放位置">
           <span ref={clockRef}>{source.last_position_s ? mmss(source.last_position_s) : "00:00"}</span>
@@ -272,7 +302,12 @@ export function WatchStage({
         </p>
       </div>
 
-      <DotBar points={points} durationS={durationS} onSeek={handleSeek} />
+      <DotBar
+        points={points}
+        durationS={durationS}
+        onSeek={handleSeek}
+        onDelete={handleDelete}
+      />
 
       {/* 悬浮捕获球（position:fixed，挂在树里即可，位置与页面布局无关）。
           轻点 = 记下这一刻并开面板；长按聆听的下游（真实语音）是 M3。
