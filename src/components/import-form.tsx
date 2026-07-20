@@ -59,8 +59,9 @@ export function ImportForm() {
         {!busy && <span aria-hidden>→</span>}
       </button>
       <p className="text-xs leading-5 text-ink-500">
-        播客直接从 App 里**分享这一集**、把链接贴过来就行（小宇宙、Apple Podcasts 等）。
-        贴节目主页或 RSS 也认，那会导入最新一集。
+        苹果播客里点这一集的{" "}
+        <span className="text-ink-300">「From this episode」</span>，直接拷贝网址粘贴进来；
+        小宇宙等其他 App 就是「分享 → 复制链接」。贴节目主页或 RSS 也认，那会导入最新一集。
       </p>
       {error && (
         <p className="text-sm text-red-400" role="alert">

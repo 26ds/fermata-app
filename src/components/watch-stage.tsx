@@ -191,6 +191,10 @@ export function WatchStage({
 
   const handleSeek = useCallback((t: number) => {
     handleRef.current?.seekTo(t);
+    // 立刻把"现在在哪"改过来，别等下一次 250ms 轮询。
+    // 否则连点两下点点条的「下一个」会卡在原地 —— 第二下读到的还是旧位置。
+    currentTimeRef.current = t;
+    if (clockRef.current) clockRef.current.textContent = mmss(t);
   }, []);
 
   /** 字幕层自己按 250ms 来取时间。给它 ref 的读法，而不是把秒数灌进 state ——
@@ -311,6 +315,7 @@ export function WatchStage({
       <DotBar
         points={points}
         durationS={durationS}
+        getCurrentTime={getCurrentTime}
         onSeek={handleSeek}
         onDelete={handleDelete}
       />

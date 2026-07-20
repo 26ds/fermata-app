@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { mmss } from "@/lib/time";
 import type { InterruptRow } from "@/lib/types";
 
@@ -15,6 +15,13 @@ export type InterruptPoint = Pick<InterruptRow, "id" | "t_s" | "question_mode">;
 
 /** 相距不超过这么多秒的点算同一簇（D19 创始人定的口径） */
 const CLUSTER_GAP_S = 10;
+
+/**
+ * 判断"上/下一个"时的容差。
+ * 刚跳到某个点上时 currentTime ≈ 该点，差半秒才算"另一个点"，
+ * 否则连点两下"下一个"会卡在原地。
+ */
+const STEP_EPS_S = 0.5;
 
 interface Cluster {
   /** 簇里第一个点的 id，仅用于 React key */
@@ -43,25 +50,108 @@ function clusterPoints(sorted: InterruptPoint[]): Cluster[] {
   return out;
 }
 
+/**
+ * 上/下一个捕获点的小三角。刻意做成"透明 UI"：无边框、无底色，
+ * 平时压得很淡，按不动时更淡 —— 它是辅助手段，不该跟捕获点本身抢注意力。
+ * 命中区仍是 44px 高，拇指够得着。
+ */
+function NavArrow({
+  ref,
+  direction,
+  onClick,
+}: {
+  ref: React.Ref<HTMLButtonElement>;
+  direction: 1 | -1;
+  onClick(): void;
+}) {
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={onClick}
+      aria-label={direction === 1 ? "跳到下一个捕获点" : "跳到上一个捕获点"}
+      // disabled 与 opacity 刻意都不写进 JSX —— 由 effect 直接改 DOM，见 DotBar 里的说明。
+      // 写进来 React 就会在每次重渲染时把它覆盖回去。
+      className="relative z-10 flex h-11 w-8 shrink-0 items-center justify-center text-ink-500 transition-opacity hover:text-teal-300 active:text-teal-200 disabled:pointer-events-none"
+    >
+      <svg viewBox="0 0 10 12" className="h-3 w-2.5" aria-hidden>
+        <path d={direction === 1 ? "M0 0 L10 6 L0 12 Z" : "M10 0 L0 6 L10 12 Z"} fill="currentColor" />
+      </svg>
+    </button>
+  );
+}
+
 interface DotBarProps {
   points: InterruptPoint[];
   /** 总时长（秒）。0 表示播放器还没报出来 */
   durationS: number;
+  /** 现在播到第几秒。左右箭头要靠它算"上/下一个" */
+  getCurrentTime(): number;
   onSeek(t: number): void;
   onDelete(id: string): Promise<void>;
 }
 
-export function DotBar({ points, durationS, onSeek, onDelete }: DotBarProps) {
+export function DotBar({ points, durationS, getCurrentTime, onSeek, onDelete }: DotBarProps) {
   // 记住"用户点开的是哪个点"而不是"哪个簇" —— 簇是算出来的，
   // 删掉一个点整个簇的构成就变了，记簇会让展开层莫名其妙地关掉。
   const [anchorId, setAnchorId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
 
-  const sorted = [...points].sort((a, b) => a.t_s - b.t_s);
+  // useMemo 不是为了省这点排序 —— 是为了让下面那个 effect 的依赖稳定下来，
+  // 否则每次重渲染都会重建数组、把 500ms 的定时器拆了重装
+  const sorted = useMemo(() => [...points].sort((a, b) => a.t_s - b.t_s), [points]);
   const ready = durationS > 0;
-  const clusters = clusterPoints(sorted);
+  const clusters = useMemo(() => clusterPoints(sorted), [sorted]);
   const open = anchorId ? clusters.find((c) => c.points.some((p) => p.id === anchorId)) : undefined;
+
+  const prevRef = useRef<HTMLButtonElement>(null);
+  const nextRef = useRef<HTMLButtonElement>(null);
+
+  /**
+   * 左右箭头的可用状态**直接写进 DOM**，不走 state。
+   * 它随播放位置一直在变，进 state 就是每 500ms 重渲染一次整条点点条；
+   * 而这两个按钮的 `disabled` 从头到尾没写进 JSX，React 也就不会来抢。
+   */
+  useEffect(() => {
+    if (sorted.length === 0) return;
+    // 变淡也一起在这里写。不用 Tailwind 的 `disabled:opacity-*`：
+    // `disabled` 是我们自己用 JS 设的，再让一条 CSS 伪类规则去跟它对表，
+    // 等于把一件事拆到两个地方 —— 出问题时很难看出是谁没生效。
+    const set = (el: HTMLButtonElement | null, enabled: boolean) => {
+      if (!el) return;
+      el.disabled = !enabled;
+      el.style.opacity = enabled ? "1" : "0.2";
+    };
+    const apply = () => {
+      const t = getCurrentTime();
+      set(prevRef.current, sorted.some((p) => p.t_s < t - STEP_EPS_S));
+      set(nextRef.current, sorted.some((p) => p.t_s > t + STEP_EPS_S));
+    };
+    apply();
+    const timer = window.setInterval(apply, 500);
+    return () => window.clearInterval(timer);
+  }, [sorted, getCurrentTime]);
+
+  /**
+   * 跳到上/下一个捕获点。
+   *
+   * 这才是密集捕获点真正的解药：10 分钟的视频里几十秒内点了好几下，
+   * 那几个圆点在轨道上只隔几个像素，手指再准也点不中 —— 而箭头的大小
+   * 跟点的疏密无关，永远好按。（集群展开解决"看得清"，箭头解决"够得着"。）
+   */
+  function step(direction: 1 | -1) {
+    const t = getCurrentTime();
+    const target =
+      direction === 1
+        ? sorted.find((p) => p.t_s > t + STEP_EPS_S)
+        : [...sorted].reverse().find((p) => p.t_s < t - STEP_EPS_S);
+    if (!target) return;
+    setError("");
+    onSeek(target.t_s);
+    // 顺手把它设成锚点：圆点会高亮、下方展开出这个点 —— 用户得知道自己落在哪
+    setAnchorId(target.id);
+  }
 
   function toggle(cluster: Cluster) {
     if (open?.key === cluster.key) {
@@ -113,9 +203,14 @@ export function DotBar({ points, durationS, onSeek, onDelete }: DotBarProps) {
         </p>
       ) : (
         <>
-          {/* 命中区 44px；左右各留半个身位，免得两端的点把页面撑出横向滚动条 */}
-          <div className="mt-2 px-6">
-            <div className="relative h-11">
+          <div className="mt-2 flex items-center">
+            {/* 上一个 / 下一个捕获点。透明、无边框，只在能用时才显形（disabled 时压到 15%）。
+                z-10：两端圆点的 44px 命中区会探进来一点，箭头必须压在上面 */}
+            <NavArrow ref={prevRef} direction={-1} onClick={() => step(-1)} />
+
+            {/* 命中区 44px；左右各留半个身位，免得两端的点把页面撑出横向滚动条 */}
+            <div className="min-w-0 flex-1 px-3">
+              <div className="relative h-11">
               <div
                 className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-ink-700"
                 aria-hidden
@@ -148,7 +243,10 @@ export function DotBar({ points, durationS, onSeek, onDelete }: DotBarProps) {
                   </button>
                 );
               })}
+              </div>
             </div>
+
+            <NavArrow ref={nextRef} direction={1} onClick={() => step(1)} />
           </div>
 
           {open && (
