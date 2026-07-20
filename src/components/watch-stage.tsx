@@ -8,7 +8,7 @@ import { InterruptPanel } from "@/components/interrupt-panel";
 import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
 import { mmss } from "@/lib/time";
-import type { QuestionMode, SourceRow } from "@/lib/types";
+import type { QuestionMode, SourceRow, TranscriptSegment, TranscriptStatus } from "@/lib/types";
 
 /** 进度回写节流：播放中最快 10 秒存一次，别把网络当秒表用 */
 const SAVE_EVERY_MS = 10_000;
@@ -43,6 +43,15 @@ export function WatchStage({
 
   const [playing, setPlaying] = useState(false);
   const [durationS, setDurationS] = useState(source.duration_s ?? 0);
+  // M2a：字幕不再是一份死数据，它会边转边长 —— 收进 state 才能实时往下传
+  const [transcript, setTranscript] = useState<TranscriptSegment[] | null>(source.transcript);
+  const [status, setStatus] = useState<TranscriptStatus>(source.transcript_status);
+  const [gen, setGen] = useState<{
+    running: boolean;
+    coveredS: number | null;
+    error: string;
+  }>({ running: false, coveredS: null, error: "" });
+  const runningRef = useRef(false);
   const [points, setPoints] = useState<InterruptPoint[]>(interrupts);
   const [panel, setPanel] = useState<{ open: boolean; tS: number; id: string | null }>({
     open: false,
@@ -201,6 +210,116 @@ export function WatchStage({
       灌进去就是每秒 4 次整页重渲染，M0.5 栽过的那个坑 */
   const getCurrentTime = useCallback(() => currentTimeRef.current, []);
 
+  /**
+   * M2a：把字幕转出来。服务端回的是 **NDJSON 流** —— 一行一个事件，
+   * 转出一块推一块，所以字幕是"长出来"的，不是等到最后一次性砸下来。
+   *
+   * 落库在服务端那边做，这里只负责显示：中途断了也不丢，重进页面还在。
+   */
+  const runTranscription = useCallback(async () => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setGen({ running: true, coveredS: null, error: "" });
+
+    let complete = false;
+    try {
+      const res = await fetch("/api/transcript", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sourceId: source.id,
+          // 播放器知道的时长比库里准（YouTube 的 oEmbed 给不了时长）
+          durationS: handleRef.current?.getDuration() || undefined,
+        }),
+      });
+      if (!res.ok || !res.body) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? "字幕没生成出来，稍后再试");
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        // NDJSON：按行切，最后一截可能是半行，留给下一轮
+        for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
+          const raw = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!raw) continue;
+
+          let event: {
+            type?: string;
+            segments?: TranscriptSegment[];
+            coveredS?: number;
+            complete?: boolean;
+            message?: string;
+          };
+          try {
+            event = JSON.parse(raw);
+          } catch {
+            continue; // 半行或杂音，跳过就是
+          }
+
+          if (event.type === "partial" && event.segments) {
+            setTranscript(event.segments);
+            setGen((g) => ({ ...g, coveredS: event.coveredS ?? g.coveredS }));
+            setStatus("partial");
+          } else if (event.type === "done") {
+            if (event.segments) setTranscript(event.segments);
+            complete = Boolean(event.complete);
+            setStatus(complete ? "ready" : "partial");
+          } else if (event.type === "error") {
+            setStatus("failed");
+            throw new Error(event.message ?? "字幕没生成出来");
+          }
+        }
+      }
+      setGen({ running: false, coveredS: null, error: "" });
+    } catch (e) {
+      setGen({
+        running: false,
+        coveredS: null,
+        error: e instanceof Error ? e.message : "字幕没生成出来，稍后再试",
+      });
+    } finally {
+      runningRef.current = false;
+    }
+    return complete;
+  }, [source.id]);
+
+  useEffect(() => {
+    // 只有"从没转过"的才自动开工。失败的不自动重来 —— 私享视频这类
+    // 每开一次页面重试一次，只是白烧额度再报同一句错，让用户自己按重试。
+    if (source.transcript_status !== "pending") return;
+
+    let cancelled = false;
+    let tries = 0;
+
+    const tick = async () => {
+      if (cancelled) return;
+      // 等播放器把真实时长报上来（最多等 5 秒）——
+      // 时长不知道就只能盲切，知道了才切得准、也才知道什么时候算转完
+      if (!durationKnownRef.current && tries++ < 10) {
+        window.setTimeout(tick, 500);
+        return;
+      }
+      // 一次最多接力 3 轮（服务端每轮有 240 秒软预算）。再长的内容
+      // 交给用户按「继续生成」—— 每一按都是真金白银，不该由代码替他连按
+      for (let round = 0; round < 3 && !cancelled; round++) {
+        const done = await runTranscription();
+        if (done !== false) break;
+      }
+    };
+
+    void tick();
+    return () => {
+      cancelled = true;
+    };
+  }, [source.transcript_status, runTranscription]);
+
   /** 1c-fix / D19：删掉一个误点的捕获点。先从条上撤下来，失败再放回去 */
   const handleDelete = useCallback(async (id: string) => {
     const snapshot = pointsRef.current;
@@ -300,7 +419,16 @@ export function WatchStage({
           />
           <span className="text-sm text-ink-300">{playing ? "播放中" : "已暂停"}</span>
           <span className="text-xs text-ink-500">
-            · {source.transcript_status === "ready" ? "字幕就绪" : "字幕待生成"}
+            ·{" "}
+            {status === "ready"
+              ? "字幕就绪"
+              : gen.running
+                ? "字幕生成中"
+                : status === "failed"
+                  ? "字幕没生成出来"
+                  : status === "partial"
+                    ? "字幕生成了一半"
+                    : "字幕待生成"}
           </span>
         </div>
         <p className="ui-mono text-sm text-ink-100" aria-label="播放位置">
@@ -323,16 +451,25 @@ export function WatchStage({
       {/* D4：字幕可开关、字号可调、行宽自适应 —— 视频与播客共用同一层 */}
       <CaptionLayer
         sourceId={source.id}
-        transcript={source.transcript}
+        transcript={transcript}
         getCurrentTime={getCurrentTime}
         onSeek={handleSeek}
+        generation={{
+          running: gen.running,
+          coveredS: gen.coveredS,
+          totalS: durationS || source.duration_s,
+          error: gen.error,
+          resumable: status === "partial",
+          onRun: () => void runTranscription(),
+        }}
       />
 
       {/* 悬浮捕获球（position:fixed，挂在树里即可，位置与页面布局无关）。
           轻点 = 记下这一刻并开面板；长按聆听的下游（真实语音）是 M3。
-          state 先写死 ready，真状态源是 M2 的 transcript_status。 */}
+          M2a：球色接上真状态 —— 灰=字幕还没好，青=字幕就绪（D5 的双态色）。
+          这条线 1b 就埋好了，今天才通电。 */}
       <CaptureOrb
-        state="ready"
+        state={status === "ready" ? "ready" : "pending"}
         onTap={captureNow}
         onLongPressStart={() => {
           // M3：长按 → 接 Live 语音提问。现在只有球自己的视觉 + 占位字幕

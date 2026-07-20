@@ -17,12 +17,28 @@ const SIZE_MIN = 14;
 const SIZE_MAX = 28;
 const SIZE_DEFAULT = 18;
 
+/** M2a：自动转写的进展。上层（watch-stage）驱动，这里只负责说人话 */
+export interface CaptionGeneration {
+  /** 正在生成中 */
+  running: boolean;
+  /** 已经转到第几秒 / 全片多长 —— 用来显示百分比 */
+  coveredS: number | null;
+  totalS: number | null;
+  /** 失败原因（人话）。空字符串 = 没失败 */
+  error: string;
+  /** 还剩一截没转完（上次被打断），可以接着来 */
+  resumable: boolean;
+  /** 开始 / 继续 / 重试，都是这一个动作 */
+  onRun(): void;
+}
+
 interface CaptionLayerProps {
   sourceId: string;
   transcript: TranscriptSegment[] | null;
   /** 现在播到第几秒。热路径 —— 这里自己按 250ms 去问，不让上层每秒 setState 四次 */
   getCurrentTime(): number;
   onSeek(t: number): void;
+  generation?: CaptionGeneration;
 }
 
 export function CaptionLayer({
@@ -30,6 +46,7 @@ export function CaptionLayer({
   transcript,
   getCurrentTime,
   onSeek,
+  generation,
 }: CaptionLayerProps) {
   const router = useRouter();
   const [segments, setSegments] = useState<TranscriptSegment[]>(transcript ?? []);
@@ -135,6 +152,12 @@ export function CaptionLayer({
 
   const hasCaptions = segments.length > 0;
 
+  /** 生成进度百分比。时长未知就不显示数字 —— 别编一个假的出来 */
+  const percent =
+    generation?.totalS && generation.coveredS != null
+      ? Math.min(99, Math.round((generation.coveredS / generation.totalS) * 100))
+      : null;
+
   return (
     <section
       ref={rootRef}
@@ -147,6 +170,12 @@ export function CaptionLayer({
         </p>
         {hasCaptions && (
           <div className="flex items-center gap-1">
+            {/* 字幕已经在长了，但还没长完 —— 让用户知道后面还有，别以为就这么点 */}
+            {generation?.running && (
+              <span className="ui-mono mr-1 text-[0.62rem] text-teal-300/80">
+                生成中{percent != null ? ` ${percent}%` : "…"}
+              </span>
+            )}
             <button
               type="button"
               onClick={() => setFollow((v) => !v)}
@@ -175,7 +204,7 @@ export function CaptionLayer({
             <label htmlFor="caption-draft" className="text-xs leading-5 text-ink-500">
               把 .srt 或 .vtt 的内容整段贴进来（要带{" "}
               <span className="ui-mono">00:00:12,340 --&gt; 00:00:15,000</span> 这样的时间轴）。
-              自动转写是 M2 的事，这里先手动验一遍同步。
+              自动转写不灵的时候，这里永远是最后一条路。
             </label>
             <textarea
               id="caption-draft"
@@ -213,13 +242,41 @@ export function CaptionLayer({
             )}
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={() => setPasting(true)}
-            className="mt-2 w-full rounded-2xl border border-dashed border-ink-700 px-4 py-3 text-left text-xs leading-5 text-ink-500 transition-colors hover:border-teal-400 hover:text-teal-300"
-          >
-            还没有字幕。自动转写是 M2 —— 现在可以先贴一份 .srt / .vtt 试试同步。
-          </button>
+          <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-dashed border-ink-700 px-4 py-3">
+            {generation?.running ? (
+              <p className="flex items-center gap-2 text-xs leading-5 text-teal-300">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal-400" aria-hidden />
+                正在生成字幕{percent != null ? `（${percent}%）` : "…"}第一段大约二十秒后出来。
+              </p>
+            ) : generation?.error ? (
+              <p role="alert" className="text-xs leading-5 text-red-400">
+                {generation.error}
+              </p>
+            ) : (
+              <p className="text-xs leading-5 text-ink-500">还没有字幕。</p>
+            )}
+
+            {!generation?.running && (
+              <div className="flex flex-wrap gap-2">
+                {generation && (
+                  <button
+                    type="button"
+                    onClick={generation.onRun}
+                    className="min-h-11 flex-1 rounded-xl bg-teal-400 px-4 text-sm font-semibold text-teal-950"
+                  >
+                    {generation.error ? "重试" : generation.resumable ? "继续生成" : "生成字幕"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPasting(true)}
+                  className="min-h-11 rounded-xl border border-ink-700 px-4 text-sm text-ink-300"
+                >
+                  手动粘贴
+                </button>
+              </div>
+            )}
+          </div>
         )
       ) : !on ? null : (
         <>
@@ -274,6 +331,23 @@ export function CaptionLayer({
               })}
             </ul>
           </div>
+
+          {/* 转到一半停了（预算用完 / 中途出错）—— 字幕已经有一截，但别让用户
+              以为"就这么多了"。给一句话说清楚 + 一个接着来的按钮 */}
+          {generation && !generation.running && (generation.resumable || generation.error) && (
+            <div className="mt-2 flex items-center gap-2 rounded-xl border border-ink-700 px-3 py-2">
+              <p className="flex-1 text-[0.68rem] leading-4 text-ink-500">
+                {generation.error || "后面还有没转完的部分。"}
+              </p>
+              <button
+                type="button"
+                onClick={generation.onRun}
+                className="min-h-9 shrink-0 rounded-lg border border-teal-400/50 px-3 text-xs text-teal-300"
+              >
+                {generation.error ? "重试" : "继续生成"}
+              </button>
+            </div>
+          )}
         </>
       )}
     </section>
