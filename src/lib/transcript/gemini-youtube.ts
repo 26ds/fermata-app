@@ -68,23 +68,39 @@ export function parseTimestampedLines(raw: string): ParsedLine[] {
 }
 
 /**
+ * 切片回来的时间戳，**基准是漂的** —— 这条是实测撞出来的，不是想出来的：
+ * 同一支视频、同一段 600–1200 秒、同一个 prompt，连打两枪，
+ * 一枪回 `[00:00] I'd like to see her…`（相对片头从 0 数），
+ * 一枪回 `[10:00] like to see her…`（整支视频的绝对时间）。
+ *
+ * 所以**不能假设是哪一种，只能当场认**：本片的时间戳如果整体落在
+ * [起点, 终点] 这个窗口里，那就是绝对时间，原样用；否则当相对时间，加偏移。
+ * 认错的代价很实在 —— 猜"相对"而实际是绝对，整支视频的字幕会翻倍偏移出去。
+ */
+export function resolveOffset(lines: ParsedLine[], startS: number, endS: number): number {
+  if (startS === 0 || lines.length === 0) return 0; // 第一片两种基准是同一回事
+  const min = Math.min(...lines.map((l) => l.at));
+  const max = Math.max(...lines.map((l) => l.at));
+  const TOL = 15; // 模型对齐没那么精确，给一点余量
+  const looksAbsolute = min >= startS - TOL && max <= endS + TOL;
+  return looksAbsolute ? 0 : startS;
+}
+
+/**
  * 把一片的行变成片段。
- *
- * **偏移这一步是命门**：切片回来的时间戳是**相对该片起点**的（从 00:00 重新数），
- * 不加 `offsetS` 的话，整支视频的字幕会全叠在开头十分钟里。
- *
  * 模型只给起点不给终点，所以每句的终点 = 下一句的起点（最后一句用片尾兜底）。
  */
-export function linesToSegments(lines: ParsedLine[], offsetS: number, chunkEndS: number): TranscriptSegment[] {
+export function linesToSegments(lines: ParsedLine[], startS: number, endS: number): TranscriptSegment[] {
+  const offset = resolveOffset(lines, startS, endS);
   const segments: TranscriptSegment[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const start = offsetS + lines[i].at;
-    // 模型偶尔回一个超出本片长度的时间戳，夹回片内，别让字幕跳到未来
-    if (start >= chunkEndS) continue;
-    const nextAt = i + 1 < lines.length ? offsetS + lines[i + 1].at : chunkEndS;
+    const start = offset + lines[i].at;
+    // 越界的行直接丢：模型偶尔会多吐一两句片外的，留着就是字幕跳到未来
+    if (start >= endS || start < startS - 1) continue;
+    const nextAt = i + 1 < lines.length ? offset + lines[i + 1].at : endS;
     segments.push({
       start,
-      end: Math.min(Math.max(nextAt, start + 0.5), chunkEndS),
+      end: Math.min(Math.max(nextAt, start + 0.5), endS),
       text: lines[i].text,
     });
   }
