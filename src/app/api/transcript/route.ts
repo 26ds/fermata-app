@@ -146,6 +146,7 @@ export async function POST(request: Request) {
             provider: provider.name,
             complete: result.complete,
             segments: result.segments,
+            note: result.note ?? null,
           });
           controller.close();
           return;

@@ -127,6 +127,53 @@ export function linesToSegments(lines: ParsedLine[], startS: number, endS: numbe
   return segments;
 }
 
+/**
+ * 把 Gemini 的报错翻译成人话。
+ *
+ * **这段是被真机打脸打出来的。** 原来的写法是一条正则
+ * `/quota|RESOURCE_EXHAUSTED|429/` 命中就说「今天的免费额度用完了，明天再试」。
+ * 创始人当天第一支视频、几秒就吃到这句，说「不可能是额度」—— 他是对的。
+ * 放探针打出原文才知道，那次 429 的真身是：
+ *
+ * > `Your project has exceeded its monthly spending cap.`
+ *
+ * 同样是 429 + RESOURCE_EXHAUSTED，**但让用户「明天再试」是纯粹的误导** ——
+ * 消费上限不会隔夜自己涨，得去 AI Studio 把上限改掉。
+ *
+ * 教训：**429 不是一种错，是一箩筐错**。别用一条正则概括一箩筐。
+ * 分不出来的，就把 Google 的原话原样端给用户，也好过编一个错的原因。
+ */
+export function explainGeminiError(raw: string): string {
+  // SDK 把真身当字符串塞在 message 里：`ApiError: {"error":{...}}`
+  const json = raw.match(/\{[\s\S]*\}/)?.[0];
+  let detail = raw;
+  if (json) {
+    try {
+      const parsed = JSON.parse(json) as { error?: { message?: string } };
+      if (parsed.error?.message) detail = parsed.error.message;
+    } catch {
+      /* 不是 JSON 就用原文 */
+    }
+  }
+
+  // 消费上限：跟额度无关，等多久都没用，必须去改设置
+  if (/spending cap|spend cap/i.test(detail)) {
+    return "Google 那边的项目设了「每月消费上限」，已经到顶了 —— 这不是免费额度用完，等明天也不会好。去 ai.studio/spend 把上限调高或去掉，再回来点「继续生成」。";
+  }
+  // 真·免费额度：Google 会明说是 per day / free tier 的配额
+  if (/per day|daily limit|free.{0,15}tier|FreeTier/i.test(detail)) {
+    return "今天的免费额度用完了，明天再试。";
+  }
+  // 每分钟限流：等一下就好，别让用户以为要等到明天
+  if (/per minute|rate limit|too many requests/i.test(detail)) {
+    return "调用太密集被限流了，等一分钟再点「继续生成」就行。";
+  }
+  if (/not found|private|unavailable|403|permission/i.test(detail)) {
+    return "这支视频读不了 —— 私享 / 会员 / 地区限制的视频拿不到内容。";
+  }
+  return `读这支视频时出错了：${detail.slice(0, 200)}`;
+}
+
 function clientFor(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new TranscribeError("服务器还没配置 GEMINI_API_KEY");
@@ -231,6 +278,8 @@ export const geminiYoutubeProvider: TranscriptProvider = {
       );
 
     let failure: string | null = null;
+    /** 转到一半停下来的原因（预算到点是正常的，不算原因；出错才算） */
+    let stopReason: string | null = null;
     let stopped = false;
 
     /**
@@ -248,19 +297,16 @@ export const geminiYoutubeProvider: TranscriptProvider = {
         segments.sort((a, b) => a.start - b.start); // 并行回来的顺序是乱的
         await onPartial({ segments, coveredS: transcribedS(), totalS });
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        // 第一片就炸 = 这条内容根本读不了，得把原因说清楚；
-        // 后面的片子炸 = 已转的仍然算数，留 partial 让用户接着来
+        const why = explainGeminiError(e instanceof Error ? e.message : String(e));
+        // 第一片就炸 = 这条内容一句都没转出来，直接失败并把原因说清楚
         if (chunk.startS === 0) {
-          if (/quota|RESOURCE_EXHAUSTED|429/i.test(msg)) {
-            failure = "今天的免费额度用完了（每天 8 小时视频），明天再试。";
-          } else if (/not found|private|unavailable|403|permission/i.test(msg)) {
-            failure = "这支视频读不了 —— 私享 / 会员 / 地区限制的视频拿不到内容。";
-          } else {
-            failure = `读这支视频时出错了：${msg.slice(0, 120)}`;
-          }
+          failure = why;
           return;
         }
+        // 后面的片子炸 = 已转的仍然算数，留 partial 让用户接着来。
+        // 但**原因要带出去** —— 从前这里是闷声停下，用户只看到字幕转到一半
+        // 就不动了，没人告诉他为什么（消费上限撞顶时正是这个样子）。
+        stopReason = why;
         stopped = true;
       }
     };
@@ -291,6 +337,10 @@ export const geminiYoutubeProvider: TranscriptProvider = {
     }
     if (failure) throw new TranscribeError(failure);
 
-    return { segments, complete: queue.length === 0 && !stopped && finished.size === todo.length };
+    return {
+      segments,
+      complete: queue.length === 0 && !stopped && finished.size === todo.length,
+      note: stopReason,
+    };
   },
 };

@@ -227,6 +227,7 @@ export function WatchStage({
     setGen({ running: true, coveredS: null, error: "" });
 
     let complete = false;
+    let note = "";
     try {
       const res = await fetch("/api/transcript", {
         method: "POST",
@@ -261,6 +262,7 @@ export function WatchStage({
             coveredS?: number;
             complete?: boolean;
             message?: string;
+            note?: string | null;
           };
           try {
             event = JSON.parse(raw);
@@ -280,13 +282,15 @@ export function WatchStage({
             }
             complete = Boolean(event.complete);
             setStatus(complete ? "ready" : "partial");
+            // 半截停下来是有原因的，别让用户对着不动的字幕自己猜
+            if (!complete && event.note) note = event.note;
           } else if (event.type === "error") {
             setStatus("failed");
             throw new Error(event.message ?? "字幕没生成出来");
           }
         }
       }
-      setGen({ running: false, coveredS: null, error: "" });
+      setGen({ running: false, coveredS: null, error: note });
     } catch (e) {
       setGen({
         running: false,

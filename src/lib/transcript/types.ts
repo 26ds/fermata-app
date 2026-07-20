@@ -41,6 +41,12 @@ export interface TranscribeResult {
   complete: boolean;
   /** Whisper 会顺便告诉我们这是什么语言 → 回写 sources.content_lang（D10） */
   lang?: string | null;
+  /**
+   * 没转完时**为什么**停下来的人话（撞了消费上限、被限流……）。
+   * 预算到点属于正常收尾，不填；只有出错才填。
+   * 有这个字段是因为：闷声停在半截、什么都不说，用户只会以为程序坏了。
+   */
+  note?: string | null;
 }
 
 export interface TranscriptProvider {
