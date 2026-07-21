@@ -82,6 +82,66 @@ export function parseCaptions(input: string): TranscriptSegment[] {
 }
 
 /**
+ * YouTube「显示转录 / Show transcript」面板复制出来的格式 —— 跟 SRT/VTT 不一样：
+ * **一行时间戳、下一行文字，交替**，没有 `-->`。例：
+ *
+ *   0:00
+ *   Hey everyone, welcome back
+ *   0:04
+ *   today we're talking about…
+ *
+ * 也认「时间戳和文字挤在同一行」的复制方式（`0:00 Hey everyone` / 用 Tab 分隔）。
+ * 每句的终点 = 下一句的起点（最后一句给 4 秒兜底）。这是创始人要的免费通路：
+ * YouTube 自己就有 CC，用户点三下复制过来，我们不用花钱让模型重转。
+ */
+const YT_TS = /^\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:\s+(.*))?$/;
+
+export function parseYoutubeTranscript(input: string): TranscriptSegment[] {
+  const lines = input.replace(/\r\n?/g, "\n").split("\n");
+  const entries: { at: number; text: string[] }[] = [];
+  let current: { at: number; text: string[] } | null = null;
+
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line === "") continue;
+    const m = YT_TS.exec(line);
+    if (m) {
+      const at = Number(m[1] ?? 0) * 3600 + Number(m[2]) * 60 + Number(m[3]);
+      current = { at, text: [] };
+      entries.push(current);
+      if (m[4]) current.text.push(m[4].trim()); // 时间戳同一行还带着文字
+      continue;
+    }
+    // 普通文字行，挂到当前时间戳名下；时间戳还没出现的前导行（面板标题）直接丢
+    if (current) current.text.push(line);
+  }
+
+  const out: TranscriptSegment[] = [];
+  for (let i = 0; i < entries.length; i++) {
+    const text = stripMarkup(entries[i].text.join(" "));
+    if (!text) continue;
+    // 与上一条同文的丢：自动字幕偶尔会连着重复一句
+    if (out[out.length - 1]?.text === text) continue;
+    const start = entries[i].at;
+    const nextAt = i + 1 < entries.length ? entries[i + 1].at : start + 4;
+    out.push({ start, end: Math.max(nextAt, start + 0.5), text });
+  }
+
+  return out.sort((a, b) => a.start - b.start).slice(0, MAX_SEGMENTS);
+}
+
+/**
+ * 用户手动粘贴的字幕，来源不止一种，这里**兜住所有认得出的格式**：
+ * 先按 SRT/VTT（带 `-->`）解析，一条都没有再退回 YouTube 转录格式。
+ * 两种都认不出才返回空，由调用方提示。
+ */
+export function parseTranscript(input: string): TranscriptSegment[] {
+  const cues = parseCaptions(input);
+  if (cues.length > 0) return cues;
+  return parseYoutubeTranscript(input);
+}
+
+/**
  * 找出"现在该高亮哪一句"。二分，因为这个函数每 250ms 跑一次。
  * 落在两句之间（说话人换气）时保持上一句亮着 —— 字幕突然全灭比慢半拍难受。
  */

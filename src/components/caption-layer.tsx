@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/navigation";
-import { activeSegmentIndex, parseCaptions } from "@/lib/captions";
+import { activeSegmentIndex, parseTranscript } from "@/lib/captions";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
 
@@ -35,6 +35,8 @@ export interface CaptionGeneration {
 interface CaptionLayerProps {
   sourceId: string;
   transcript: TranscriptSegment[] | null;
+  /** 内容类型。YouTube 走"粘贴优先"（有 CC 就免费），播客走自动转写 */
+  kind?: string;
   /** 现在播到第几秒。热路径 —— 这里自己按 250ms 去问，不让上层每秒 setState 四次 */
   getCurrentTime(): number;
   onSeek(t: number): void;
@@ -44,10 +46,14 @@ interface CaptionLayerProps {
 export function CaptionLayer({
   sourceId,
   transcript,
+  kind,
   getCurrentTime,
   onSeek,
   generation,
 }: CaptionLayerProps) {
+  // YouTube 视频自己带 CC，用户粘贴过来免费又快；只有没 CC 的才值得花钱走 Gemini。
+  // 所以 YouTube 默认引导粘贴，把"自动生成"降为次选。
+  const youtube = kind === "youtube";
   const router = useRouter();
   const [segments, setSegments] = useState<TranscriptSegment[]>(transcript ?? []);
   const [on, setOn] = useState(true);
@@ -122,9 +128,11 @@ export function CaptionLayer({
   }, [active, follow]);
 
   async function submitDraft() {
-    const parsed = parseCaptions(draft);
+    const parsed = parseTranscript(draft);
     if (parsed.length === 0) {
-      setError("没认出任何一条字幕。要的是 .srt / .vtt 的文件内容（带时间轴那种）。");
+      setError(
+        "没认出任何一条字幕。可以是 YouTube「显示转录」复制的内容（时间戳+文字），也可以是 .srt / .vtt 文件内容。",
+      );
       return;
     }
     setBusy(true);
@@ -201,18 +209,30 @@ export function CaptionLayer({
       {!hasCaptions ? (
         pasting ? (
           <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-ink-700 p-3">
-            <label htmlFor="caption-draft" className="text-xs leading-5 text-ink-500">
-              把 .srt 或 .vtt 的内容整段贴进来（要带{" "}
-              <span className="ui-mono">00:00:12,340 --&gt; 00:00:15,000</span> 这样的时间轴）。
-              自动转写不灵的时候，这里永远是最后一条路。
-            </label>
+            {youtube ? (
+              <div className="text-xs leading-5 text-ink-500">
+                <p className="mb-1 text-ink-300">这个视频有字幕(CC)的话，自己粘过来最快、免费 —— 三步：</p>
+                <ol className="ml-4 list-decimal space-y-0.5">
+                  <li>在 YouTube 打开这个视频 → 视频下方「<span className="text-ink-300">...更多</span>」→「<span className="text-ink-300">显示转录 / Show transcript</span>」</li>
+                  <li>在弹出的转录里长按/右键 <span className="text-ink-300">全选、复制</span></li>
+                  <li>回到这里，整段 <span className="text-ink-300">粘</span> 进下面的框</li>
+                </ol>
+                <p className="mt-1">认 YouTube 那种「时间戳+文字」，也认 .srt / .vtt。没有 CC 就用下面的「自动生成」。</p>
+              </div>
+            ) : (
+              <label htmlFor="caption-draft" className="text-xs leading-5 text-ink-500">
+                把 .srt 或 .vtt 的内容整段贴进来（要带{" "}
+                <span className="ui-mono">00:00:12,340 --&gt; 00:00:15,000</span> 这样的时间轴）。
+                自动转写不灵的时候，这里永远是最后一条路。
+              </label>
+            )}
             <textarea
               id="caption-draft"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               rows={6}
               className="w-full rounded-xl border border-ink-500/70 bg-ink-900 p-3 text-xs leading-5 text-ink-100 outline-none focus:border-teal-400"
-              placeholder={"1\n00:00:00,000 --> 00:00:03,200\n第一句话"}
+              placeholder={youtube ? "0:00\n第一句话\n0:04\n第二句话" : "1\n00:00:00,000 --> 00:00:03,200\n第一句话"}
             />
             <div className="flex gap-2">
               <button
@@ -252,30 +272,56 @@ export function CaptionLayer({
               <p role="alert" className="text-xs leading-5 text-red-400">
                 {generation.error}
               </p>
+            ) : youtube ? (
+              <p className="text-xs leading-5 text-ink-500">
+                这个视频<span className="text-ink-300">有字幕(CC)吗？自己粘过来免费又快</span>。没有 CC 的再用「自动生成」。
+              </p>
             ) : (
               <p className="text-xs leading-5 text-ink-500">还没有字幕。</p>
             )}
 
-            {!generation?.running && (
-              <div className="flex flex-wrap gap-2">
-                {generation && (
+            {!generation?.running &&
+              // YouTube：粘贴是主按钮（免费），自动生成降为次选（要花钱，只给没 CC 的）。
+              // 播客：没有可粘的 CC，自动转写（Whisper）才是主按钮。
+              (youtube ? (
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={generation.onRun}
+                    onClick={() => setPasting(true)}
                     className="min-h-11 flex-1 rounded-xl bg-teal-400 px-4 text-sm font-semibold text-teal-950"
                   >
-                    {generation.error ? "重试" : generation.resumable ? "继续生成" : "生成字幕"}
+                    粘贴字幕（免费）
                   </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setPasting(true)}
-                  className="min-h-11 rounded-xl border border-ink-700 px-4 text-sm text-ink-300"
-                >
-                  手动粘贴
-                </button>
-              </div>
-            )}
+                  {generation && (
+                    <button
+                      type="button"
+                      onClick={generation.onRun}
+                      className="min-h-11 rounded-xl border border-ink-700 px-4 text-sm text-ink-300"
+                    >
+                      {generation.error ? "重试" : generation.resumable ? "继续生成" : "没有字幕？自动生成"}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {generation && (
+                    <button
+                      type="button"
+                      onClick={generation.onRun}
+                      className="min-h-11 flex-1 rounded-xl bg-teal-400 px-4 text-sm font-semibold text-teal-950"
+                    >
+                      {generation.error ? "重试" : generation.resumable ? "继续生成" : "生成字幕"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPasting(true)}
+                    className="min-h-11 rounded-xl border border-ink-700 px-4 text-sm text-ink-300"
+                  >
+                    手动粘贴
+                  </button>
+                </div>
+              ))}
           </div>
         )
       ) : !on ? null : (

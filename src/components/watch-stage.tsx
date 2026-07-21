@@ -311,6 +311,11 @@ export function WatchStage({
     // 每开一次页面重试一次只是白烧额度再报同一句错。
     if (source.transcript_status !== "pending" && source.transcript_status !== "partial") return;
 
+    // YouTube 从没转过（pending）的，**不自动烧 Gemini** —— 它多半自带 CC，
+    // 让用户先免费粘（caption-layer 会引导）。真没 CC 再手动点「自动生成」。
+    // 但转了一半（partial）的仍自动接着跑：那说明用户已经选了 Gemini，别让它僵在半路。
+    if (source.kind === "youtube" && source.transcript_status === "pending") return;
+
     let cancelled = false;
     let tries = 0;
 
@@ -481,6 +486,7 @@ export function WatchStage({
       <CaptionLayer
         sourceId={source.id}
         transcript={transcript}
+        kind={source.kind}
         getCurrentTime={getCurrentTime}
         onSeek={handleSeek}
         generation={{
