@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
+import { putCachedTranscript } from "@/lib/transcript/cache";
 
 // M1a — 单条内容源的更新与删除。
 // PATCH：回写真实时长（oEmbed 给不了，只有播放器就绪后才知道）与"看到第几秒"。
@@ -98,6 +99,20 @@ export async function PATCH(
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // 用户手动粘贴的字幕，也回填跨用户缓存（D31）—— 桌面用户从 YouTube「显示转录」
+  // 粘一次，手机用户打开同一支就直接白拿。字幕是公共内容，共享无隐私顾虑。
+  if (patch.transcript) {
+    const { data: row } = await supabase
+      .from("sources")
+      .select("external_id, kind")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (row?.external_id) {
+      await putCachedTranscript(supabase, row.external_id, row.kind, patch.transcript);
+    }
   }
 
   return NextResponse.json({ ok: true });

@@ -221,10 +221,12 @@ export function WatchStage({
    *
    * 落库在服务端那边做，这里只负责显示：中途断了也不丢，重进页面还在。
    */
-  const runTranscription = useCallback(async () => {
+  const runTranscription = useCallback(async (cacheOnly = false) => {
     if (runningRef.current) return;
     runningRef.current = true;
-    setGen({ running: true, coveredS: null, error: "" });
+    // 只查缓存那次是"静默"的：命中就让字幕自己冒出来，没命中什么都不显示，
+    // 别闪一下"生成中"再缩回去。真要花钱转时才亮出进度。
+    if (!cacheOnly) setGen({ running: true, coveredS: null, error: "" });
 
     let complete = false;
     let note = "";
@@ -236,6 +238,7 @@ export function WatchStage({
           sourceId: source.id,
           // 播放器知道的时长比库里准（YouTube 的 oEmbed 给不了时长）
           durationS: handleRef.current?.getDuration() || undefined,
+          cacheOnly: cacheOnly || undefined,
         }),
       });
       if (!res.ok || !res.body) {
@@ -288,15 +291,20 @@ export function WatchStage({
             setStatus("failed");
             throw new Error(event.message ?? "字幕没生成出来");
           }
+          // event.type === "miss"：缓存没命中。什么都不做 —— 状态留 pending，
+          // 让 YouTube 的「生成字幕」按钮候着，等用户真要花钱时再点。
         }
       }
-      setGen({ running: false, coveredS: null, error: note });
+      if (!cacheOnly) setGen({ running: false, coveredS: null, error: note });
     } catch (e) {
-      setGen({
-        running: false,
-        coveredS: null,
-        error: e instanceof Error ? e.message : "字幕没生成出来，稍后再试",
-      });
+      // 只查缓存那次失败就默默算了（多半是迁移还没跑），别拿红字吓用户
+      if (!cacheOnly) {
+        setGen({
+          running: false,
+          coveredS: null,
+          error: e instanceof Error ? e.message : "字幕没生成出来，稍后再试",
+        });
+      }
     } finally {
       runningRef.current = false;
     }
@@ -311,18 +319,23 @@ export function WatchStage({
     // 每开一次页面重试一次只是白烧额度再报同一句错。
     if (source.transcript_status !== "pending" && source.transcript_status !== "partial") return;
 
-    // YouTube 从没转过（pending）的，**不自动烧 Gemini** —— 它多半自带 CC，
-    // 让用户先免费粘（caption-layer 会引导）。真没 CC 再手动点「自动生成」。
-    // 但转了一半（partial）的仍自动接着跑：那说明用户已经选了 Gemini，别让它僵在半路。
-    if (source.kind === "youtube" && source.transcript_status === "pending") return;
-
     let cancelled = false;
     let tries = 0;
 
     const tick = async () => {
       if (cancelled) return;
-      // 等播放器把真实时长报上来（最多等 5 秒）——
-      // 时长不知道就只能盲切，知道了才切得准、也才知道什么时候算转完
+
+      // YouTube 从没转过（pending）：**只免费查一次缓存**（D31）——
+      // 别人转过这支就直接白拿、零点击零等待；没人转过就此打住，
+      // 等用户按「生成字幕」再花钱走 Gemini。绝不打开就自动烧钱。
+      // 缓存检查不需要时长，立刻打。
+      if (source.kind === "youtube" && source.transcript_status === "pending") {
+        await runTranscription(true);
+        return;
+      }
+
+      // 其余（YouTube 转了一半要续 / 播客自动转）：这些是真要转的，
+      // 先等播放器报真实时长（最多等 5 秒）—— 不知道时长就切不准、也不知何时算转完。
       if (!durationKnownRef.current && tries++ < 10) {
         window.setTimeout(tick, 500);
         return;
@@ -330,7 +343,7 @@ export function WatchStage({
       // 一次最多接力 3 轮（服务端每轮有 240 秒软预算）。再长的内容
       // 交给用户按「继续生成」—— 每一按都是真金白银，不该由代码替他连按
       for (let round = 0; round < 3 && !cancelled; round++) {
-        const done = await runTranscription();
+        const done = await runTranscription(false);
         if (done !== false) break;
       }
     };
@@ -339,7 +352,7 @@ export function WatchStage({
     return () => {
       cancelled = true;
     };
-  }, [source.transcript_status, runTranscription]);
+  }, [source.transcript_status, source.kind, runTranscription]);
 
   /** 1c-fix / D19：删掉一个误点的捕获点。先从条上撤下来，失败再放回去 */
   const handleDelete = useCallback(async (id: string) => {

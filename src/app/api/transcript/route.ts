@@ -3,6 +3,7 @@ import { z } from "zod";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { providersFor } from "@/lib/transcript/registry";
+import { getCachedTranscript, putCachedTranscript } from "@/lib/transcript/cache";
 import { TranscribeError, type TranscriptProgress } from "@/lib/transcript/types";
 import { MAX_SEGMENTS } from "@/lib/captions";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
@@ -26,10 +27,28 @@ const bodySchema = z.object({
   sourceId: z.string().uuid(),
   /** 播放器就绪后客户端才知道真实时长，比库里的新，优先用它 */
   durationS: z.number().positive().max(24 * 3600).optional(),
+  /**
+   * 只查缓存、不花钱转（D31）。YouTube 打开时客户端用它免费探一下：
+   * 别人转过就直接白拿，没人转过就此打住，等用户按「生成字幕」再花钱。
+   */
+  cacheOnly: z.boolean().optional(),
 });
+
+const NDJSON_HEADERS = {
+  "content-type": "application/x-ndjson; charset=utf-8",
+  "cache-control": "no-store",
+  // 别让任何中间层攒着不发 —— 流式的意义就在于第一块立刻到屏幕上
+  "x-accel-buffering": "no",
+} as const;
 
 function line(payload: unknown): Uint8Array {
   return new TextEncoder().encode(`${JSON.stringify(payload)}\n`);
+}
+
+/** 一次性把几行 NDJSON 直接吐完（缓存命中 / cacheOnly 未命中，不需要开流慢慢推） */
+function ndjsonOnce(payloads: unknown[]): Response {
+  const text = payloads.map((p) => `${JSON.stringify(p)}\n`).join("");
+  return new Response(text, { headers: NDJSON_HEADERS });
 }
 
 export async function POST(request: Request) {
@@ -92,14 +111,6 @@ export async function POST(request: Request) {
     );
   }
 
-  // 占坑：状态先置 partial。浏览器只在 pending / failed 时自动敲，
-  // 所以这一步同时挡住了"两个标签页同时开转"的重复消费。
-  await supabase
-    .from("sources")
-    .update({ transcript_status: "partial" })
-    .eq("id", source.id)
-    .eq("user_id", user.id);
-
   const startedAt = Date.now();
   const remainingMs = () => BUDGET_MS - (Date.now() - startedAt);
 
@@ -111,6 +122,33 @@ export async function POST(request: Request) {
     if (lang) patch.content_lang = lang;
     await supabase.from("sources").update(patch).eq("id", source.id).eq("user_id", user.id);
   };
+
+  // === 缓存优先（D31）：同一支内容别人转过，就直接白拿，零成本零延迟。 ===
+  // content_key = external_id（youtube=videoId / podcast=feedUrl#guid），跨用户共享。
+  const contentKey = source.external_id;
+  const cacheOnly = parsed.data.cacheOnly === true;
+  if (contentKey) {
+    const cached = await getCachedTranscript(supabase, contentKey);
+    if (cached) {
+      await save(cached.segments, "ready", cached.lang);
+      return ndjsonOnce([
+        { type: "start", existing: cached.segments.length, totalS: durationS, cached: true },
+        { type: "done", provider: "cache", complete: true, segments: cached.segments, cached: true },
+      ]);
+    }
+  }
+  // 只查缓存的那次（YouTube 打开时免费探一下）：没命中就此打住，绝不自动花钱转。
+  if (cacheOnly) {
+    return ndjsonOnce([{ type: "start", existing: 0, totalS: durationS }, { type: "miss" }]);
+  }
+
+  // 走到这才真要花钱转 —— 现在才占坑：状态置 partial。浏览器只在 pending / failed
+  // 时自动敲，所以这一步同时挡住了"两个标签页同时开转"的重复消费。
+  await supabase
+    .from("sources")
+    .update({ transcript_status: "partial" })
+    .eq("id", source.id)
+    .eq("user_id", user.id);
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -141,6 +179,10 @@ export async function POST(request: Request) {
 
           const status = result.complete ? "ready" : "partial";
           await save(result.segments, status, result.lang);
+          // 转完整了就写回缓存，给后来人白拿（只写 complete 的，半截的会坑下一个人）
+          if (result.complete && contentKey) {
+            await putCachedTranscript(supabase, contentKey, source.kind, result.segments, result.lang);
+          }
           push({
             type: "done",
             provider: provider.name,
@@ -168,12 +210,5 @@ export async function POST(request: Request) {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "content-type": "application/x-ndjson; charset=utf-8",
-      "cache-control": "no-store",
-      // 别让任何中间层攒着不发 —— 流式的意义就在于第一块立刻到屏幕上
-      "x-accel-buffering": "no",
-    },
-  });
+  return new Response(stream, { headers: NDJSON_HEADERS });
 }

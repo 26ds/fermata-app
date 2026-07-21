@@ -211,13 +211,13 @@ export function CaptionLayer({
           <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-ink-700 p-3">
             {youtube ? (
               <div className="text-xs leading-5 text-ink-500">
-                <p className="mb-1 text-ink-300">这个视频有字幕(CC)的话，自己粘过来最快、免费 —— 三步：</p>
+                <p className="mb-1 text-ink-300">有字幕(CC)的话，粘过来免费（手机上没有「显示转录」入口，这条要在电脑上做）：</p>
                 <ol className="ml-4 list-decimal space-y-0.5">
-                  <li>在 YouTube 打开这个视频 → 视频下方「<span className="text-ink-300">...更多</span>」→「<span className="text-ink-300">显示转录 / Show transcript</span>」</li>
-                  <li>在弹出的转录里长按/右键 <span className="text-ink-300">全选、复制</span></li>
+                  <li>电脑浏览器打开这个视频 → 视频下方「<span className="text-ink-300">...更多</span>」→「<span className="text-ink-300">显示转录 / Show transcript</span>」</li>
+                  <li>在弹出的转录里 <span className="text-ink-300">全选、复制</span></li>
                   <li>回到这里，整段 <span className="text-ink-300">粘</span> 进下面的框</li>
                 </ol>
-                <p className="mt-1">认 YouTube 那种「时间戳+文字」，也认 .srt / .vtt。没有 CC 就用下面的「自动生成」。</p>
+                <p className="mt-1">认 YouTube 那种「时间戳+文字」，也认 .srt / .vtt。手机上直接用「生成字幕」就行。</p>
               </div>
             ) : (
               <label htmlFor="caption-draft" className="text-xs leading-5 text-ink-500">
@@ -274,54 +274,34 @@ export function CaptionLayer({
               </p>
             ) : youtube ? (
               <p className="text-xs leading-5 text-ink-500">
-                这个视频<span className="text-ink-300">有字幕(CC)吗？自己粘过来免费又快</span>。没有 CC 的再用「自动生成」。
+                点<span className="text-ink-300">「生成字幕」</span>一键自动生成（约二十秒）。在电脑上打开、这视频有 CC 的话，也可以「粘贴字幕」免费拿。
               </p>
             ) : (
               <p className="text-xs leading-5 text-ink-500">还没有字幕。</p>
             )}
 
-            {!generation?.running &&
-              // YouTube：粘贴是主按钮（免费），自动生成降为次选（要花钱，只给没 CC 的）。
-              // 播客：没有可粘的 CC，自动转写（Whisper）才是主按钮。
-              (youtube ? (
-                <div className="flex flex-wrap gap-2">
+            {!generation?.running && (
+              // 手机上「显示转录」没入口，粘贴基本只对电脑用户成立（D30/D28）。
+              // 所以「生成字幕」（一键，命中缓存则免费）永远是主按钮，粘贴降为次选。
+              <div className="flex flex-wrap gap-2">
+                {generation && (
                   <button
                     type="button"
-                    onClick={() => setPasting(true)}
+                    onClick={generation.onRun}
                     className="min-h-11 flex-1 rounded-xl bg-teal-400 px-4 text-sm font-semibold text-teal-950"
                   >
-                    粘贴字幕（免费）
+                    {generation.error ? "重试" : generation.resumable ? "继续生成" : "生成字幕"}
                   </button>
-                  {generation && (
-                    <button
-                      type="button"
-                      onClick={generation.onRun}
-                      className="min-h-11 rounded-xl border border-ink-700 px-4 text-sm text-ink-300"
-                    >
-                      {generation.error ? "重试" : generation.resumable ? "继续生成" : "没有字幕？自动生成"}
-                    </button>
-                  )}
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {generation && (
-                    <button
-                      type="button"
-                      onClick={generation.onRun}
-                      className="min-h-11 flex-1 rounded-xl bg-teal-400 px-4 text-sm font-semibold text-teal-950"
-                    >
-                      {generation.error ? "重试" : generation.resumable ? "继续生成" : "生成字幕"}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setPasting(true)}
-                    className="min-h-11 rounded-xl border border-ink-700 px-4 text-sm text-ink-300"
-                  >
-                    手动粘贴
-                  </button>
-                </div>
-              ))}
+                )}
+                <button
+                  type="button"
+                  onClick={() => setPasting(true)}
+                  className="min-h-11 rounded-xl border border-ink-700 px-4 text-sm text-ink-300"
+                >
+                  {youtube ? "粘贴字幕" : "手动粘贴"}
+                </button>
+              </div>
+            )}
           </div>
         )
       ) : !on ? null : (
