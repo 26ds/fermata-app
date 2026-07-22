@@ -6,7 +6,7 @@ import { SetupNotice } from "@/components/setup-notice";
 import { ImportForm } from "@/components/import-form";
 import { SourceList, type SourceListItem } from "@/components/source-list";
 
-const BASE_COLUMNS = "id, kind, title, url, duration_s";
+const BASE_COLUMNS = "id, kind, title, url, external_id, duration_s";
 
 // M1a — 播放器入口：贴链接导入 + 已导入内容列表（全部 ｜ 收藏，见 D16）。
 export default async function WatchPage({

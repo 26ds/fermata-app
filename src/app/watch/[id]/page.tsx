@@ -6,6 +6,7 @@ import { SetupNotice } from "@/components/setup-notice";
 import { WatchStage } from "@/components/watch-stage";
 import type { InterruptPoint } from "@/components/dot-bar";
 import type { SourceRow } from "@/lib/types";
+import { sourceOriginUrl } from "@/lib/source-origin";
 
 // M1a — 观看页。RLS 保证只能查到自己的 source，查不到就是 404。
 export default async function WatchDetailPage({
@@ -31,6 +32,7 @@ export default async function WatchDetailPage({
     .maybeSingle();
   if (!data) notFound();
   const source = data as SourceRow;
+  const origin = sourceOriginUrl(source);
 
   // 点点条首屏就该有历史点，所以顺手一起取（RLS 保证只查得到自己的）
   const { data: interruptRows } = await supabase
@@ -50,8 +52,22 @@ export default async function WatchDetailPage({
         <Link href="/watch" aria-label="返回播放器列表" className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300">
           <span aria-hidden>←</span>
         </Link>
+        {/* 标题点一下回到原网页（YouTube 观看页 / 小宇宙单集页）。取不到就是纯文字。 */}
         <h1 className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-ink-100">
-          {source.title ?? "未命名内容"}
+          {origin ? (
+            <a
+              href={origin}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`在原网站打开：${source.title ?? "这条内容"}`}
+              className="group inline-flex max-w-full items-center gap-1 hover:text-teal-300"
+            >
+              <span className="truncate">{source.title ?? "未命名内容"}</span>
+              <span aria-hidden className="shrink-0 text-ink-400 transition-colors group-hover:text-teal-300">↗</span>
+            </a>
+          ) : (
+            (source.title ?? "未命名内容")
+          )}
         </h1>
       </header>
 

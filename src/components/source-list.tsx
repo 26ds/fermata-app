@@ -3,12 +3,14 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { sourceOriginUrl } from "@/lib/source-origin";
 
 export interface SourceListItem {
   id: string;
   kind: string;
   title: string | null;
   url: string | null;
+  external_id: string | null;
   duration_s: number | null;
   last_position_s: number | null;
   pinned_at: string | null;
@@ -188,6 +190,22 @@ export function SourceList({
                 </span>
               </span>
             </Link>
+
+            {/* ↗ 回到原网页：跟「⋯」一样放在 Link 外面，点它开原站、不误触进播放器 */}
+            {(() => {
+              const origin = sourceOriginUrl(s);
+              return origin ? (
+                <a
+                  href={origin}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`在原网站打开：${s.title ?? "这条内容"}`}
+                  className="flex h-11 w-8 shrink-0 items-center justify-center text-base text-ink-500 hover:text-teal-300"
+                >
+                  ↗
+                </a>
+              ) : null;
+            })()}
 
             {/* 「⋯」必须在 Link 外面，否则点它会先跳转 */}
             <button
