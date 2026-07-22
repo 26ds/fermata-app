@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { activeSegmentIndex, parseTranscript } from "@/lib/captions";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
+import { TARGET_LANGS } from "@/lib/translate/langs";
 
 // M1d — 字幕层（D4）：开关 + 字号 14–28px（存 localStorage）+ 行宽自适应（.caption-copy）
 // + 跟着播放走的高亮。点某一句 = 跳到那一句，跟点点条同一个手感。
@@ -16,6 +17,11 @@ const SIZE_KEY = "fermata.captions.size";
 const SIZE_MIN = 14;
 const SIZE_MAX = 28;
 const SIZE_DEFAULT = 18;
+
+// M2.9 双语字幕：语言、flip（谁大）、只当前行 —— 都记 localStorage，下次记住。
+const LANG_KEY = "fermata.captions.lang"; // "" = 关闭
+const FLIP_KEY = "fermata.captions.flip"; // "1" = 译文大原文小
+const TRONLY_KEY = "fermata.captions.tronly"; // "1" = 只在当前行显示译文
 
 /** M2a：自动转写的进展。上层（watch-stage）驱动，这里只负责说人话 */
 export interface CaptionGeneration {
@@ -65,6 +71,17 @@ export function CaptionLayer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  // === M2.9 双语字幕 ===
+  // 初值一律取"关闭/默认"，与 SSR 一致；挂载后再读 localStorage（避免水合不一致）。
+  const [lang, setLang] = useState(""); // "" = 不显示译文
+  const [flip, setFlip] = useState(false); // true = 译文大原文小
+  const [trOnlyCurrent, setTrOnlyCurrent] = useState(false); // true = 只在当前行显示译文
+  const [tr, setTr] = useState<Map<number, string>>(new Map()); // 字幕下标 → 译文
+  const [trRunning, setTrRunning] = useState(false);
+  const [trDone, setTrDone] = useState(0);
+  const [trTotal, setTrTotal] = useState(0);
+  const [trNote, setTrNote] = useState(""); // 翻译失败/未翻完的人话
+
   const activeRef = useRef<HTMLLIElement>(null);
   const rootRef = useRef<HTMLElement>(null);
   const sliderRef = useRef<HTMLInputElement | null>(null);
@@ -109,6 +126,100 @@ export function CaptionLayer({
     }
     applySize(stored);
   }, [applySize]);
+
+  // 挂载后读回上次选的语言 / flip / 只当前行（放 effect 里，避开 SSR 水合不一致）
+  useEffect(() => {
+    try {
+      const savedLang = localStorage.getItem(LANG_KEY);
+      if (savedLang) setLang(savedLang);
+      if (localStorage.getItem(FLIP_KEY) === "1") setFlip(true);
+      if (localStorage.getItem(TRONLY_KEY) === "1") setTrOnlyCurrent(true);
+    } catch {
+      // 隐私模式读不到：用默认（不显示译文），不影响看原文
+    }
+  }, []);
+
+  // 选了语言就去翻译。命中缓存瞬间全出；否则流式 NDJSON，边翻边显示进度。
+  // 换语言 / 组件卸载时中断上一次请求，避免旧译文覆盖新译文。
+  useEffect(() => {
+    if (!lang) {
+      setTr(new Map());
+      setTrRunning(false);
+      setTrNote("");
+      setTrDone(0);
+      setTrTotal(0);
+      return;
+    }
+    if (segments.length === 0) return; // 还没字幕，没得翻
+
+    const ctrl = new AbortController();
+    setTrRunning(true);
+    setTrNote("");
+    setTrDone(0);
+    setTrTotal(segments.length);
+
+    (async () => {
+      try {
+        const res = await fetch("/api/translate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sourceId, targetLang: lang }),
+          signal: ctrl.signal,
+        });
+        if (!res.ok || !res.body) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error ?? "翻译服务没响应");
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = buf.indexOf("\n")) >= 0) {
+            const raw = buf.slice(0, nl);
+            buf = buf.slice(nl + 1);
+            if (!raw.trim()) continue;
+            const ev = JSON.parse(raw) as {
+              type: string;
+              total?: number;
+              done?: number;
+              translations?: { i: number; text: string }[];
+              note?: string | null;
+              message?: string;
+            };
+            if (ev.type === "start") {
+              if (ev.total) setTrTotal(ev.total);
+            } else if (ev.type === "partial" || ev.type === "done") {
+              if (ev.translations) {
+                const next = new Map<number, string>();
+                for (const t of ev.translations) next.set(t.i, t.text);
+                setTr(next);
+                setTrDone(ev.done ?? ev.translations.length);
+              }
+              if (ev.type === "done" && ev.note) setTrNote(ev.note);
+            } else if (ev.type === "same-language") {
+              setTr(new Map()); // 原文就是这个语言，不显示译文
+              setTrNote("这条内容的原文就是这个语言。");
+            } else if (ev.type === "error") {
+              setTrNote(ev.message ?? "翻译没成，稍后再试。");
+            }
+          }
+        }
+      } catch (e) {
+        if (!ctrl.signal.aborted) {
+          setTrNote(e instanceof Error ? e.message : "翻译没成，稍后再试。");
+        }
+      } finally {
+        if (!ctrl.signal.aborted) setTrRunning(false);
+      }
+    })();
+
+    return () => ctrl.abort();
+    // 只在语言 / 内容切换时重来。segments.length 进依赖：字幕从无到有后能自动补翻。
+  }, [lang, sourceId, segments.length]);
 
   // 每 250ms 问一次时间，但**只有跨句时才 setState** ——
   // 一句字幕少说两三秒，于是重渲染从每秒 4 次降到每句 1 次。
@@ -165,6 +276,36 @@ export function CaptionLayer({
     generation?.totalS && generation.coveredS != null
       ? Math.min(99, Math.round((generation.coveredS / generation.totalS) * 100))
       : null;
+
+  // === M2.9 派生值 + 持久化处理器 ===
+  const trPercent = trTotal > 0 ? Math.min(99, Math.round((trDone / trTotal) * 100)) : null;
+  const showTranslation = !!lang && tr.size > 0;
+
+  const pickLang = (v: string) => {
+    setLang(v);
+    try {
+      if (v) localStorage.setItem(LANG_KEY, v);
+      else localStorage.removeItem(LANG_KEY);
+    } catch {
+      /* 存不进不致命，只是下次不记得 */
+    }
+  };
+  const toggleFlip = () =>
+    setFlip((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(FLIP_KEY, next ? "1" : "0");
+      } catch {}
+      return next;
+    });
+  const toggleOnlyCurrent = () =>
+    setTrOnlyCurrent((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem(TRONLY_KEY, next ? "1" : "0");
+      } catch {}
+      return next;
+    });
 
   return (
     <section
@@ -332,10 +473,59 @@ export function CaptionLayer({
             </span>
           </div>
 
+          {/* M2.9 双语字幕：选语言（默认关闭）+ flip 对调大小 + 只当前行 + 进度 */}
+          <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-[0.68rem]">
+            <span className="text-ink-500">译文</span>
+            <select
+              value={lang}
+              onChange={(e) => pickLang(e.target.value)}
+              aria-label="译文语言"
+              className="h-8 rounded-lg border border-ink-700 bg-ink-900 px-2 text-ink-100 outline-none focus:border-teal-400"
+            >
+              <option value="">关闭</option>
+              {TARGET_LANGS.map((l) => (
+                <option key={l.code} value={l.code}>
+                  {l.label}
+                </option>
+              ))}
+            </select>
+            {lang && (
+              <>
+                <button
+                  type="button"
+                  onClick={toggleFlip}
+                  aria-label="对调原文与译文的大小"
+                  className="h-8 rounded-lg px-2 text-ink-300 hover:text-teal-300"
+                >
+                  {flip ? "译文大 ⇅" : "原文大 ⇅"}
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleOnlyCurrent}
+                  aria-pressed={trOnlyCurrent}
+                  className={`h-8 rounded-lg px-2 transition-colors ${
+                    trOnlyCurrent ? "text-teal-300" : "text-ink-500 hover:text-ink-300"
+                  }`}
+                >
+                  {trOnlyCurrent ? "只当前行" : "每行译文"}
+                </button>
+                {trRunning && (
+                  <span className="ui-mono text-teal-300/80">
+                    翻译中{trPercent != null ? ` ${trPercent}%` : "…"}
+                  </span>
+                )}
+              </>
+            )}
+            {trNote && !trRunning && <span className="text-ink-400">{trNote}</span>}
+          </div>
+
           <div className="mt-2 max-h-64 overflow-y-auto rounded-2xl border border-ink-700 p-2">
             <ul className="caption-copy flex flex-col">
               {segments.map((seg, i) => {
                 const isActive = i === active;
+                // 这一行显不显示译文：开了语言 + 这句有译文 +（每行显示 或 正好是当前行）
+                const translation = showTranslation ? tr.get(i) : undefined;
+                const lineShowsTr = !!translation && (!trOnlyCurrent || isActive);
                 return (
                   <li key={`${seg.start}-${i}`} ref={isActive ? activeRef : null}>
                     <button
@@ -348,9 +538,21 @@ export function CaptionLayer({
                       <span className="ui-mono shrink-0 pt-0.5 text-[0.68rem] text-ink-500">
                         {mmss(seg.start)}
                       </span>
-                      <span style={{ fontSize: "var(--caption-size)", lineHeight: 1.5 }}>
-                        {seg.text}
-                      </span>
+                      {lineShowsTr ? (
+                        // 原文大译文小（缩约 13% 给译文让位）；flip 后对调谁大、谁在上。
+                        <span className="flex min-w-0 flex-col gap-0.5" style={{ lineHeight: 1.4 }}>
+                          <span style={{ fontSize: "calc(var(--caption-size) * 0.87)" }}>
+                            {flip ? translation : seg.text}
+                          </span>
+                          <span className="opacity-65" style={{ fontSize: "calc(var(--caption-size) * 0.61)" }}>
+                            {flip ? seg.text : translation}
+                          </span>
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: "var(--caption-size)", lineHeight: 1.5 }}>
+                          {seg.text}
+                        </span>
+                      )}
                     </button>
                   </li>
                 );
