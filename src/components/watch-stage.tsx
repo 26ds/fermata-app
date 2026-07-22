@@ -58,10 +58,25 @@ export function WatchStage({
   const orbReadyRef = useRef(false);
   const [orbReady, setOrbReady] = useState(false);
   const [points, setPoints] = useState<InterruptPoint[]>(interrupts);
-  const [panel, setPanel] = useState<{ open: boolean; tS: number; id: string | null }>({
+  const [panel, setPanel] = useState<{
+    open: boolean;
+    tS: number;
+    id: string | null;
+    captured: boolean;
+  }>({
     open: false,
     tS: 0,
     id: null,
+    captured: false,
+  });
+  // 这条打断点落库的 promise —— handleAsk 直接 await，避免"刚开面板就问"时重复落库
+  const panelIdRef = useRef<Promise<string | null> | null>(null);
+  const panelTSRef = useRef(0);
+  // M3 打断问答：流式答案状态
+  const [ask, setAsk] = useState<{ asking: boolean; answer: string; error: string }>({
+    asking: false,
+    answer: "",
+    error: "",
   });
 
   // 服务端数据变了（router.refresh 之后）就跟着换。渲染期校正，不用 effect
@@ -112,36 +127,6 @@ export function WatchStage({
     [savePosition],
   );
 
-  // ── 打断面板的开关 ──
-  const openPanel = useCallback((tS: number, id: string | null) => {
-    // 同步置位：紧接着的 pause 回调要靠它判断"这是我们自己按停的"
-    panelOpenRef.current = true;
-    if (playingRef.current) {
-      // 是我们把它按停的 → 关面板时恢复播放
-      resumeOnCloseRef.current = true;
-      handleRef.current?.pause();
-    } else {
-      // 用户自己停的 → 关面板时别擅自续播
-      resumeOnCloseRef.current = false;
-    }
-    setPanel({ open: true, tS, id });
-  }, []);
-
-  const closePanel = useCallback(() => {
-    panelOpenRef.current = false;
-    setPanel((p) => ({ ...p, open: false }));
-    if (resumeOnCloseRef.current) {
-      resumeOnCloseRef.current = false;
-      handleRef.current?.play();
-    }
-  }, []);
-
-  /** 用户真的按了暂停（缓冲/播放结束不算，见 PlayerProps.onPause） */
-  const handlePause = useCallback(() => {
-    if (panelOpenRef.current) return; // 面板已经开着（多半是我们自己按停的）
-    openPanel(currentTimeRef.current, null);
-  }, [openPanel]);
-
   const postInterrupt = useCallback(
     async (tS: number, mode: QuestionMode | null): Promise<InterruptPoint> => {
       const res = await fetch("/api/interrupts", {
@@ -156,49 +141,140 @@ export function WatchStage({
     [source.id],
   );
 
-  /** 轻点悬浮球 = 记下这一刻。点先画上去，落库回来再换真 id */
-  const captureNow = useCallback(() => {
-    const t = currentTimeRef.current;
-    openPanel(t, null);
-    const tempId = `temp-${Date.now()}`;
-    setPoints((prev) => [...prev, { id: tempId, t_s: t, question_mode: null }]);
-    void postInterrupt(t, null)
-      .then((saved) => {
-        setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
-        // 落库成功 → 面板从"还没记"切成"已记下"，chip 改走 PATCH
-        setPanel((p) => (p.open && p.id === null ? { ...p, id: saved.id } : p));
-      })
-      .catch(() => {
-        // 没存上就把这个假点撤掉，别留一个点不回去的点。
-        // 面板仍开着且 id 还是 null，用户可以在里面重试。
-        setPoints((prev) => prev.filter((p) => p.id !== tempId));
-      });
-  }, [openPanel, postInterrupt]);
+  // ── 打断面板的开关 ──
+  // capture=true（点球）：开面板同时把这一刻记下来（乐观先画点，落库回来换真 id）。
+  // capture=false（暂停）：先开面板不落库 —— 用户可能只是停下想想，真问了再记（handleAsk）。
+  const openPanel = useCallback(
+    (tS: number, capture: boolean) => {
+      // 同步置位：紧接着的 pause 回调靠它判断"这是我们自己按停的"
+      panelOpenRef.current = true;
+      panelTSRef.current = tS;
+      if (playingRef.current) {
+        resumeOnCloseRef.current = true;
+        handleRef.current?.pause();
+      } else {
+        resumeOnCloseRef.current = false;
+      }
+      setAsk({ asking: false, answer: "", error: "" }); // 新一轮问答，清掉上次答案
+      setPanel({ open: true, tS, id: null, captured: capture });
 
-  /** 面板里选了一个类型：已落库就补类型，没落库就带着类型落库 */
-  async function handlePick(mode: QuestionMode) {
-    const { id, tS } = panel;
-    if (id) {
-      const res = await fetch(`/api/interrupts/${id}`, {
-        method: "PATCH",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ questionMode: mode }),
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "没记下来，请重试");
-      setPoints((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, question_mode: mode } : p)),
-      );
-    } else {
-      const saved = await postInterrupt(tS, mode);
-      setPoints((prev) => [...prev, saved]);
+      if (capture) {
+        const tempId = `temp-${Date.now()}`;
+        setPoints((prev) => [...prev, { id: tempId, t_s: tS, question_mode: null }]);
+        // 落库做成 promise，handleAsk 直接 await —— 避免"点球刚开面板就问"重复落库
+        panelIdRef.current = postInterrupt(tS, null)
+          .then((saved) => {
+            setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+            setPanel((p) => (p.open && p.id === null ? { ...p, id: saved.id } : p));
+            return saved.id;
+          })
+          .catch(() => {
+            setPoints((prev) => prev.filter((p) => p.id !== tempId)); // 没存上撤掉假点
+            return null;
+          });
+      } else {
+        panelIdRef.current = null; // 还没落库，等真问了再记
+      }
+    },
+    [postInterrupt],
+  );
+
+  const closePanel = useCallback(() => {
+    panelOpenRef.current = false;
+    setPanel((p) => ({ ...p, open: false }));
+    if (resumeOnCloseRef.current) {
+      resumeOnCloseRef.current = false;
+      handleRef.current?.play();
     }
-    closePanel();
-  }
+  }, []);
 
-  /** 不选类型，只记下这一刻 */
+  /** 用户真的按了暂停（缓冲/播放结束不算，见 PlayerProps.onPause） */
+  const handlePause = useCallback(() => {
+    if (panelOpenRef.current) return; // 面板已经开着（多半是我们自己按停的）
+    openPanel(currentTimeRef.current, false);
+  }, [openPanel]);
+
+  /** 轻点悬浮球 = 记下这一刻并开面板 */
+  const captureNow = useCallback(() => {
+    openPanel(currentTimeRef.current, true);
+  }, [openPanel]);
+
+  /** 问一句：确保这刻已落库（拿到 interruptId）→ 流式取 /api/ask，边收边显示 */
+  const handleAsk = useCallback(
+    async (question: string) => {
+      setAsk({ asking: true, answer: "", error: "" });
+      try {
+        // 点球开的面板已经在落库（await 那个 promise）；暂停开的还没落库，这会儿才记（标 free）
+        let idPromise = panelIdRef.current;
+        if (!idPromise) {
+          idPromise = postInterrupt(panelTSRef.current, "free")
+            .then((saved) => {
+              setPoints((prev) => [...prev, saved]);
+              setPanel((p) => (p.open && p.id === null ? { ...p, id: saved.id, captured: true } : p));
+              return saved.id;
+            })
+            .catch(() => null);
+          panelIdRef.current = idPromise;
+        }
+        const id = await idPromise;
+        if (!id) throw new Error("没记下这一刻，稍后再问一次");
+
+        const res = await fetch("/api/ask", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ interruptId: id, question }),
+        });
+        if (!res.ok || !res.body) {
+          const b = await res.json().catch(() => ({}));
+          throw new Error(b.error ?? "没答出来，稍后再试");
+        }
+
+        // NDJSON：chunk 逐块拼、done 收尾、error 报错
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        let streamErr = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          for (let nl = buf.indexOf("\n"); nl >= 0; nl = buf.indexOf("\n")) {
+            const raw = buf.slice(0, nl).trim();
+            buf = buf.slice(nl + 1);
+            if (!raw) continue;
+            let ev: { type?: string; text?: string; answer?: string; message?: string };
+            try {
+              ev = JSON.parse(raw);
+            } catch {
+              continue;
+            }
+            if (ev.type === "chunk" && ev.text) {
+              const piece = ev.text;
+              setAsk((a) => ({ ...a, answer: a.answer + piece }));
+            } else if (ev.type === "done") {
+              const full = ev.answer;
+              setAsk((a) => ({ asking: false, answer: full ?? a.answer, error: "" }));
+            } else if (ev.type === "error") {
+              streamErr = ev.message ?? "没答出来，稍后再试";
+            }
+          }
+        }
+        if (streamErr) setAsk({ asking: false, answer: "", error: streamErr });
+        else setAsk((a) => (a.asking ? { ...a, asking: false } : a));
+      } catch (e) {
+        setAsk({
+          asking: false,
+          answer: "",
+          error: e instanceof Error ? e.message : "没答出来，稍后再试",
+        });
+      }
+    },
+    [postInterrupt],
+  );
+
+  /** 不问，只把这一刻记下来（暂停触发、还没落库时的入口） */
   async function handleJustCapture() {
-    const saved = await postInterrupt(panel.tS, null);
+    const saved = await postInterrupt(panelTSRef.current, null);
     setPoints((prev) => [...prev, saved]);
     closePanel();
   }
@@ -530,8 +606,11 @@ export function WatchStage({
       <InterruptPanel
         open={panel.open}
         tS={panel.tS}
-        captured={panel.id !== null}
-        onPick={handlePick}
+        captured={panel.captured}
+        asking={ask.asking}
+        answer={ask.answer}
+        askError={ask.error}
+        onAsk={handleAsk}
         onJustCapture={handleJustCapture}
         onClose={closePanel}
       />

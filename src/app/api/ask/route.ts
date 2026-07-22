@@ -1,0 +1,129 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { askQuestion, AskError } from "@/lib/ask/gemini-ask";
+import { supabaseConfigured } from "@/lib/supabase/config";
+import { createClient } from "@/lib/supabase/server";
+import type { SourceRow, TranscriptSegment } from "@/lib/types";
+
+// M3 打断问答 —— 用户在某个打断点上打字问一句，Gemini Flash 扣着当前字幕流式作答。
+//
+// 形态照抄 /api/transcript、/api/translate：**流式 NDJSON**（答案逐块上屏）。
+// 答完整了才把 question + ai_answer 写回这条 interrupts 行（半截答案不落库，别坑复习）。
+// 接地范围由这行的 window_start_s / window_end_s（D5 落库时定死）+ 全文一起给引擎。
+
+export const maxDuration = 300;
+
+const bodySchema = z.object({
+  interruptId: z.string().uuid(),
+  question: z.string().trim().min(1, "先写一句想问的").max(2000),
+});
+
+const NDJSON_HEADERS = {
+  "content-type": "application/x-ndjson; charset=utf-8",
+  "cache-control": "no-store",
+  "x-accel-buffering": "no",
+} as const;
+
+function line(payload: unknown): Uint8Array {
+  return new TextEncoder().encode(`${JSON.stringify(payload)}\n`);
+}
+
+export async function POST(request: Request) {
+  if (!supabaseConfigured) {
+    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  }
+
+  const parsed = bodySchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: parsed.error?.issues[0]?.message ?? "请求参数不合法" },
+      { status: 400 },
+    );
+  }
+  const { interruptId, question } = parsed.data;
+
+  // 这条打断点（RLS + user_id 双保险，别人的点问不了）—— 窗口就从这行拿
+  const { data: interrupt } = await supabase
+    .from("interrupts")
+    .select("id, source_id, t_s, window_start_s, window_end_s, question_mode")
+    .eq("id", interruptId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!interrupt) {
+    return NextResponse.json({ error: "找不到这个打断点" }, { status: 404 });
+  }
+
+  // 内容的字幕
+  const { data: srcRow } = await supabase
+    .from("sources")
+    .select("*")
+    .eq("id", interrupt.source_id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!srcRow) {
+    return NextResponse.json({ error: "找不到这条内容" }, { status: 404 });
+  }
+  const source = srcRow as SourceRow;
+  const segments: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
+  if (segments.length === 0) {
+    return NextResponse.json(
+      { error: "这条内容还没有字幕，先生成字幕再问。" },
+      { status: 400 },
+    );
+  }
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const push = (payload: unknown) => {
+        try {
+          controller.enqueue(line(payload));
+        } catch {
+          /* 浏览器已经走了，不影响服务端把答案收完再落库 */
+        }
+      };
+
+      try {
+        const answer = await askQuestion({
+          question,
+          segments,
+          windowStartS: Number(interrupt.window_start_s),
+          windowEndS: Number(interrupt.window_end_s),
+          tS: Number(interrupt.t_s),
+          title: source.title,
+          onChunk: async (text) => push({ type: "chunk", text }),
+        });
+
+        // 答完整才落库：写回这条打断点的问题与答案，复习时要用（WORKORDER 283）。
+        // question_mode 之前空着的话，标成 free（自由提问）。
+        await supabase
+          .from("interrupts")
+          .update({
+            question,
+            ai_answer: answer,
+            question_mode: interrupt.question_mode ?? "free",
+          })
+          .eq("id", interruptId)
+          .eq("user_id", user.id);
+
+        push({ type: "done", answer });
+      } catch (e) {
+        const message =
+          e instanceof AskError
+            ? e.message
+            : `回答时出错了：${e instanceof Error ? e.message.slice(0, 120) : String(e)}`;
+        push({ type: "error", message });
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(stream, { headers: NDJSON_HEADERS });
+}
