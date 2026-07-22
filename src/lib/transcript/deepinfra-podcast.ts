@@ -28,11 +28,14 @@ const FIRST_BYTES = 1_500_000;
 /** 其余每块 8MB（≈11 分钟）。再大没必要，下载+上传的往返才是大头 */
 const CHUNK_BYTES = 8_000_000;
 /**
- * m4a/mp4 的中段没有文件头、单独切出来解不了码（探针在 2a 就验过：moov 在文件最前面，
- * 只有「从头的前缀」可解）。所以 m4a 只能整文件一次转，受这个上限约束。
- * 50MB ≈ 50 分钟音频，小宇宙一集（43 分钟 ≈ 42MB）够用；再长的只转开头并如实说明。
+ * m4a/mp4 不能按字节切：中段没有文件头，而**截断的前缀 DeepInfra 也拒收**
+ * —— 2026-07-21 拿小宇宙《百年孤独》那集实测：1.5MB m4a 前缀 → `400 Invalid or
+ * unsupported audio file`；同一集整文件（72MB）→ 200、192 段、27 秒转完。
+ * 所以 m4a 只能**整文件一次转**，受这个上限约束。上限给到 150MB（≈110 分钟）留足余量，
+ * 因为小宇宙一集常常四五十分钟、七八十兆（那集 52 分钟就 72MB，早超了原来的 50MB）。
+ * 再长的如实报错、让用户手动粘贴（长 m4a 支持以后再补）。
  */
-const MAX_WHOLE_M4A = 50_000_000;
+const MAX_WHOLE_M4A = 150_000_000;
 
 /** 单块最长等这么久 */
 const CHUNK_TIMEOUT_MS = 120_000;
@@ -196,7 +199,7 @@ export const deepinfraPodcastProvider: TranscriptProvider = {
     const baseCount = segments.length;
     let lang: string | null = null;
 
-    // ── 首块（0..1.5MB）：抢首屏 + 用字节头认格式。精确续转时跳过 ──
+    // ── 首块（0..1.5MB）：先下一段认格式，再决定怎么起手。精确续转时跳过 ──
     let offset = startFresh ? 0 : anchor;
     if (startFresh) {
       const firstEnd = totalBytes > 0 ? Math.min(FIRST_BYTES, totalBytes) : FIRST_BYTES;
@@ -204,17 +207,20 @@ export const deepinfraPodcastProvider: TranscriptProvider = {
       const sniffed = sniff(new Uint8Array(prefix.slice(0, 16)));
       if (sniffed !== "unknown") format = sniffed;
 
-      const mime = format === "m4a" ? "audio/mp4" : "audio/mpeg";
-      const name = format === "m4a" ? "chunk.m4a" : "chunk.mp3";
-      const resp = await transcribeBytes(key, prefix, mime, name);
-      lang = resp.language ?? null;
-      segments.push(...diToSegments(resp, 0));
-      segments.sort((a, b) => a.start - b.start);
-      offset = resp.duration ?? coveredUntil(segments);
-      await onPartial({ segments, coveredS: offset, totalS });
+      // **只有 mp3/unknown 用前缀抢首屏**（截断的前缀能解，约 2 秒上屏）。
+      // m4a 的截断前缀 DeepInfra 拒收（实测 400 "Invalid or unsupported audio file"），
+      // 所以 m4a 认出来就丢掉这段前缀、直接落到下面整文件转，别拿它去撞 400。
+      if (format !== "m4a") {
+        const resp = await transcribeBytes(key, prefix, "audio/mpeg", "chunk.mp3");
+        lang = resp.language ?? null;
+        segments.push(...diToSegments(resp, 0));
+        segments.sort((a, b) => a.start - b.start);
+        offset = resp.duration ?? coveredUntil(segments);
+        await onPartial({ segments, coveredS: offset, totalS });
 
-      // 整个文件还没首块大 → 已经转完了
-      if (totalBytes > 0 && totalBytes <= firstEnd) return { segments, complete: true, lang };
+        // 整个文件还没首块大 → 已经转完了
+        if (totalBytes > 0 && totalBytes <= firstEnd) return { segments, complete: true, lang };
+      }
     }
 
     // ── mp3：能任意按字节切，顺着往后转，时间戳用「前面各块实测时长之和」对齐 ──
@@ -253,44 +259,44 @@ export const deepinfraPodcastProvider: TranscriptProvider = {
       return { segments, complete: true, lang };
     }
 
-    // ── m4a / mp4：中段切不了，只能整文件一次转（时间戳本身就是绝对的，不用加偏移）──
+    // ── m4a / mp4：中段切不了、截断前缀也拒收，只能整文件一次转 ──
+    //    （整文件的时间戳本身就是绝对的，不用加偏移）
     if (totalBytes > 0 && totalBytes <= MAX_WHOLE_M4A) {
-      if (remainingMs() < MIN_BUDGET_MS && segments.length > 0) return { segments, complete: false, lang };
       try {
         const resp = await transcribeBytes(key, await getWhole(url), "audio/mp4", "audio.m4a");
-        // 整文件是权威且从 0 开始的全量结果，直接取代首块那点预览
+        // 整文件是权威且从 0 开始的全量结果，取代（续转时）已有的那点
         const full = diToSegments(resp, 0);
         if (full.length > 0) return { segments: full, complete: true, lang: resp.language ?? lang };
-        return { segments, complete: segments.length > 0, lang };
+        if (segments.length > 0) return { segments, complete: true, lang };
+        throw new TranscribeError("这条播客的音频没能转出内容 —— 可以手动粘贴字幕。");
       } catch (e) {
-        if (e instanceof DiTooLarge) {
-          // 落到这说明比我们估的还大 —— 保留首块预览，如实说明
-          return {
-            segments,
-            complete: false,
-            lang,
-            note: "这一集是 m4a 且偏长，DeepInfra 一次收不下，暂时只转出了开头。",
-          };
-        }
         if (e instanceof TranscribeError) {
           if (segments.length > 0) return { segments, complete: false, lang, note: e.message };
           throw e;
         }
+        if (e instanceof DiTooLarge) {
+          if (segments.length > 0)
+            return { segments, complete: false, lang, note: "这一集偏长，转写服务一次收不下，暂时只转出了已有部分。" };
+          throw new TranscribeError(
+            "这一集偏长，转写服务一次收不下 —— 可以手动粘贴字幕，长音频支持我们随后补上。",
+          );
+        }
+        // 其它异常：有进展就收尾带原因，没进展往上抛（让链去换 / 入口记 failed）
         if (segments.length > 0) return { segments, complete: false, lang, note: e instanceof Error ? e.message : String(e) };
         throw e;
       }
     }
 
-    // ── 整文件超上限、又切不了中段：只有首块那点预览，如实说明（不假装成功）──
-    if (segments.length > 0) {
-      return {
-        segments,
-        complete: false,
-        lang,
-        note: "这一集是 m4a 且太长（超过约 50 分钟），暂时只转出了开头。完整转写以后再补。",
-      };
+    // ── 整文件超上限（m4a 太长）：如实报错，不假装成功 ──
+    if (totalBytes > MAX_WHOLE_M4A) {
+      if (segments.length > 0) {
+        return { segments, complete: false, lang, note: "这一集是 m4a 且太长（超过约 110 分钟），暂时只转出了已有部分。" };
+      }
+      throw new TranscribeError(
+        "这一集是 m4a 且太长（超过约 110 分钟），暂时整段转不了 —— 可以手动粘贴字幕，长 m4a 支持我们随后补上。",
+      );
     }
-    // 连首块都没有（不支持 Range 又拿不到大小）：交给链上下一个 / 让入口记 failed
+    // 连大小都读不到、又不支持 Range：交给链上下一个 / 让入口记 failed
     throw new Error("这条音频既不支持分段下载、又读不到大小，暂时转不了");
   },
 };
