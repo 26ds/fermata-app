@@ -28,9 +28,20 @@ const GLOW_PRESETS: { id: string; name: string; colors: [string, string, string,
 ];
 const DEFAULT_GLOW = GLOW_PRESETS[0].colors;
 
-/** 把一轮文字切成 1–4 行的小段（按换行 + 句末标点），歌词式留白 */
-function toSegments(text: string): string[] {
+/** 剥掉 markdown 记号，像人聊天一样纯文字（引擎已被提示词禁 markdown，这是兜底；
+ *  且流式半截收到 `**` 也不会闪出星号 —— 全局去掉 * 和行首 #/项目符号/序号）。 */
+function cleanMarkdown(text: string): string {
   return text
+    .replace(/`+/g, "")
+    .replace(/\*+/g, "")
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^\s*[-+]\s+/gm, "")
+    .replace(/^\s*\d+\.\s+/gm, "");
+}
+
+/** 把一轮文字切成 1–4 行的小段（先剥 markdown，再按换行 + 句末标点），歌词式留白 */
+function toSegments(text: string): string[] {
+  return cleanMarkdown(text)
     .split(/\n+/)
     .flatMap((line) => line.split(/(?<=[。！？!?…])/))
     .map((s) => s.trim())
@@ -43,11 +54,19 @@ interface ImmersiveChatProps {
   videoRef: React.RefObject<HTMLDivElement | null>;
   /** 当前播放头（秒），发问时作为 atS */
   getCurrentTime: () => number;
+  /** 暂停视频 —— 发问前调用（创始人：问答一定要视频处于暂停态） */
+  pauseVideo: () => void;
   /** 退出沉浸态（键盘 Esc 可达；主退出走悬浮球长按） */
   onExit: () => void;
 }
 
-export function ImmersiveChat({ sourceId, videoRef, getCurrentTime, onExit }: ImmersiveChatProps) {
+export function ImmersiveChat({
+  sourceId,
+  videoRef,
+  getCurrentTime,
+  pauseVideo,
+  onExit,
+}: ImmersiveChatProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState("");
@@ -60,6 +79,22 @@ export function ImmersiveChat({ sourceId, videoRef, getCurrentTime, onExit }: Im
   const [burst, setBurst] = useState(true); // 进入时的扩散光，放完卸载
 
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // ── 打字机流式（创始人：思考中最多闪一下，然后像 GPT 一字一字快速吐出）──
+  // 网络分块大小不定（Gemini 常一次给一整句），直接上屏就是"一下子一堆"。
+  // 所以：收到的整段进 fullTextRef，一个定时器按固定节奏把 shown 往前推，视觉上恒定逐字。
+  const revealTimerRef = useRef<number | null>(null);
+  const fullTextRef = useRef("");
+  const shownRef = useRef(0);
+  const streamDoneRef = useRef(false);
+
+  // 卸载时清掉打字机定时器
+  useEffect(
+    () => () => {
+      if (revealTimerRef.current != null) window.clearInterval(revealTimerRef.current);
+    },
+    [],
+  );
 
   // ── 量「视频底缘」：磨砂面板从这条线往下铺（design §4 过渡带） ──
   useLayoutEffect(() => {
@@ -187,11 +222,36 @@ export function ImmersiveChat({ sourceId, videoRef, getCurrentTime, onExit }: Im
     }).catch(() => {});
   };
 
-  // ── 发问：乐观追加用户 + 空 AI 两轮 → POST /api/chat 流式填 AI（服务端 append 落库） ──
+  // 把最后一条 AI 的正文设为 text（打字机每帧调用）
+  const setLastAssistantText = (text: string) =>
+    setTurns((prev) => {
+      const n = [...prev];
+      const last = n[n.length - 1];
+      if (last && last.role === "assistant") n[n.length - 1] = { ...last, text };
+      return n;
+    });
+
+  const stopReveal = () => {
+    if (revealTimerRef.current != null) {
+      window.clearInterval(revealTimerRef.current);
+      revealTimerRef.current = null;
+    }
+  };
+
+  const dropEmptyTail = () =>
+    setTurns((prev) => {
+      const n = [...prev];
+      const last = n[n.length - 1];
+      if (last && last.role === "assistant" && !last.text) n.pop();
+      return n;
+    });
+
+  // ── 发问：乐观追加用户 + 空 AI 两轮 → POST /api/chat 流式填进 fullTextRef → 打字机逐字上屏 ──
   const send = useCallback(
     async (q: string) => {
       const question = q.trim();
       if (!question || sending) return;
+      pauseVideo(); // 创始人：问答一定要视频处于暂停态
       setInput("");
       setError("");
       const atS = Math.max(0, Math.round(getCurrentTime()));
@@ -203,13 +263,24 @@ export function ImmersiveChat({ sourceId, videoRef, getCurrentTime, onExit }: Im
       setAtBottom(true);
       setSending(true);
 
-      const dropEmptyTail = () =>
-        setTurns((prev) => {
-          const n = [...prev];
-          const last = n[n.length - 1];
-          if (last && last.role === "assistant" && !last.text) n.pop();
-          return n;
-        });
+      // 打字机：fullTextRef 是收到的全部，shownRef 是已上屏的字数，定时器把它往前推。
+      // 恒定节奏、按积压量自适应步长（一次给一整句也能很快追上，但仍是逐字动效）。
+      fullTextRef.current = "";
+      shownRef.current = 0;
+      streamDoneRef.current = false;
+      stopReveal();
+      revealTimerRef.current = window.setInterval(() => {
+        const full = fullTextRef.current;
+        if (shownRef.current < full.length) {
+          const remaining = full.length - shownRef.current;
+          const step = Math.max(2, Math.ceil(remaining / 45)); // 积压越多推得越快，最少 2 字
+          shownRef.current = Math.min(full.length, shownRef.current + step);
+          setLastAssistantText(full.slice(0, shownRef.current));
+        } else if (streamDoneRef.current) {
+          stopReveal();
+          setSending(false);
+        }
+      }, 16);
 
       try {
         const res = await fetch(`/api/chat`, {
@@ -222,7 +293,7 @@ export function ImmersiveChat({ sourceId, videoRef, getCurrentTime, onExit }: Im
           throw new Error(b.error ?? "没答出来，稍后再试");
         }
 
-        // NDJSON：chunk 逐块拼进最后一条 AI、done 收尾、error 报错
+        // NDJSON：chunk 累进 fullTextRef（不直接上屏，交给打字机）、done 校正、error 报错
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
@@ -242,42 +313,31 @@ export function ImmersiveChat({ sourceId, videoRef, getCurrentTime, onExit }: Im
               continue;
             }
             if (ev.type === "chunk" && ev.text) {
-              const piece = ev.text;
-              setTurns((prev) => {
-                const n = [...prev];
-                const last = n[n.length - 1];
-                if (last && last.role === "assistant") {
-                  n[n.length - 1] = { ...last, text: last.text + piece };
-                }
-                return n;
-              });
+              fullTextRef.current += ev.text;
             } else if (ev.type === "done") {
-              const full = ev.answer;
-              if (typeof full === "string") {
-                setTurns((prev) => {
-                  const n = [...prev];
-                  const last = n[n.length - 1];
-                  if (last && last.role === "assistant") n[n.length - 1] = { ...last, text: full };
-                  return n;
-                });
-              }
+              if (typeof ev.answer === "string") fullTextRef.current = ev.answer;
             } else if (ev.type === "error") {
               streamErr = ev.message ?? "没答出来，稍后再试";
             }
           }
         }
         if (streamErr) {
+          stopReveal();
+          setSending(false);
           setError(streamErr);
           dropEmptyTail();
+        } else {
+          // 让打字机把剩下的字吐完，吐完它自己收尾（清定时器 + setSending(false)）
+          streamDoneRef.current = true;
         }
       } catch (e) {
+        stopReveal();
+        setSending(false);
         setError(e instanceof Error ? e.message : "没答出来，稍后再试");
         dropEmptyTail();
-      } finally {
-        setSending(false);
       }
     },
-    [sending, sourceId, getCurrentTime],
+    [sending, sourceId, getCurrentTime, pauseVideo],
   );
 
   const n = turns.length;
@@ -290,8 +350,9 @@ export function ImmersiveChat({ sourceId, videoRef, getCurrentTime, onExit }: Im
 
   return (
     <>
-      {/* 整页外缘流光边 + 进入扩散光。pointer-events-none：绝不挡视频控件与聊天 */}
-      <div className="pointer-events-none fixed inset-0 z-[45]" style={glowVars} aria-hidden>
+      {/* 整页外缘流光边 + 进入扩散光。z 抬到最高 + pointer-events-none：四角/顶部标题都被
+          流光框住（含视频与页头），且绝不挡视频控件与聊天（创始人反馈 1：铺满全屏、加粗） */}
+      <div className="pointer-events-none fixed inset-0 z-[60]" style={glowVars} aria-hidden>
         <div className="edge-glow absolute inset-0" />
         {burst && (
           <div
@@ -354,26 +415,34 @@ export function ImmersiveChat({ sourceId, videoRef, getCurrentTime, onExit }: Im
             {turns.map((t, i) => {
               const fromEnd = n - 1 - i;
               const isLast = fromEnd === 0;
+              const isUser = t.role === "user";
               // 最新最亮；越旧越融进背景。用户略低于 AI（design §1）
-              const opacity =
-                t.role === "assistant"
-                  ? isLast
-                    ? 1
-                    : Math.max(0.34, 0.72 - fromEnd * 0.11)
-                  : isLast
-                    ? 0.82
-                    : Math.max(0.3, 0.64 - fromEnd * 0.11);
-              const streaming = isLast && t.role === "assistant" && sending;
+              const opacity = isUser
+                ? isLast
+                  ? 0.82
+                  : Math.max(0.3, 0.64 - fromEnd * 0.11)
+                : isLast
+                  ? 1
+                  : Math.max(0.34, 0.72 - fromEnd * 0.11);
+              const streaming = isLast && !isUser && sending;
               const segs = toSegments(t.text);
+              // 用户 = 窄一档 + 右侧留白 + 上方大间距（和 AI 明显分开，创始人反馈 2a）；
+              // AI = 满宽最亮，紧贴它回答的那句问题。首条不留上边距。
+              const blockCls = isUser
+                ? `${i === 0 ? "" : "mt-9"} mr-[22%]`
+                : `${i === 0 ? "" : "mt-3"}`;
+              const lineCls = isUser
+                ? "text-[20px] leading-[1.32] text-ink-100"
+                : "text-[24px] leading-[1.32] text-ink-100";
               return (
-                <div key={i} className="mt-[22px] first:mt-0" style={{ opacity }}>
+                <div key={i} className={blockCls} style={{ opacity }}>
                   {segs.length === 0 && streaming ? (
                     <p className="text-[24px] leading-[1.32] text-ink-100">
                       <span className="animate-pulse text-teal-300">正在想…</span>
                     </p>
                   ) : (
                     segs.map((s, j) => (
-                      <p key={j} className="text-[24px] leading-[1.32] text-ink-100">
+                      <p key={j} className={lineCls}>
                         {s}
                         {streaming && j === segs.length - 1 && (
                           <span className="ml-0.5 animate-pulse text-teal-300">▍</span>

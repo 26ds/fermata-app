@@ -270,7 +270,7 @@ select:focus-visible {
 /* 整页外缘：约 1.5px 连续流光，沿边缓慢流动（周期 5.6s）+ 极轻明暗呼吸。
    用「渐变填充 + 遮罩挖空中心」只留一圈描边（GPU 友好：只动 background-position）。 */
 .edge-glow {
-  padding: 1.5px;
+  padding: 3px;
   background: linear-gradient(
     115deg,
     var(--glow-1), var(--glow-2), var(--glow-3), var(--glow-4),

@@ -643,6 +643,7 @@ export function WatchStage({
           sourceId={source.id}
           videoRef={videoWrapRef}
           getCurrentTime={getCurrentTime}
+          pauseVideo={() => handleRef.current?.pause()}
           onExit={exitImmersive}
         />
       )}

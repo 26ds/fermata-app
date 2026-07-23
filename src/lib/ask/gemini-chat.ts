@@ -45,7 +45,8 @@ function groundingInstruction(ctx: AskChatContext): string {
   const focus = windowText(ctx.segments, ctx.atS - WINDOW_BEFORE_S, ctx.atS + WINDOW_AFTER_S);
   const background = backgroundText(ctx.segments);
   const parts = [
-    `你是学习助手，正陪用户看 ${where}、边看边聊。直接、简洁地接着对话回答，扣住他现在看的这段和你们聊过的；别跑题、别编内容里没有的、别反问让他先猜。用他的语言。`,
+    `你是学习助手，正陪用户看 ${where}、边看边聊。直接、简洁地接着对话回答，扣住他现在看的这段和你们聊过的；别跑题、别编内容里没有的、别反问让他先猜。用他的语言。` +
+      `\n像面对面聊天一样自然地说：**不要用 markdown**——不要 ** 加粗、不要 * 或 - 或 1. 2. 这类列表符号、不要 # 标题。要分点就用短句加换行，别用符号。语气口语、干脆。`,
   ];
   if (ctx.priorSummary?.trim()) {
     parts.push(`\n【这个用户之前在这条视频上聊过的重点（尤其他没搞懂的）】\n${ctx.priorSummary.trim()}`);
