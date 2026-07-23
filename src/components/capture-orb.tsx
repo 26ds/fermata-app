@@ -1,36 +1,32 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  MIC_ACTIVE_RMS,
-  micLevelToScale,
-  useMicLevel,
-} from "@/lib/live/use-mic-level";
+import { useEffect, useRef } from "react";
 
-// M1 1b：悬浮捕获球。拖到任意边缘（落库 localStorage），长按唤醒聆听态、
-// 对着说话球随音量涨落，轻点 = 记这一刻（真正的打断面板是 1c）。
+// M1 1b：悬浮捕获球。拖到任意边缘（落库 localStorage），轻点 = 记这一刻（打断面板）。
+// M3 Phase-2：长按 = 进/出「长问答沉浸聊天」。进入时球从当前停靠位平滑滑到底部正中
+// 的 Siri 位（design §B），成为模式锚点 + 退出动作（长按收起）。
 //
-// 结构必须两层（live-console 踩出来的硬教训）：外层写 transform 归拖动，
-// 内层写独立的 `scale` 属性归音量脉动 —— 同一节点上 transform 只能有一份，
-// 拖动的 translate 和音量的 scale 会互相覆盖。
+// 结构必须两层（live-console 踩出来的硬教训）：外层写 transform 归拖动/滑动，
+// 内层归视觉（Siri 脉动等）—— 同一节点上 transform 只能有一份。
 
 type OrbState = "pending" | "ready";
 
 interface CaptureOrbProps {
-  /** pending = 转写准备中（灰）；ready = 字幕就绪（青）。1b 先写死 ready，真状态源是 M2 */
+  /** pending = 这一刻还没字幕（灰）；ready = 有字幕（青）。真状态源是 M2 */
   state: OrbState;
-  /** 轻点：1b 无动作，1c 接打断面板 */
+  /** 轻点：接打断面板（沉浸态下不触发） */
   onTap: () => void;
-  /** 长按开始：1b 只做视觉 + 占位字幕，真正接语音在 M3 */
-  onLongPressStart: () => void;
-  /** 长按结束 / 被打断：务必在这里释放任何长按期资源 */
-  onLongPressEnd: () => void;
+  /** 长按达阈值：非沉浸态 = 进入沉浸聊天；沉浸态 = 退出。由父组件按当前模式路由 */
+  onLongPress: () => void;
+  /** 是否处于沉浸聊天态：true 时球滑到底部正中并变 Siri 位，禁用拖拽/轻点 */
+  immersive: boolean;
 }
 
 const ORB = 56; // 球径 px，与 live-console 的 h-14 一致
 const EDGE = 16; // 离屏幕边缘留白 px
-const LONG_PRESS_MS = 500; // 按住这么久 = 长按唤醒
+const LONG_PRESS_MS = 500; // 按住这么久 = 长按（与既有阈值一致，design §B/E）
 const DRAG_THRESHOLD = 8; // 位移超过它就算拖动，不再是点按/长按
+const IMMERSIVE_BOTTOM = 72; // 沉浸态球顶端离屏幕底的 px（球底约 72px，避让 Home 指示条 + 输入条排上方）
 
 const STORAGE_KEY = "fermata-orb-dock";
 
@@ -65,30 +61,33 @@ function dockToXY(dock: Dock): { x: number; y: number } {
   return { x, y: dock.y };
 }
 
-export function CaptureOrb({
-  state,
-  onTap,
-  onLongPressStart,
-  onLongPressEnd,
-}: CaptureOrbProps) {
+export function CaptureOrb({ state, onTap, onLongPress, immersive }: CaptureOrbProps) {
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
 
-  // 位置全程走 ref + 直改 DOM：JSX 里不写 transform / visibility，React 就不
-  // 接管这两个属性，重渲染（比如 listening 切换）也不会把球弹回原位。
+  // 位置全程走 ref + 直改 DOM：JSX 里不写 transform，React 就不接管它，
+  // 重渲染也不会把球弹回原位。dockRef 记住当前停靠点，退出沉浸态时滑回它。
   const posRef = useRef<{ x: number; y: number } | null>(null);
-  const [listening, setListening] = useState(false);
+  const dockRef = useRef<Dock | null>(null);
 
   // 手势期间的临时账本，全走 ref 不触发渲染
   const startRef = useRef({ x: 0, y: 0, baseX: 0, baseY: 0 });
   const movedRef = useRef(false);
   const draggingRef = useRef(false);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const longPressActiveRef = useRef(false);
+  const longPressFiredRef = useRef(false);
+
+  // 沉浸态永远读最新值（长按计时器在 pointerdown 时设，回调里要判当前模式）
+  const immersiveRef = useRef(immersive);
+  useEffect(() => {
+    immersiveRef.current = immersive;
+  }, [immersive]);
 
   // 首次挂载：恢复停靠点，直接写进 DOM 并显形。位置不参与渲染，就不占 state。
   useEffect(() => {
-    const xy = dockToXY(loadDock());
+    const dock = loadDock();
+    dockRef.current = dock;
+    const xy = dockToXY(dock);
     posRef.current = xy;
     const el = outerRef.current;
     if (el) {
@@ -97,23 +96,32 @@ export function CaptureOrb({
     }
   }, []);
 
-  // 长按期间才开麦；音量写进内层的 scale 属性（外层 transform 留给拖动）
-  useMicLevel(listening, (rms) => {
-    const el = innerRef.current;
-    if (!el) return;
-    el.style.scale = micLevelToScale(rms).toFixed(3);
-    el.style.opacity = rms > MIC_ACTIVE_RMS ? "1" : "0.9";
-  });
-
-  // 松手 / 取消后把脉动复位，别让球停在放大的定格上
+  // 进/出沉浸态：球平滑滑到底部正中 / 滑回原停靠位（design §B/E：连续动画，位置不丢）
+  const firstImmersiveRef = useRef(true);
   useEffect(() => {
-    if (listening) return;
-    const el = innerRef.current;
-    if (el) {
-      el.style.scale = "1";
-      el.style.opacity = "1";
+    if (firstImmersiveRef.current) {
+      firstImmersiveRef.current = false;
+      if (!immersive) return; // 初始就是非沉浸态：不做无谓的滑动
     }
-  }, [listening]);
+    const el = outerRef.current;
+    if (!el) return;
+    if (immersive) {
+      const cx = (window.innerWidth - ORB) / 2;
+      const cy = window.innerHeight - ORB - IMMERSIVE_BOTTOM;
+      el.style.transition = "transform 620ms cubic-bezier(0.22, 1, 0.36, 1)";
+      el.style.transform = `translate(${cx}px, ${cy}px)`;
+    } else {
+      const xy = dockToXY(dockRef.current ?? loadDock());
+      posRef.current = xy;
+      el.style.transition = "transform 500ms cubic-bezier(0.22, 1, 0.36, 1)";
+      el.style.transform = `translate(${xy.x}px, ${xy.y}px)`;
+    }
+    // 滑动结束后清掉 transition —— 否则下次拖动会被动画拖慢发黏
+    const id = window.setTimeout(() => {
+      if (outerRef.current) outerRef.current.style.transition = "";
+    }, 660);
+    return () => window.clearTimeout(id);
+  }, [immersive]);
 
   function clearLongPress() {
     if (longPressTimerRef.current) {
@@ -121,38 +129,6 @@ export function CaptureOrb({
       longPressTimerRef.current = null;
     }
   }
-
-  // 回调放 ref，endListening 的身份才稳得住（下面的兜底 effect 要依赖它）
-  const onLongPressEndRef = useRef(onLongPressEnd);
-  useEffect(() => {
-    onLongPressEndRef.current = onLongPressEnd;
-  }, [onLongPressEnd]);
-
-  const endListening = useCallback(() => {
-    if (!longPressActiveRef.current) return;
-    longPressActiveRef.current = false;
-    setListening(false);
-    onLongPressEndRef.current();
-  }, []);
-
-  // 兜底：万一 pointerup / pointercancel 没送到（指针捕获失败、切后台、手势被系统截走），
-  // 也必须把聆听态收回来 —— 麦克风绝不能悄悄开着（WORKORDER §M1：控成本也保隐私）。
-  // 组件卸载时 useMicLevel 自己的 cleanup 会停 track，这里管的是"还挂着但没人管"的情况。
-  useEffect(() => {
-    if (!listening) return;
-    const stop = () => endListening();
-    const onHide = () => {
-      if (document.visibilityState === "hidden") endListening();
-    };
-    window.addEventListener("pointerup", stop);
-    window.addEventListener("pointercancel", stop);
-    document.addEventListener("visibilitychange", onHide);
-    return () => {
-      window.removeEventListener("pointerup", stop);
-      window.removeEventListener("pointercancel", stop);
-      document.removeEventListener("visibilitychange", onHide);
-    };
-  }, [listening, endListening]);
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     const base = posRef.current;
@@ -165,23 +141,24 @@ export function CaptureOrb({
     startRef.current = { x: e.clientX, y: e.clientY, baseX: base.x, baseY: base.y };
     movedRef.current = false;
     draggingRef.current = false;
+    longPressFiredRef.current = false;
     clearLongPress();
     longPressTimerRef.current = setTimeout(() => {
-      // 到点还没移动 = 长按唤醒
+      // 到点还没移动 = 长按：进入或退出沉浸聊天（父组件按当前模式路由）
       if (!movedRef.current) {
-        longPressActiveRef.current = true;
-        setListening(true);
-        onLongPressStart();
+        longPressFiredRef.current = true;
+        onLongPress();
       }
     }, LONG_PRESS_MS);
   }
 
   function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (immersiveRef.current) return; // 沉浸态：球固定在 Siri 位，不接受拖动
+    if (longPressFiredRef.current) return; // 已触发长按，别再转拖动
     const s = startRef.current;
     const dx = e.clientX - s.x;
     const dy = e.clientY - s.y;
     if (!draggingRef.current) {
-      if (longPressActiveRef.current) return; // 已在聆听态，不转成拖动
       if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
       draggingRef.current = true;
       movedRef.current = true;
@@ -204,10 +181,11 @@ export function CaptureOrb({
     } catch {
       // 忽略
     }
-    if (longPressActiveRef.current) {
-      endListening();
-      return;
+    if (longPressFiredRef.current) {
+      longPressFiredRef.current = false;
+      return; // 长按已处理，不再当轻点
     }
+    if (immersiveRef.current) return; // 沉浸态：非长按不做事（轻点/拖动都忽略）
     if (draggingRef.current) {
       draggingRef.current = false;
       const s = startRef.current;
@@ -218,6 +196,7 @@ export function CaptureOrb({
       const side: "left" | "right" =
         rawX + ORB / 2 < window.innerWidth / 2 ? "left" : "right";
       const dock: Dock = { side, y };
+      dockRef.current = dock;
       const xy = dockToXY(dock);
       posRef.current = xy;
       if (outerRef.current) {
@@ -238,8 +217,8 @@ export function CaptureOrb({
     // pointercancel 的坐标无意义（常是 0,0）—— 一律回退到手势开始时的基准位，
     // 绝不拿事件坐标算落点（右滑删除就是栽在这上头）。
     clearLongPress();
-    endListening(); // 被打断也要把麦克风还回去
-    if (draggingRef.current) {
+    longPressFiredRef.current = false;
+    if (draggingRef.current && !immersiveRef.current) {
       draggingRef.current = false;
       const s = startRef.current;
       if (outerRef.current) {
@@ -251,15 +230,21 @@ export function CaptureOrb({
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      onTap();
+      if (immersiveRef.current) onLongPress(); // 键盘可达：沉浸态回车 = 退出
+      else onTap();
     }
   }
 
   const isReady = state === "ready";
+  const label = immersive
+    ? "沉浸聊天：长按收起"
+    : isReady
+      ? "捕获球：轻点记这一刻，长按进入沉浸聊天"
+      : "捕获球：字幕准备中，长按进入沉浸聊天";
 
   return (
     // invisible 只管到挂载那一刻：effect 量好位置后写行内 visibility 盖掉它。
-    // transform / visibility 都不进 JSX —— React 不接管，就不会覆盖拖动结果。
+    // transform / visibility 都不进 JSX —— React 不接管，就不会覆盖拖动/滑动结果。
     <div
       ref={outerRef}
       className="invisible fixed left-0 top-0 z-50 touch-none select-none"
@@ -268,25 +253,21 @@ export function CaptureOrb({
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
     >
-      {/* 聆听态占位字幕：1b 只做视觉，真正的逐词转写在 M3 */}
-      {listening && (
-        <div className="glass pointer-events-none absolute bottom-full right-0 mb-2 whitespace-nowrap rounded-full px-3 py-1 text-xs text-ink-100">
-          正在聆听…
-        </div>
-      )}
       <div
         ref={innerRef}
         role="button"
         tabIndex={0}
-        aria-label={isReady ? "捕获球：轻点记这一刻，长按说话" : "捕获球：字幕准备中"}
-        aria-pressed={listening}
+        aria-label={label}
         onKeyDown={onKeyDown}
-        style={{ transition: "scale 120ms ease-out" }}
         className={`flex h-14 w-14 items-center justify-center rounded-full text-lg shadow-[0_10px_30px_rgba(0,0,0,0.35)] ${
-          isReady ? "teal-halo bg-teal-400 text-teal-950" : "bg-ink-500 text-ink-900"
-        } ${listening ? "ring-2 ring-teal-300/80" : ""}`}
+          immersive
+            ? "siri-orb text-teal-950"
+            : isReady
+              ? "teal-halo bg-teal-400 text-teal-950"
+              : "bg-ink-500 text-ink-900"
+        }`}
       >
-        <span aria-hidden>{isReady ? "◉" : "◌"}</span>
+        <span aria-hidden>{immersive ? "◉" : isReady ? "◉" : "◌"}</span>
       </div>
     </div>
   );

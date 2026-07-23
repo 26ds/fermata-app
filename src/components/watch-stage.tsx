@@ -5,6 +5,7 @@ import { activeSegmentIndex } from "@/lib/captions";
 import { CaptionLayer } from "@/components/caption-layer";
 import { CaptureOrb } from "@/components/capture-orb";
 import { DotBar, type InterruptPoint } from "@/components/dot-bar";
+import { ImmersiveChat } from "@/components/immersive-chat";
 import { InterruptPanel } from "@/components/interrupt-panel";
 import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
@@ -41,6 +42,9 @@ export function WatchStage({
   const playingRef = useRef(false);
   const panelOpenRef = useRef(false);
   const resumeOnCloseRef = useRef(false);
+  // 沉浸态也走 ref：进入时 pause() 会触发 onPause，必须在那之前就置位，
+  // 否则 handlePause 会把短问答面板弹到沉浸层底下（同步判断，state 太慢）
+  const immersiveRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
   const [durationS, setDurationS] = useState(source.duration_s ?? 0);
@@ -78,6 +82,11 @@ export function WatchStage({
     answer: "",
     error: "",
   });
+  // M3 Phase-2：长问答沉浸聊天是观看页上的一层浮层（状态开关，不是新路由）——
+  // 播放器实例永不卸载，退出不重载、不跳回开头（WORKORDER D33 / design §99）。
+  const [immersive, setImmersive] = useState(false);
+  // 量「视频底缘」给沉浸磨砂层用（磨砂从这条线往下铺，不碰视频本体）
+  const videoWrapRef = useRef<HTMLDivElement>(null);
 
   // 服务端数据变了（router.refresh 之后）就跟着换。渲染期校正，不用 effect
   const [seen, setSeen] = useState(interrupts);
@@ -188,9 +197,26 @@ export function WatchStage({
     }
   }, []);
 
+  // ── 长问答沉浸聊天 进/出（design §B/C/E） ──
+  // 进入：视频先冻结（暂停）；关掉可能开着的短问答面板但**不**触发它的续播。
+  // 顺序要紧：immersiveRef 必须在 pause() 之前置位（pause 会触发 onPause→handlePause）。
+  const enterImmersive = useCallback(() => {
+    immersiveRef.current = true;
+    panelOpenRef.current = false;
+    resumeOnCloseRef.current = false;
+    setPanel((p) => ({ ...p, open: false }));
+    handleRef.current?.pause();
+    setImmersive(true);
+  }, []);
+  // 退出：不自动播放，保留进入时的暂停状态（design §E.4）。退出 compact 在沉浸层卸载时跑。
+  const exitImmersive = useCallback(() => {
+    immersiveRef.current = false;
+    setImmersive(false);
+  }, []);
+
   /** 用户真的按了暂停（缓冲/播放结束不算，见 PlayerProps.onPause） */
   const handlePause = useCallback(() => {
-    if (panelOpenRef.current) return; // 面板已经开着（多半是我们自己按停的）
+    if (panelOpenRef.current || immersiveRef.current) return; // 面板已开 / 沉浸态：不弹短问答面板
     openPanel(currentTimeRef.current, false);
   }, [openPanel]);
 
@@ -525,7 +551,7 @@ export function WatchStage({
     <div className="flex flex-col gap-3">
       {/* D18：画面越大越好 —— 手机上让播放器顶掉页面左右内边距，整整宽出 40px。
           sm 以上回到圆角卡片（桌面宽度富余，全出血反而失衡） */}
-      <div className="-mx-5 sm:mx-0">
+      <div ref={videoWrapRef} className="-mx-5 sm:mx-0">
         <Player
           source={source}
           onReady={handleReady}
@@ -594,13 +620,9 @@ export function WatchStage({
           判据是"盖没盖住当前播放位置"，不是"整片转完没有"。 */}
       <CaptureOrb
         state={orbReady ? "ready" : "pending"}
+        immersive={immersive}
         onTap={captureNow}
-        onLongPressStart={() => {
-          // M3：长按 → 接 Live 语音提问。现在只有球自己的视觉 + 占位字幕
-        }}
-        onLongPressEnd={() => {
-          // M3：松手结束语音轮
-        }}
+        onLongPress={immersive ? exitImmersive : enterImmersive}
       />
 
       <InterruptPanel
@@ -612,8 +634,18 @@ export function WatchStage({
         askError={ask.error}
         onAsk={handleAsk}
         onJustCapture={handleJustCapture}
+        onEnterImmersive={enterImmersive}
         onClose={closePanel}
       />
+
+      {immersive && (
+        <ImmersiveChat
+          sourceId={source.id}
+          videoRef={videoWrapRef}
+          getCurrentTime={getCurrentTime}
+          onExit={exitImmersive}
+        />
+      )}
     </div>
   );
 }

@@ -193,3 +193,152 @@ select:focus-visible {
     background: var(--color-ink-700);
   }
 }
+
+/* ══════════════════════════════════════════════════════════════
+   M3 Phase-2 长问答沉浸聊天（design/long-qa-immersive-chat.md）
+   —— 整屏磨砂 + 整页流光边 + Apple Music 歌词式文字流 + Siri 位圆球。
+   流光色由 --glow-1..4 驱动（默认薄荷→青→紫→粉，可被用户设置覆盖）。
+   ══════════════════════════════════════════════════════════════ */
+
+/* 流光四色默认值（薄荷→青→紫→粉）。沉浸层可就地用 --glow-* 覆盖成用户配色；
+   暂停面板里的 Siri 小球也靠这份默认值取色。 */
+:root {
+  --glow-1: #5dcaa5;
+  --glow-2: #3bc4d6;
+  --glow-3: #8b7cf0;
+  --glow-4: #f0a6c8;
+}
+
+/* 入口二按钮：一束克制的流光缓慢扫过表面（发现入口，不刺眼） */
+.immersive-cta {
+  position: relative;
+  overflow: hidden;
+}
+.immersive-cta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--glow-2) 26%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  animation: cta-sweep 4.6s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes cta-sweep {
+  from { background-position: 180% 0; }
+  to { background-position: -80% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .immersive-cta::after { animation: none; opacity: 0.5; }
+}
+
+/* 歌词式文字：厚实系统无衬线，略紧字距。中/英/韩同一份厚感 */
+.lyric-flow {
+  font-family: var(--font-sans);
+  font-weight: 680;
+  letter-spacing: -0.006em;
+  text-wrap: pretty;
+}
+
+/* 磨砂聊天层：从视频底缘往下铺。顶部 34px 用遮罩淡入 —— 与视频之间是一条
+   低对比度过渡带，不是硬切割线（design §4）。不带边框（不做卡片语言）。 */
+.chat-frost {
+  backdrop-filter: blur(26px) saturate(150%);
+  -webkit-backdrop-filter: blur(26px) saturate(150%);
+  background: color-mix(in srgb, var(--color-ink-900) 66%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 34px);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 34px);
+  animation: chat-in 460ms ease both;
+  animation-delay: 140ms;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .chat-frost {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: color-mix(in srgb, var(--color-ink-900) 92%, transparent);
+  }
+}
+@keyframes chat-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 整页外缘：约 1.5px 连续流光，沿边缓慢流动（周期 5.6s）+ 极轻明暗呼吸。
+   用「渐变填充 + 遮罩挖空中心」只留一圈描边（GPU 友好：只动 background-position）。 */
+.edge-glow {
+  padding: 1.5px;
+  background: linear-gradient(
+    115deg,
+    var(--glow-1), var(--glow-2), var(--glow-3), var(--glow-4),
+    var(--glow-1), var(--glow-2), var(--glow-3), var(--glow-4), var(--glow-1)
+  );
+  background-size: 300% 100%;
+  animation: glow-flow 5.6s linear infinite, glow-breathe 5.6s ease-in-out infinite;
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+@keyframes glow-flow {
+  from { background-position: 0% 50%; }
+  to { background-position: 300% 50%; }
+}
+@keyframes glow-breathe {
+  0%, 100% { opacity: 0.78; }
+  50% { opacity: 1; }
+}
+
+/* 进入时从底部正中扩散的薄荷光 —— 与圆球滑动同步（design §B）。放完即卸载。 */
+.glow-burst {
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--glow-1) 85%, transparent) 0%,
+    transparent 68%
+  );
+  transform: scale(0.2);
+  animation: glow-expand 920ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes glow-expand {
+  0% { transform: scale(0.2); opacity: 0.85; }
+  60% { opacity: 0.5; }
+  100% { transform: scale(22); opacity: 0; }
+}
+
+/* Siri 位圆球：薄荷→青→紫→粉细腻混色外环 + 较亮水晶青核，柔和脉动 */
+.siri-orb {
+  background:
+    radial-gradient(circle at 36% 30%, #d6faf1 0%, transparent 42%),
+    conic-gradient(from 210deg, var(--glow-1), var(--glow-2), var(--glow-3), var(--glow-4), var(--glow-1));
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 0 22px 3px color-mix(in srgb, var(--glow-2) 55%, transparent),
+    0 0 46px 10px color-mix(in srgb, var(--glow-3) 34%, transparent);
+  animation: siri-pulse 3.4s ease-in-out infinite;
+}
+@keyframes siri-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.16),
+      0 0 20px 2px color-mix(in srgb, var(--glow-2) 50%, transparent),
+      0 0 40px 8px color-mix(in srgb, var(--glow-3) 30%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.22),
+      0 0 28px 5px color-mix(in srgb, var(--glow-2) 62%, transparent),
+      0 0 56px 14px color-mix(in srgb, var(--glow-3) 42%, transparent);
+  }
+}
+
+/* 弱性能 / 减少动效：模式仍切换，边缘停在柔和静态多色，去掉流动与扩散闪耀 */
+@media (prefers-reduced-motion: reduce) {
+  .chat-frost { animation: none; }
+  .edge-glow { animation: none; opacity: 0.85; }
+  .glow-burst { animation: none; display: none; }
+  .siri-orb { animation: none; }
+}

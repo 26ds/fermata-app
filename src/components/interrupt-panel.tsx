@@ -31,6 +31,8 @@ interface InterruptPanelProps {
   onAsk(question: string): void;
   /** 不问，只把这一刻记下来（仅未落库时出现） */
   onJustCapture(): Promise<void>;
+  /** 入口二：进入长问答沉浸聊天（design §C：两个快捷问下方） */
+  onEnterImmersive(): void;
   onClose(): void;
 }
 
@@ -43,6 +45,7 @@ export function InterruptPanel({
   askError,
   onAsk,
   onJustCapture,
+  onEnterImmersive,
   onClose,
 }: InterruptPanelProps) {
   const [input, setInput] = useState("");
@@ -172,6 +175,25 @@ export function InterruptPanel({
               </button>
             ))}
           </div>
+        )}
+
+        {/* 入口二（design §C）：两个快捷问下方的「长问答沉浸聊天」。发现入口，
+            克制的流光扫过（immersive-cta），不像广告横幅。点后由父组件扩屏进入。 */}
+        {!showAnswer && (
+          <button
+            type="button"
+            disabled={asking}
+            onClick={onEnterImmersive}
+            className="immersive-cta mt-2 flex w-full shrink-0 items-center gap-3 rounded-2xl border border-ink-500/50 px-4 py-3 text-left transition-colors hover:border-teal-400 disabled:opacity-50"
+          >
+            <span aria-hidden className="siri-orb flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm text-teal-950">
+              ◉
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-ink-100">长问答沉浸聊天</span>
+              <span className="block text-xs leading-4 text-ink-500">有诸多疑惑？进来接着问，我扣着当前进度答。</span>
+            </span>
+          </button>
         )}
 
         {/* 答案区（实底高对比，非玻璃 —— WORKORDER 材质纪律） */}
