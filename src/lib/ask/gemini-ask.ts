@@ -42,14 +42,14 @@ export interface AskContext {
   onChunk: (text: string) => void | Promise<void>;
 }
 
-function clientFor(): GoogleGenAI {
+export function clientFor(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new AskError("服务器还没配置 GEMINI_API_KEY");
   return new GoogleGenAI({ apiKey });
 }
 
-/** 窗口 [start,end] 内（有重叠即算）的逐句原文 —— 用户「刚听到的那几句」，问答的焦点 */
-function windowText(segments: TranscriptSegment[], startS: number, endS: number): string {
+/** 窗口 [start,end] 内（有重叠即算）的逐句原文 —— 用户「刚听到的那几句」，问答的焦点。沉浸聊天也复用 */
+export function windowText(segments: TranscriptSegment[], startS: number, endS: number): string {
   return segments
     .filter((s) => s.start <= endS && s.end >= startS)
     .map((s) => s.text)
@@ -57,8 +57,8 @@ function windowText(segments: TranscriptSegment[], startS: number, endS: number)
     .trim();
 }
 
-/** 全文作背景，超预算掐尾 */
-function backgroundText(segments: TranscriptSegment[]): string {
+/** 全文作背景，超预算掐尾。沉浸聊天也复用 */
+export function backgroundText(segments: TranscriptSegment[]): string {
   const all = segments
     .map((s) => s.text)
     .join(" ")
