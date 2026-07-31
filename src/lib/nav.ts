@@ -11,7 +11,7 @@
 //   别的一律当没传，回默认那一层。
 
 /** 认识的来路。加新值时同步改 backTarget，别在别处另写一套判断 */
-export type BackFrom = "library" | "favorites";
+export type BackFrom = "library" | "favorites" | "vocab";
 
 export interface BackTarget {
   href: string;
@@ -28,6 +28,10 @@ export function watchBackTarget(from: string | undefined, sourceId: string): Bac
   // 从「观看 → ★ 收藏」那一栏点进来的 → 退回收藏，别把筛选状态吃掉
   if (from === "favorites") {
     return { href: "/watch?tab=favorites", label: "返回收藏列表" };
+  }
+  // M3.7：从「全部词库」点一条词跳过来的 → 退回词库，接着背下一条
+  if (from === "vocab") {
+    return { href: "/library/vocab", label: "返回全部词库" };
   }
   return { href: "/watch", label: "返回观看列表" };
 }

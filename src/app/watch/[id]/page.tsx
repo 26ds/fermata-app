@@ -2,10 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
+import { LangBootstrap } from "@/components/lang-bootstrap";
 import { SetupNotice } from "@/components/setup-notice";
 import { WatchStage } from "@/components/watch-stage";
 import type { PausePoint } from "@/components/pause-list";
 import type { SourceRow } from "@/lib/types";
+import { getLangPrefs } from "@/lib/settings";
 import { sourceOriginUrl } from "@/lib/source-origin";
 import { watchBackTarget } from "@/lib/nav";
 
@@ -58,6 +60,19 @@ export default async function WatchDetailPage({
     .order("t_s", { ascending: true });
   const interrupts = (interruptRows ?? []) as PausePoint[];
 
+  // M3.7 / D42：三个语言（母语 / 目标语言 / 译文语言）。
+  // 词库要标什么、AI 用哪门语言答、字幕译成什么，全从这里推 —— 不许硬编码。
+  const prefs = await getLangPrefs(supabase, user.id);
+
+  // M3.7：这条内容里已经收进词库的（首屏 ✓ 就该是实心的，不能等请求回来才补上）。
+  // 表还没建 / 查失败一律当"一个都没收"，别让词库把观看页拖下水。
+  const { data: atomRows } = await supabase
+    .from("atoms")
+    .select("id, term")
+    .eq("source_id", id)
+    .eq("user_id", user.id);
+  const savedAtoms = (atomRows ?? []) as { id: string; term: string }[];
+
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-48 opacity-50" />
@@ -89,11 +104,14 @@ export default async function WatchDetailPage({
       </header>
 
       <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
+        <LangBootstrap prefs={prefs} />
         <WatchStage
           source={source}
           interrupts={interrupts}
           startAtS={startAtS}
           startInChat={chat === "1"}
+          prefs={prefs}
+          savedAtoms={savedAtoms}
         />
       </main>
     </div>

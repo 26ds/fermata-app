@@ -101,6 +101,11 @@ export async function POST(request: Request) {
       title: meta.title,
       duration_s: meta.durationS,
       transcript_status: "pending",
+      // D42：这一列的数据库默认值是 `'en'` —— 一条早期的偏见。刚导入时我们**根本
+      // 还不知道**这条内容是什么语言（字幕都没转），写 `'en'` 是在编。写 null =
+      // 如实的"还不知道"，等 /api/transcript 拿到模型实测的语言再回填。
+      // 迁移不改默认（D42 定的），靠这里显式写值把默认值架空。
+      content_lang: null,
     })
     .select("id")
     .single();

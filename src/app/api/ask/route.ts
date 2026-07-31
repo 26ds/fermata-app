@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { askQuestion, AskError } from "@/lib/ask/gemini-ask";
+import { getLangPrefs } from "@/lib/settings";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
@@ -80,6 +81,9 @@ export async function POST(request: Request) {
     );
   }
 
+  // D42：答案用哪门语言是**已知事实**（他自己设的母语），不该让模型从问句猜
+  const prefs = await getLangPrefs(supabase, user.id);
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const push = (payload: unknown) => {
@@ -98,6 +102,7 @@ export async function POST(request: Request) {
           windowEndS: Number(interrupt.window_end_s),
           tS: Number(interrupt.t_s),
           title: source.title,
+          nativeLang: prefs.nativeLang,
           onChunk: async (text) => push({ type: "chunk", text }),
         });
 

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { AskError } from "@/lib/ask/gemini-ask";
 import { askChat, type ChatTurn } from "@/lib/ask/gemini-chat";
+import { getLangPrefs } from "@/lib/settings";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
@@ -135,6 +136,9 @@ export async function POST(request: Request) {
   // 本次会话的实时几轮 = 还没折进 summary 的那部分
   const liveTurns = existing.slice(upto);
 
+  // D42：显式告诉引擎用哪门语言答，别让它从问句猜
+  const prefs = await getLangPrefs(supabase, user.id);
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const push = (payload: unknown) => {
@@ -153,6 +157,7 @@ export async function POST(request: Request) {
           title: source.title,
           priorSummary: chatRow.summary ?? null,
           liveTurns,
+          nativeLang: prefs.nativeLang,
           onChunk: async (text) => push({ type: "chunk", text }),
         });
 

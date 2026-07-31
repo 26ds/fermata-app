@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { PauseList, type PausePoint } from "@/components/pause-list";
+import { VocabList, type VocabItem } from "@/components/vocab-list";
 import { withFrom } from "@/lib/nav";
 import type { TranscriptSegment } from "@/lib/types";
 
@@ -26,7 +27,6 @@ const COPY = {
   dayYesterday: "昨天",
   dayUnknown: "时间不详",
   emptyPauses: "这条内容你还没停过。回观看页看的时候点右下角悬浮球，停下的每一刻都会记在这里。",
-  vocabSoon: "词库还没做好。等它上线，你在字幕上勾中的词组会存到这里，点一下就能跳回它出现的那一秒。",
   deleteFailed: "没删掉，请重试",
 };
 
@@ -67,11 +67,14 @@ export function LibraryDetail({
   points,
   transcript,
   chatRounds,
+  vocab = [],
 }: {
   sourceId: string;
   points: DatedPausePoint[];
   transcript: TranscriptSegment[] | null;
   chatRounds: number;
+  /** M3.7：本片词库（tab2）。跨视频的那份在 `/library/vocab` */
+  vocab?: VocabItem[];
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<"pauses" | "vocab">("pauses");
@@ -170,12 +173,8 @@ export function LibraryDetail({
       </div>
 
       {tab === "vocab" ? (
-        <div className="mt-6 rounded-2xl border border-dashed border-ink-700 px-5 py-10 text-center">
-          <span className="text-2xl text-ink-500" aria-hidden>
-            ✓
-          </span>
-          <p className="mt-3 text-sm leading-6 text-ink-500">{COPY.vocabSoon}</p>
-        </div>
+        // M3.7：本片词库。点一条跳回观看页那一秒，返回箭头退回**这一页**（from=library）
+        <VocabList items={vocab} from="library" />
       ) : (
         <div className="mt-4 flex flex-col gap-4">
           {/* 沉浸聊天不锚在某一秒，所以它单独占一行、排在所有日期分堆之上

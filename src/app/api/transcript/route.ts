@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { normalizeLang } from "@/lib/lang";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { providersFor } from "@/lib/transcript/registry";
@@ -119,7 +120,9 @@ export async function POST(request: Request) {
       transcript: segments.slice(0, MAX_SEGMENTS),
       transcript_status: status,
     };
-    if (lang) patch.content_lang = lang;
+    // D42：模型报的可能是 `"english"` 这种全称，落库前归一成码 —— 库里三种写法混着，
+    // 后面"这条内容是不是他母语"的判断就没法做了
+    if (lang) patch.content_lang = normalizeLang(lang);
     await supabase.from("sources").update(patch).eq("id", source.id).eq("user_id", user.id);
   };
 

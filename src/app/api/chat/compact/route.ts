@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { AskError } from "@/lib/ask/gemini-ask";
 import { compactChat, type ChatTurn } from "@/lib/ask/gemini-chat";
+import { getLangPrefs } from "@/lib/settings";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow } from "@/lib/types";
@@ -60,7 +61,14 @@ export async function POST(request: Request) {
 
   let summary: string;
   try {
-    summary = await compactChat({ priorSummary: chat.summary ?? null, turns, title });
+    // D42：备忘会被塞回下一轮的 systemInstruction —— 它的语言错了，后面每一轮都跟着错
+    const prefs = await getLangPrefs(supabase, user.id);
+    summary = await compactChat({
+      priorSummary: chat.summary ?? null,
+      turns,
+      title,
+      nativeLang: prefs.nativeLang,
+    });
   } catch (e) {
     const message = e instanceof AskError ? e.message : "浓缩这次对话时出错了，稍后再试。";
     return NextResponse.json({ error: message }, { status: 500 });

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { normalizeLang } from "@/lib/lang";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { getCachedTranslation, putCachedTranslation } from "@/lib/translate/cache";
@@ -81,11 +82,14 @@ export async function POST(request: Request) {
   }
 
   const contentKey = source.external_id;
-  // content_lang 非空列，默认空串 —— 空串当「原文语言未知」，归 null
-  const sourceLang = source.content_lang || null;
+  // 空 = 原文语言未知（还没转写，或模型没报），归 null。
+  // **M3.7 加了归一化**（D42）：转写模型报的是 `"english"` 这样的全称，而目标语言是 `"en"` ——
+  // 不归一的话下面那个"同语言"判断永远不成立，等于花钱把英文翻成英文。
+  // 归一后仍是**精确比较**，不用 sameLang：简体→繁体是真的要转换的，不能当同一门语言给略过。
+  const sourceLang = normalizeLang(source.content_lang) || null;
 
   // 目标语言就是原文语言 —— 不用翻，让客户端只显示原文
-  if (sourceLang && sourceLang === targetLang) {
+  if (sourceLang && sourceLang === normalizeLang(targetLang)) {
     return ndjsonOnce([{ type: "same-language", lang: targetLang }]);
   }
 

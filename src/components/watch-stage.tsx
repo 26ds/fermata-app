@@ -1,13 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { activeSegmentIndex } from "@/lib/captions";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { activeSegmentIndex, segmentsInWindow } from "@/lib/captions";
 import { CaptionLayer } from "@/components/caption-layer";
 import { CaptureOrb } from "@/components/capture-orb";
 import { DotBar } from "@/components/dot-bar";
 import { ImmersiveChat } from "@/components/immersive-chat";
-import { InterruptPanel } from "@/components/interrupt-panel";
+import { InterruptPanel, type PanelLine } from "@/components/interrupt-panel";
 import type { PausePoint } from "@/components/pause-list";
+import { DEFAULT_LANG_PREFS, type LangPrefs } from "@/lib/lang";
+import { isPhraseScan, resolvePhrases, type PhraseItem, type PhraseScan } from "@/lib/phrases/types";
+import { putSettings } from "@/lib/settings-client";
 import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
 import { mmss } from "@/lib/time";
@@ -26,6 +29,8 @@ export function WatchStage({
   interrupts,
   startAtS,
   startInChat,
+  prefs = DEFAULT_LANG_PREFS,
+  savedAtoms = [],
 }: {
   source: SourceRow;
   interrupts: PausePoint[];
@@ -36,6 +41,10 @@ export function WatchStage({
   startAtS?: number | null;
   /** M3.6：`?chat=1`。从回看页点「和这条内容聊过 N 轮」过来的，落地直接进沉浸层 */
   startInChat?: boolean;
+  /** M3.7 / D42：三个语言（母语 / 目标语言 / 译文语言），服务端读出来传下来 */
+  prefs?: LangPrefs;
+  /** M3.7：这条内容里已经收进词库的词组（决定 ✓ 是实心还是空心） */
+  savedAtoms?: { id: string; term: string }[];
 }) {
   // 只问"用哪个壳"。这条链接是什么平台、叫什么名字，是服务端 registry 的活（M1d）
   const shell = playerFor(source.kind);
@@ -99,6 +108,26 @@ export function WatchStage({
   // M3 Phase-2：长问答沉浸聊天是观看页上的一层浮层（状态开关，不是新路由）——
   // 播放器实例永不卸载，退出不重载、不跳回开头（WORKORDER D33 / design §99）。
   const [immersive, setImmersive] = useState(Boolean(startInChat));
+
+  // === M3.7 词库（D40 + D42） ===
+  // 整片扫出来的词组。首屏直接吃服务端那份（`sources.phrases`）—— 扫过的片子
+  // **一进来高亮就在**，不用等任何请求（验收⑤"重看不再花钱"的可见部分）。
+  const [scan, setScan] = useState<PhraseScan | null>(
+    isPhraseScan(source.phrases) ? source.phrases : null,
+  );
+  const [scanning, setScanning] = useState(false);
+  /** D42：内容不是他母语、又没问过 —— 有值时面板上弹那一句问询。答完即定 */
+  const [needTargetLang, setNeedTargetLang] = useState("");
+  /** 已收进词库的：词组原文 → atom id（取消勾选要用 id） */
+  const [savedMap, setSavedMap] = useState<Map<string, string>>(
+    () => new Map(savedAtoms.map((a) => [a.term, a.id])),
+  );
+  const scanTriedRef = useRef(false);
+  const scanRunningRef = useRef(false);
+  const savedRef = useRef(savedMap);
+  useEffect(() => {
+    savedRef.current = savedMap;
+  }, [savedMap]);
   // 量「视频底缘」给沉浸磨砂层用（磨砂从这条线往下铺，不碰视频本体）
   const videoWrapRef = useRef<HTMLDivElement>(null);
 
@@ -187,6 +216,111 @@ export function WatchStage({
     [savePosition, markWatched],
   );
 
+  /**
+   * M3.7 / D40 —— **懒触发**整片扫词组：第一次在这片子里暂停时后台跑一次，
+   * 不看的片子一分钱不花。服务端已经扫过就原样返回（不重复计费）。
+   *
+   * 全程静默失败：扫不出来只是没有高亮，**面板照常能问、视频照常能看** ——
+   * 词库这一片不许把观看页拖下水。
+   */
+  const ensurePhrases = useCallback(
+    async (force = false) => {
+      if (scanRunningRef.current) return;
+      if (scanTriedRef.current && !force) return;
+      scanTriedRef.current = true;
+      scanRunningRef.current = true;
+      setScanning(true);
+      try {
+        // 长内容一轮扫不完（服务端有 150 秒软预算），最多接力 3 轮
+        for (let round = 0; round < 3; round++) {
+          const res = await fetch("/api/phrases", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ sourceId: source.id }),
+          });
+          const body = await res.json().catch(() => ({}));
+          if (!res.ok) break;
+          if (body.status === "need-target") {
+            setNeedTargetLang(String(body.contentLang ?? ""));
+            break;
+          }
+          if (isPhraseScan(body.phrases)) setScan(body.phrases);
+          if (body.status !== "partial") break; // ready / not-ready / running 都不用再打
+        }
+      } catch {
+        // 网络抽风：下次暂停再说
+      } finally {
+        scanRunningRef.current = false;
+        setScanning(false);
+      }
+    },
+    [source.id],
+  );
+
+  /** D42 那一句问询的答案。答完立刻存，并接着把这条内容按正确的模式扫一遍 */
+  const answerTarget = useCallback(
+    (learn: boolean) => {
+      const value = learn ? needTargetLang : ""; // "" = 问过了、不学语言（和"没问过"分得开）
+      setNeedTargetLang("");
+      void putSettings({ targetLang: value }).then(() => {
+        scanTriedRef.current = false;
+        void ensurePhrases(true);
+      });
+    },
+    [needTargetLang, ensurePhrases],
+  );
+
+  /**
+   * 勾 / 取消勾一个词组。乐观更新 —— 打勾要立刻有反应，落库慢一拍不该让人等。
+   * 失败就回滚，别让一个假的实心勾骗人说"已经收进去了"。
+   */
+  const toggleTerm = useCallback(
+    async (phrase: PhraseItem) => {
+      const existingId = savedRef.current.get(phrase.text);
+      if (existingId) {
+        setSavedMap((prev) => {
+          const next = new Map(prev);
+          next.delete(phrase.text);
+          return next;
+        });
+        try {
+          const res = await fetch(`/api/atoms/${existingId}`, { method: "DELETE" });
+          if (!res.ok) throw new Error("delete failed");
+        } catch {
+          setSavedMap((prev) => new Map(prev).set(phrase.text, existingId));
+        }
+        return;
+      }
+
+      const temp = `temp-${Date.now()}`;
+      setSavedMap((prev) => new Map(prev).set(phrase.text, temp));
+      try {
+        const res = await fetch("/api/atoms", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sourceId: source.id,
+            term: phrase.text,
+            gloss: phrase.gloss,
+            // 它出现的那句原话 —— 复习时光看一个孤零零的词组是想不起来的
+            contextQuote: segmentsRef.current[phrase.i]?.text ?? "",
+            tS: phrase.t,
+          }),
+        });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok || !body?.atom?.id) throw new Error("save failed");
+        setSavedMap((prev) => new Map(prev).set(phrase.text, String(body.atom.id)));
+      } catch {
+        setSavedMap((prev) => {
+          const next = new Map(prev);
+          if (next.get(phrase.text) === temp) next.delete(phrase.text);
+          return next;
+        });
+      }
+    },
+    [source.id],
+  );
+
   const postInterrupt = useCallback(
     async (tS: number, mode: QuestionMode | null): Promise<PausePoint> => {
       const res = await fetch("/api/interrupts", {
@@ -217,6 +351,8 @@ export function WatchStage({
       }
       setAsk({ asking: false, answer: "", error: "" }); // 新一轮问答，清掉上次答案
       setPanel({ open: true, tS, id: null, captured: capture });
+      // D40 懒触发：**第一次在这片子里停下来**才去扫词组。打开页面就扫等于替他花钱
+      void ensurePhrases();
 
       if (capture) {
         const tempId = `temp-${Date.now()}`;
@@ -239,7 +375,7 @@ export function WatchStage({
         panelIdRef.current = null; // 还没落库，等真问了再记
       }
     },
-    [postInterrupt],
+    [postInterrupt, ensurePhrases],
   );
 
   const closePanel = useCallback(() => {
@@ -614,6 +750,24 @@ export function WatchStage({
     };
   }, [savePosition]);
 
+  // M3.7：把扫描结果对齐回**当前**字幕。字幕会变（转到一半会继续长、还能重新粘一份），
+  // 下标错位就会把高亮标到别的句子上 —— `resolvePhrases` 逐条校验，对不上的宁可不标。
+  // useMemo：字幕层是 250ms 的热路径，这个绝不能每帧重算。
+  const highlights = useMemo(() => resolvePhrases(scan, transcript ?? []), [scan, transcript]);
+  const savedTerms = useMemo(() => new Set(savedMap.keys()), [savedMap]);
+
+  // D39：面板里那两秒（`[t−2, t]`）。"有重叠即算"，所以拿到的是覆盖那两秒的完整一两句，
+  // 不会切半句。纯前端从已加载的字幕里切，不发请求。
+  const panelLines: PanelLine[] = useMemo(() => {
+    if (!panel.open) return [];
+    const segs = transcript ?? [];
+    return segmentsInWindow(segs, panel.tS - 2, panel.tS).map((seg) => {
+      const i = segs.indexOf(seg);
+      const phrase = highlights.get(i);
+      return { i, text: seg.text, phrase, saved: !!phrase && savedTerms.has(phrase.text) };
+    });
+  }, [panel.open, panel.tS, transcript, highlights, savedTerms]);
+
   if (!shell) {
     return (
       <div className="rounded-2xl border border-ink-700 p-5 text-sm text-ink-300">
@@ -686,6 +840,10 @@ export function WatchStage({
         kind={source.kind}
         getCurrentTime={getCurrentTime}
         onSeek={handleSeek}
+        captionLang={prefs.captionLang}
+        highlights={highlights}
+        savedTerms={savedTerms}
+        onToggleTerm={toggleTerm}
         generation={{
           running: gen.running,
           coveredS: gen.coveredS,
@@ -718,6 +876,11 @@ export function WatchStage({
         onJustCapture={handleJustCapture}
         onEnterImmersive={enterImmersive}
         onClose={closePanel}
+        lines={panelLines}
+        scanning={scanning}
+        onToggleTerm={toggleTerm}
+        needTargetLang={needTargetLang}
+        onAnswerTarget={answerTarget}
       />
 
       {immersive && (

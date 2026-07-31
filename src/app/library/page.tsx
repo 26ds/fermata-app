@@ -128,21 +128,27 @@ export default async function LibraryPage({
         </section>
 
         {/* 从首页搬过来的「知识原子」（D37）。攒下来的东西该和"看过什么"待在一起。
-            这里收成一条细带：M3.7 之前它的数字一直是 0，摆一个整屏空态只会把历史列表挤到屏外 */}
-        <section
-          className="mt-6 flex items-center justify-between gap-3 rounded-2xl border border-ink-500/50 bg-ink-700 px-4 py-3"
-          aria-labelledby="atoms-title"
+            收成一条细带而不是整屏空态，免得把历史列表挤到屏外。
+            M3.7：数字变成真的，并且**点得进去**了 —— 背词是跨视频的事（D40），
+            所以全部词库单独一页，不塞在某条内容底下 */}
+        <Link
+          href="/library/vocab"
+          className="mt-6 flex items-center justify-between gap-3 rounded-2xl border border-ink-500/50 bg-ink-700 px-4 py-3 transition-colors hover:border-teal-400/60"
+          aria-label={`${COPY.atomsTitle}：${atomCount} 条`}
         >
-          <div className="min-w-0">
-            <p id="atoms-title" className="text-sm font-semibold text-ink-100">
-              {COPY.atomsTitle}
-            </p>
-            <p className="mt-0.5 truncate text-xs text-ink-500">{COPY.atomsHint}</p>
-          </div>
-          <span className="shrink-0 rounded-full border border-ink-500/50 px-2.5 py-1 text-xs tabular-nums text-ink-300">
-            {String(atomCount).padStart(2, "0")} atoms
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-ink-100">{COPY.atomsTitle}</span>
+            <span className="mt-0.5 block truncate text-xs text-ink-500">{COPY.atomsHint}</span>
           </span>
-        </section>
+          <span className="flex shrink-0 items-center gap-2">
+            <span className="rounded-full border border-ink-500/50 px-2.5 py-1 text-xs tabular-nums text-ink-300">
+              {String(atomCount).padStart(2, "0")} atoms
+            </span>
+            <span aria-hidden className="text-ink-500">
+              →
+            </span>
+          </span>
+        </Link>
 
         <section className="mt-7" aria-labelledby="history-tabs">
           <div className="flex items-center justify-between border-b border-ink-500/30 pb-3">

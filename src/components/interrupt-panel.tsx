@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { PhraseCheck, PhraseText } from "@/components/phrase-line";
+import { langLabel } from "@/lib/lang";
+import type { PhraseItem } from "@/lib/phrases/types";
 import { mmss } from "@/lib/time";
 
 // M3 打断问答 —— 面板从「只记类型的壳」变成「当场问、AI 扣着字幕答」。
@@ -8,12 +11,47 @@ import { mmss } from "@/lib/time";
 // 通用问答，不套教学法（苏格拉底式反问是 M4，教学法唯一来源 SKILL.md）。
 // 问答的流式与落库在父组件 + /api/ask 那边做，这里只负责：收问题、显示流式答案。
 // D18：半屏玻璃、不遮视频。WORKORDER 材质纪律：玻璃只用于壳，**AI 答案正文实底高对比**。
+//
+// === M3.7 / D39 改造：面板从两态变三态 ===
+// 创始人指出的矛盾：暂停自动弹出的这块面板**盖住了字幕**，而挑词组恰恰要读字幕。
+// 否掉了"做成设置开关"（开关逼人**提前**决定这一场是想问还是想挑词，可意图是逐次变的）。
+// 定案是把要读的东西搬进来 + 让面板能缩：
+//   展开 —— 顶部多一块「刚才这两秒」（原句 + 高亮词组 + ✓），盖住下面的字幕条无所谓
+//   细条 —— 点顶部横杠收成一根，字幕**全露出来**，还能往回翻着勾（验收③）
+//   关闭 —— 细条上的 ×、展开态的「取消」、Esc
+// ⚠️ 行为变更：横杠原来是"关闭"，现在是"收起"。
+
+/** D42：文案集中在顶部，M3.9 抽语言表时只动这一处 */
+const COPY = {
+  stuckAt: "卡在",
+  askHint: "问一句，我扣着这段字幕答你。",
+  lastTwoSeconds: "刚才这两秒",
+  scanning: "正在把这条内容里值得收的表达标出来…",
+  noCaptionHere: "这一刻附近没有字幕。",
+  collapse: "收起面板，让字幕露出来",
+  expand: "展开面板",
+  close: "关闭",
+  askShort: "问一句",
+  addWord: "＋词",
+  targetTitle: (lang: string) => `这条内容是 ${lang}。`,
+  targetQuestion: "你是想学这门语言，还是只想搞懂内容？",
+  targetLearn: (lang: string) => `我想学 ${lang}`,
+  targetJustContent: "只想搞懂内容",
+};
 
 /** 快捷问：一键把常见困惑问出去，不用打字。语音提问是 Phase-2（长按球接 Live），这里先留个说明 */
 const QUICK: { label: string; hint: string; question: string }[] = [
   { label: "解释这段", hint: "整段没跟上", question: "把刚才这段内容讲清楚一点，我没跟上。" },
   { label: "有个词没听懂", hint: "卡在某个词", question: "刚才这段里有没有比较难懂的词或术语？挑出来解释一下。" },
 ];
+
+/** 面板里那两秒的一行字幕 */
+export interface PanelLine {
+  i: number;
+  text: string;
+  phrase?: PhraseItem;
+  saved: boolean;
+}
 
 interface InterruptPanelProps {
   open: boolean;
@@ -34,6 +72,20 @@ interface InterruptPanelProps {
   /** 入口二：进入长问答沉浸聊天（design §C：两个快捷问下方） */
   onEnterImmersive(): void;
   onClose(): void;
+
+  // ── M3.7 / D39：面板里读字幕、挑词组 ──
+  /** `[t−2, t]` 的原句（D39 定死的窗口）。纯前端从已加载的字幕里切，不发请求 */
+  lines?: PanelLine[];
+  /** 整片扫描还在跑（第一次在这片子里暂停时后台触发） */
+  scanning?: boolean;
+  /** 勾 / 取消勾一个词组 */
+  onToggleTerm?: (phrase: PhraseItem) => void;
+  /**
+   * D42：还没问过他"想学这门语言还是只想搞懂内容"。
+   * 有值 = 这条内容的语言码，**只问这一次**，答完即定。
+   */
+  needTargetLang?: string;
+  onAnswerTarget?: (learn: boolean) => void;
 }
 
 export function InterruptPanel({
@@ -47,11 +99,21 @@ export function InterruptPanel({
   onJustCapture,
   onEnterImmersive,
   onClose,
+  lines = [],
+  scanning = false,
+  onToggleTerm,
+  needTargetLang = "",
+  onAnswerTarget,
 }: InterruptPanelProps) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // D39：收成细条。**每次重开都回到展开** —— 上次收起来了不代表这次也想收着
+  const [collapsed, setCollapsed] = useState(false);
   const answerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  /** 横杠上手指按下的位置 —— 往下拖 30px 以上就收起（D39：下拉收成细条） */
+  const dragFromRef = useRef<number | null>(null);
 
   // 每次重新打开都清掉上一轮的输入/报错。渲染期校正，别用 effect（免得先闪一帧旧状态）
   const [seenOpen, setSeenOpen] = useState(open);
@@ -60,13 +122,15 @@ export function InterruptPanel({
     setInput("");
     setError("");
     setBusy(false);
+    setCollapsed(false);
   }
 
-  // 打开时锁背景滚动 + Esc 关闭
+  // 展开时锁背景滚动 + Esc 关闭。
+  // **收成细条时不锁** —— 细条的全部意义就是让人去翻下面那条字幕列表（D39 验收③）
   useEffect(() => {
     if (!open) return;
     const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    if (!collapsed) document.body.style.overflow = "hidden";
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -75,7 +139,7 @@ export function InterruptPanel({
       document.body.style.overflow = previous;
       document.removeEventListener("keydown", onKey);
     };
-  }, [open, onClose]);
+  }, [open, collapsed, onClose]);
 
   // 答案边长边把视图滚到底，别让新句子长在看不见的地方
   useEffect(() => {
@@ -107,6 +171,53 @@ export function InterruptPanel({
 
   const showAnswer = asking || answer || askError;
 
+  // D39 细条：只留「问一句」「＋词」「×」，其余全让给字幕
+  if (collapsed) {
+    return (
+      <div className="fixed inset-x-0 bottom-0 z-[60] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <div role="dialog" aria-label="打断面板（已收起）" className="glass flex items-center gap-2 rounded-2xl px-3 py-2">
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label={COPY.expand}
+            className="flex h-8 w-10 shrink-0 items-center justify-center"
+          >
+            <span className="h-1 w-7 rounded-full bg-ink-500/60" aria-hidden />
+          </button>
+          <span className="ui-mono shrink-0 text-xs text-teal-300">{mmss(tS)}</span>
+          <span className="flex-1" />
+          <button
+            type="button"
+            onClick={() => {
+              setCollapsed(false);
+              // 展开后把光标送进输入框 —— 少一次点击
+              window.setTimeout(() => inputRef.current?.focus(), 60);
+            }}
+            className="min-h-9 shrink-0 rounded-xl border border-ink-500/60 px-3 text-xs text-ink-100 hover:border-teal-400 hover:text-teal-300"
+          >
+            {COPY.askShort}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCollapsed(false)}
+            aria-label="回到暂停那两秒挑词"
+            className="min-h-9 shrink-0 rounded-xl border border-ink-500/60 px-3 text-xs text-ink-100 hover:border-teal-400 hover:text-teal-300"
+          >
+            {COPY.addWord}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={COPY.close}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-base text-ink-500 hover:text-teal-300"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     // D18：**最多占屏幕下半，绝不遮住视频**（没有全屏遮罩）。抓手 / 取消 / Esc 三个入口关闭。
     // z-60：盖住 z-50 的悬浮球
@@ -116,25 +227,117 @@ export function InterruptPanel({
         aria-labelledby="interrupt-title"
         className="glass flex max-h-[50dvh] flex-col overflow-y-auto rounded-t-3xl px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.6)]"
       >
+        {/* D39：横杠改成「收起成细条」（原来是关闭）。点一下收，往下拖也收 ——
+            要彻底关掉走底下的「取消」或 Esc。**一层层退，不是一脚关到底**（同 D43 的脾气） */}
         <button
           type="button"
-          onClick={onClose}
-          aria-label="收起"
+          onClick={() => setCollapsed(true)}
+          onTouchStart={(e) => {
+            dragFromRef.current = e.touches[0]?.clientY ?? null;
+          }}
+          onTouchEnd={(e) => {
+            const from = dragFromRef.current;
+            dragFromRef.current = null;
+            const to = e.changedTouches[0]?.clientY;
+            if (from != null && to != null && to - from > 30) setCollapsed(true);
+          }}
+          aria-label={COPY.collapse}
           className="mx-auto mb-3 flex h-6 w-16 shrink-0 items-center justify-center"
         >
           <span className="h-1 w-10 rounded-full bg-ink-500/60" aria-hidden />
         </button>
 
-        <p id="interrupt-title" className="text-base font-semibold text-ink-100">
-          卡在 <span className="ui-mono text-teal-300">{mmss(tS)}</span>
-        </p>
-        <p className="mt-1 text-xs leading-5 text-ink-500">
-          问一句，我扣着这段字幕答你。
-        </p>
+        {/* 横杠改成"收起"之后，关掉面板本来要滑到最底下按「取消」——
+            面板现在更高了（多了那两秒字幕），那等于把"我不想要这个"变成两步。
+            右上角补一个 ×，一步关掉的路留着。 */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p id="interrupt-title" className="text-base font-semibold text-ink-100">
+              {COPY.stuckAt} <span className="ui-mono text-teal-300">{mmss(tS)}</span>
+            </p>
+            <p className="mt-1 text-xs leading-5 text-ink-500">{COPY.askHint}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={COPY.close}
+            className="-mr-1 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-base text-ink-500 transition-colors hover:text-teal-300"
+          >
+            ×
+          </button>
+        </div>
+
+        {/* ── D42：只问这一句（内容不是他母语、且从没问过）。答完即定，不再问第二次 ── */}
+        {needTargetLang && onAnswerTarget && (
+          <div className="mt-3 shrink-0 rounded-2xl border border-teal-400/40 bg-ink-700/70 px-4 py-3">
+            <p className="text-sm leading-6 text-ink-100">
+              {COPY.targetTitle(langLabel(needTargetLang))}
+              <br />
+              {COPY.targetQuestion}
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={() => onAnswerTarget(true)}
+                className="min-h-11 flex-1 rounded-xl bg-teal-400 px-3 text-sm font-semibold text-teal-950 hover:bg-teal-300"
+              >
+                {COPY.targetLearn(langLabel(needTargetLang))}
+              </button>
+              <button
+                type="button"
+                onClick={() => onAnswerTarget(false)}
+                className="min-h-11 flex-1 rounded-xl border border-ink-500/60 px-3 text-sm text-ink-100 hover:border-teal-400 hover:text-teal-300"
+              >
+                {COPY.targetJustContent}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── D39：把要读的东西搬进面板里 ——「刚才这两秒」的原句 + 高亮 + ✓。
+            盖住下面的字幕条就无所谓了，因为要读的已经在这儿了。 ── */}
+        {!needTargetLang && !showAnswer && (
+          <div className="mt-3 shrink-0 rounded-2xl border border-ink-500/50 bg-ink-900/50 px-3 py-2.5">
+            <div className="flex items-baseline justify-between">
+              <p className="eyebrow">{COPY.lastTwoSeconds}</p>
+              {scanning && <span className="ui-mono text-[0.62rem] text-teal-300/80">扫描中…</span>}
+            </div>
+            {lines.length === 0 ? (
+              <p className="mt-1.5 text-xs leading-5 text-ink-500">
+                {scanning ? COPY.scanning : COPY.noCaptionHere}
+              </p>
+            ) : (
+              <ul className="mt-1.5 flex flex-col gap-1.5">
+                {lines.map((l) => (
+                  <li key={l.i}>
+                    <div className="flex items-start gap-2">
+                      <PhraseText
+                        text={l.text}
+                        phrase={l.phrase}
+                        saved={l.saved}
+                        onToggle={onToggleTerm}
+                        className="min-w-0 flex-1 text-sm leading-6 text-ink-100"
+                      />
+                      <PhraseCheck phrase={l.phrase} saved={l.saved} onToggle={onToggleTerm} />
+                    </div>
+                    {/* 解释就跟在它自己那一行下面 —— 两行都标了词的时候，
+                        把解释堆在最后会让人对不上是谁的 */}
+                    {l.phrase && (
+                      <p className="mt-0.5 pl-0.5 text-[0.68rem] leading-4 text-ink-500">
+                        {l.phrase.text} · {l.phrase.gloss}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* 提问框 */}
         <div className="mt-3 shrink-0">
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {

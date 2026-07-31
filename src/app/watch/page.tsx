@@ -3,7 +3,9 @@ import { redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { BottomNav } from "@/components/bottom-nav";
+import { LangBootstrap } from "@/components/lang-bootstrap";
 import { SetupNotice } from "@/components/setup-notice";
+import { getLangPrefs } from "@/lib/settings";
 import { ImportForm } from "@/components/import-form";
 import { SourceList, type SourceListItem } from "@/components/source-list";
 
@@ -82,8 +84,13 @@ export default async function WatchPage({
     flagsEnabled ? null : "0003_source_flags.sql",
   ].filter(Boolean);
 
+  // D42：母语探一次就够（`navigator.language`）。放在登录后最常落地的这一页，
+  // 让它在真正需要语言判定（词库扫描）之前就已经有值。
+  const prefs = await getLangPrefs(supabase, user.id);
+
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
+      <LangBootstrap prefs={prefs} />
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-64 opacity-60" />
       <header className="relative flex items-center justify-between px-5 pb-4 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8">
         {/* M3.6：/watch 从"首页的下一级"升成了底部第一个 tab（D37），

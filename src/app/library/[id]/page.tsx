@@ -4,6 +4,7 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/setup-notice";
 import { LibraryDetail, type DatedPausePoint } from "@/components/library-detail";
+import type { VocabItem } from "@/components/vocab-list";
 import { thumbUrlFor } from "@/lib/thumb";
 import { withFrom } from "@/lib/nav";
 import { hms } from "@/lib/time";
@@ -65,6 +66,16 @@ export default async function LibraryDetailPage({
   const chatMessages = (chatRow as { messages?: unknown } | null)?.messages;
   const chatRounds = Array.isArray(chatMessages) ? Math.ceil(chatMessages.length / 2) : 0;
 
+  // M3.7 tab2：本片词库。表在（0001）、`t_s` 也在（0007 已跑）；
+  // 万一查不到就当空，别为一个 tab 把整页搞塌
+  const { data: atomRows } = await supabase
+    .from("atoms")
+    .select("id, term, gloss, context_quote, t_s, source_id")
+    .eq("source_id", id)
+    .eq("user_id", user.id)
+    .order("created_at", { ascending: false });
+  const vocab = (atomRows ?? []) as VocabItem[];
+
   const thumb = thumbUrlFor(source);
 
   return (
@@ -120,6 +131,7 @@ export default async function LibraryDetailPage({
           points={points}
           transcript={source.transcript}
           chatRounds={chatRounds}
+          vocab={vocab}
         />
       </main>
     </div>

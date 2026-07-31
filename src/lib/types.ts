@@ -26,7 +26,11 @@ export interface SourceRow {
   external_id: string | null;
   url: string | null;
   title: string | null;
-  content_lang: string;
+  /**
+   * 这条内容是什么语言。**可空 = 还不知道**（刚导入、字幕还没转）——
+   * D42：不许拿数据库默认的 `'en'` 冒充"已知是英文"。转写时由模型实测回填。
+   */
+  content_lang: string | null;
   duration_s: number | null;
   /** 上次退出前播放到第几秒（迁移 0002） */
   last_position_s: number | null;
@@ -41,6 +45,10 @@ export interface SourceRow {
   watch_count?: number | null;
   /** 播客封面（导入时从 RSS/苹果接口存）。YouTube 不用，缩略图由 external_id 拼 */
   thumb_url?: string | null;
+  /** M3.7 词库：整片扫出来的词组（`PhraseScan`，见 lib/phrases/types.ts）。用 unknown 是因为它是 jsonb */
+  phrases?: unknown;
+  /** `ready` / `partial` / `running@<ISO>`（并发锁）/ 空 = 还没扫过 */
+  phrases_status?: string | null;
 }
 
 /** interrupts 表行：打断点指针 (source, t) + 上下文窗口 [t−15, t+3] */

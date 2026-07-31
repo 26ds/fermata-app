@@ -1,7 +1,7 @@
 import { explainGeminiError } from "@/lib/transcript/gemini-youtube";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
-import { AskError, backgroundText, clientFor, windowText } from "./gemini-ask";
+import { AskError, answerLanguageRule, backgroundText, clientFor, windowText } from "./gemini-ask";
 
 // M3 Phase-2 长问答沉浸聊天引擎。
 //
@@ -37,6 +37,8 @@ export interface AskChatContext {
   priorSummary: string | null;
   /** 本次会话到目前为止的逐轮（不含正在问的这句） */
   liveTurns: ChatTurn[];
+  /** D42：用户母语 —— 显式指定答案用哪门语言，不靠模型从问句猜。空 = 还不知道 */
+  nativeLang?: string | null;
   onChunk: (text: string) => void | Promise<void>;
 }
 
@@ -45,7 +47,7 @@ function groundingInstruction(ctx: AskChatContext): string {
   const focus = windowText(ctx.segments, ctx.atS - WINDOW_BEFORE_S, ctx.atS + WINDOW_AFTER_S);
   const background = backgroundText(ctx.segments);
   const parts = [
-    `你是学习助手，正陪用户看 ${where}、边看边聊。直接、简洁地接着对话回答，扣住他现在看的这段和你们聊过的；别跑题、别编内容里没有的、别反问让他先猜。用他的语言。` +
+    `你是学习助手，正陪用户看 ${where}、边看边聊。直接、简洁地接着对话回答，扣住他现在看的这段和你们聊过的；别跑题、别编内容里没有的、别反问让他先猜。${answerLanguageRule(ctx.nativeLang)}` +
       `\n像面对面聊天一样自然地说：**不要用 markdown**——不要 ** 加粗、不要 * 或 - 或 1. 2. 这类列表符号、不要 # 标题。要分点就用短句加换行，别用符号。语气口语、干脆。`,
   ];
   if (ctx.priorSummary?.trim()) {
@@ -102,11 +104,14 @@ export interface CompactChatContext {
   /** 这次要折进备忘的新逐轮 */
   turns: ChatTurn[];
   title: string | null;
+  /** D42：备忘也要用母语写 —— 它会被塞回下一次的 systemInstruction，语言乱了下一轮就跟着乱 */
+  nativeLang?: string | null;
 }
 
-const COMPACT_PROMPT = `把下面「用户看视频时和 AI 的对话」浓缩成一份学习备忘，之后接着聊时给 AI 当背景。
+const compactPrompt = (nativeLang: string | null | undefined) =>
+  `把下面「用户看视频时和 AI 的对话」浓缩成一份学习备忘，之后接着聊时给 AI 当背景。
 只保留重点，**以用户问了什么、以及他明显没搞懂/混淆/反复追问的地方为主**；AI 的回答只在为了说清用户的卡点时才带一句。
-用第三人称、用户的语言，尽量短。若已有旧备忘，把新内容并进去、别丢旧的关键点。
+用第三人称，尽量短。${answerLanguageRule(nativeLang)}若已有旧备忘，把新内容并进去、别丢旧的关键点。
 只输出更新后的备忘正文，别加标题、别加客套。`;
 
 /**
@@ -133,7 +138,7 @@ export async function compactChat(ctx: CompactChatContext): Promise<string> {
       model: MODEL,
       contents: [{ role: "user", parts: [{ text: body }] }],
       config: {
-        systemInstruction: COMPACT_PROMPT,
+        systemInstruction: compactPrompt(ctx.nativeLang),
         temperature: 0.2,
         maxOutputTokens: COMPACT_MAX_TOKENS,
         thinkingConfig: { thinkingBudget: 0 },

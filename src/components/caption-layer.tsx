@@ -1,8 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+} from "react";
 import { useRouter } from "next/navigation";
 import { activeSegmentIndex, parseTranscript } from "@/lib/captions";
+import { PhraseCheck, PhraseText } from "@/components/phrase-line";
+import type { PhraseItem } from "@/lib/phrases/types";
+import { putSettings } from "@/lib/settings-client";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
 import { TARGET_LANGS } from "@/lib/translate/langs";
@@ -18,10 +28,30 @@ const SIZE_MIN = 14;
 const SIZE_MAX = 28;
 const SIZE_DEFAULT = 18;
 
-// M2.9 双语字幕：语言、flip（谁大）、只当前行 —— 都记 localStorage，下次记住。
-const LANG_KEY = "fermata.captions.lang"; // "" = 关闭
+// M2.9 双语字幕的三个偏好。
+// **M3.7 / D42：译文语言搬进后台**（`user_settings.captionLang`）—— 存 localStorage
+// 意味着换台设备就得重选一次，这是 D42 点名的三处硬伤之一。
+// flip（谁大）和"只当前行"留在 localStorage：纯显示口味，不值得占一次网络请求。
+const LANG_KEY = "fermata.captions.lang"; // 只剩下"从老版本搬家"这一个用途
 const FLIP_KEY = "fermata.captions.flip"; // "1" = 译文大原文小
 const TRONLY_KEY = "fermata.captions.tronly"; // "1" = 只在当前行显示译文
+
+// 老版本存在本机的译文语言，读一次就够（搬进后台后这个值再也不用）。
+// 走 useSyncExternalStore 而不是 effect：SSR 那一帧拿到 ""，水合完再拿真值，
+// 不会"服务端渲染的和客户端第一帧对不上"（本项目 M3.5 起统一用这个套路读本地状态）。
+let cachedLegacyLang: string | null = null;
+const readLegacyLang = () => {
+  if (cachedLegacyLang === null) {
+    try {
+      cachedLegacyLang = localStorage.getItem(LANG_KEY) ?? "";
+    } catch {
+      cachedLegacyLang = ""; // 隐私模式：没得搬
+    }
+  }
+  return cachedLegacyLang;
+};
+const readServerLegacyLang = () => "";
+const subscribeNothing = () => () => {};
 
 /** M2a：自动转写的进展。上层（watch-stage）驱动，这里只负责说人话 */
 export interface CaptionGeneration {
@@ -47,6 +77,20 @@ interface CaptionLayerProps {
   getCurrentTime(): number;
   onSeek(t: number): void;
   generation?: CaptionGeneration;
+  /**
+   * M3.7 / D42：译文语言，服务端读出来传下来（`user_settings.captionLang`）。
+   * `null` = 这个键还不存在（老用户的值可能还躺在 localStorage 里，挂载后搬一次）；
+   * `""` = 他明确关掉了译文，**别再从 localStorage 把旧值搬回来**。
+   */
+  captionLang?: string | null;
+  /**
+   * M3.7 / D40：整片扫出来的词组，已经对齐到当前字幕（`段下标 → 词组`）。
+   * **对齐与校验在 `resolvePhrases` 里做**，这里拿到的每一条都保证能在那一行里找到。
+   */
+  highlights?: Map<number, PhraseItem>;
+  /** 已经收进词库的词组原文 —— 决定高亮是实心还是虚线 */
+  savedTerms?: Set<string>;
+  onToggleTerm?: (phrase: PhraseItem) => void;
 }
 
 export function CaptionLayer({
@@ -56,6 +100,10 @@ export function CaptionLayer({
   getCurrentTime,
   onSeek,
   generation,
+  captionLang = null,
+  highlights,
+  savedTerms,
+  onToggleTerm,
 }: CaptionLayerProps) {
   // YouTube 视频自己带 CC，用户粘贴过来免费又快；只有没 CC 的才值得花钱走 Gemini。
   // 所以 YouTube 默认引导粘贴，把"自动生成"降为次选。
@@ -72,8 +120,9 @@ export function CaptionLayer({
   const [error, setError] = useState("");
 
   // === M2.9 双语字幕 ===
-  // 初值一律取"关闭/默认"，与 SSR 一致；挂载后再读 localStorage（避免水合不一致）。
-  const [lang, setLang] = useState(""); // "" = 不显示译文
+  // 译文语言的初值直接来自服务端（props，SSR 与客户端一致，不会水合不一致，
+  // 也不再"先闪一下关闭再跳出来"）。flip / 只当前行仍在挂载后读 localStorage。
+  const [lang, setLang] = useState(captionLang ?? ""); // "" = 不显示译文
   const [flip, setFlip] = useState(false); // true = 译文大原文小
   const [trOnlyCurrent, setTrOnlyCurrent] = useState(false); // true = 只在当前行显示译文
   const [tr, setTr] = useState<Map<number, string>>(new Map()); // 字幕下标 → 译文
@@ -127,17 +176,31 @@ export function CaptionLayer({
     applySize(stored);
   }, [applySize]);
 
-  // 挂载后读回上次选的语言 / flip / 只当前行（放 effect 里，避开 SSR 水合不一致）
+  // 挂载后读回 flip / 只当前行（纯显示口味，留在本机）
   useEffect(() => {
     try {
-      const savedLang = localStorage.getItem(LANG_KEY);
-      if (savedLang) setLang(savedLang);
       if (localStorage.getItem(FLIP_KEY) === "1") setFlip(true);
       if (localStorage.getItem(TRONLY_KEY) === "1") setTrOnlyCurrent(true);
     } catch {
       // 隐私模式读不到：用默认（不显示译文），不影响看原文
     }
   }, []);
+
+  // 老用户搬家（M3.7 / D42）：译文语言以前存在 localStorage，换设备就丢。
+  // **只在后台还没有这个键时搬一次**（`captionLang === null`）——
+  // 他要是明确把译文关掉（存的是 `""`），就不能再把 localStorage 里的旧值捞回来。
+  //
+  // 写法上：state 的校正放在**渲染期**（本文件已有的老写法），effect 里只留
+  // "往外面写"这一件事 —— 那才是 effect 该干的（同时也躲开 set-state-in-effect）。
+  const legacyLang = useSyncExternalStore(subscribeNothing, readLegacyLang, readServerLegacyLang);
+  const [migratedFrom, setMigratedFrom] = useState<string | null>(null);
+  if (captionLang === null && legacyLang && migratedFrom !== legacyLang) {
+    setMigratedFrom(legacyLang);
+    setLang(legacyLang);
+  }
+  useEffect(() => {
+    if (migratedFrom) void putSettings({ captionLang: migratedFrom });
+  }, [migratedFrom]);
 
   // 选了语言就去翻译。命中缓存瞬间全出；否则流式 NDJSON，边翻边显示进度。
   // 换语言 / 组件卸载时中断上一次请求，避免旧译文覆盖新译文。
@@ -281,14 +344,10 @@ export function CaptionLayer({
   const trPercent = trTotal > 0 ? Math.min(99, Math.round((trDone / trTotal) * 100)) : null;
   const showTranslation = !!lang && tr.size > 0;
 
+  // D42：译文语言存后台 —— 换台设备也记得（M2.9 存 localStorage 是要还的账）
   const pickLang = (v: string) => {
     setLang(v);
-    try {
-      if (v) localStorage.setItem(LANG_KEY, v);
-      else localStorage.removeItem(LANG_KEY);
-    } catch {
-      /* 存不进不致命，只是下次不记得 */
-    }
+    void putSettings({ captionLang: v });
   };
   const toggleFlip = () =>
     setFlip((v) => {
@@ -526,34 +585,68 @@ export function CaptionLayer({
                 // 这一行显不显示译文：开了语言 + 这句有译文 +（每行显示 或 正好是当前行）
                 const translation = showTranslation ? tr.get(i) : undefined;
                 const lineShowsTr = !!translation && (!trOnlyCurrent || isActive);
+                // M3.7：这一行标出来的词组（至多一个，D40）+ 它收没收进词库
+                const phrase = highlights?.get(i);
+                const saved = !!phrase && !!savedTerms?.has(phrase.text);
+                // 原文那一段的样式（有译文时缩约 13% 给译文让位）
+                const originalStyle = lineShowsTr
+                  ? { fontSize: "calc(var(--caption-size) * 0.87)" }
+                  : { fontSize: "var(--caption-size)", lineHeight: 1.5 };
+                const original = (
+                  <PhraseText
+                    text={seg.text}
+                    phrase={phrase}
+                    saved={saved}
+                    onToggle={onToggleTerm}
+                    className={flip && lineShowsTr ? "opacity-65" : undefined}
+                    style={flip && lineShowsTr ? { fontSize: "calc(var(--caption-size) * 0.61)" } : originalStyle}
+                  />
+                );
+                const translated = (
+                  <span
+                    className={flip ? undefined : "opacity-65"}
+                    style={{
+                      fontSize: flip
+                        ? "calc(var(--caption-size) * 0.87)"
+                        : "calc(var(--caption-size) * 0.61)",
+                    }}
+                  >
+                    {translation}
+                  </span>
+                );
                 return (
-                  <li key={`${seg.start}-${i}`} ref={isActive ? activeRef : null}>
+                  <li key={`${seg.start}-${i}`} ref={isActive ? activeRef : null} className="relative">
+                    {/* 整行点一下 = 跳到这一句（和点点条同一个手感）。
+                        做成**绝对定位的覆盖按钮**，而不是把整行包成 <button> ——
+                        M3.7 之后行内多了「词组」和「✓」两个真按钮，按钮不能套按钮。
+                        正文那层 pointer-events-none，点普通文字就穿过去落到这个覆盖层上。 */}
                     <button
                       type="button"
                       onClick={() => onSeek(seg.start)}
-                      className={`flex w-full gap-3 rounded-xl px-2 py-1.5 text-left transition-colors ${
-                        isActive ? "bg-ink-700/60 text-ink-100" : "text-ink-500 hover:text-ink-300"
+                      aria-label={`跳到 ${mmss(seg.start)}`}
+                      className={`absolute inset-0 rounded-xl transition-colors ${
+                        isActive ? "bg-ink-700/60" : "hover:bg-ink-700/30"
+                      }`}
+                    />
+                    <div
+                      className={`pointer-events-none relative flex gap-3 rounded-xl px-2 py-1.5 text-left ${
+                        isActive ? "text-ink-100" : "text-ink-500"
                       }`}
                     >
                       <span className="ui-mono shrink-0 pt-0.5 text-[0.68rem] text-ink-500">
                         {mmss(seg.start)}
                       </span>
                       {lineShowsTr ? (
-                        // 原文大译文小（缩约 13% 给译文让位）；flip 后对调谁大、谁在上。
-                        <span className="flex min-w-0 flex-col gap-0.5" style={{ lineHeight: 1.4 }}>
-                          <span style={{ fontSize: "calc(var(--caption-size) * 0.87)" }}>
-                            {flip ? translation : seg.text}
-                          </span>
-                          <span className="opacity-65" style={{ fontSize: "calc(var(--caption-size) * 0.61)" }}>
-                            {flip ? seg.text : translation}
-                          </span>
+                        // 原文大译文小；flip 后对调谁大、谁在上。高亮永远跟着**原文**走
+                        <span className="flex min-w-0 flex-1 flex-col gap-0.5" style={{ lineHeight: 1.4 }}>
+                          {flip ? translated : original}
+                          {flip ? original : translated}
                         </span>
                       ) : (
-                        <span style={{ fontSize: "var(--caption-size)", lineHeight: 1.5 }}>
-                          {seg.text}
-                        </span>
+                        <span className="min-w-0 flex-1">{original}</span>
                       )}
-                    </button>
+                      <PhraseCheck phrase={phrase} saved={saved} onToggle={onToggleTerm} />
+                    </div>
                   </li>
                 );
               })}

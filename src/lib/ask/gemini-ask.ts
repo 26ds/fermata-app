@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { explainGeminiError } from "@/lib/transcript/gemini-youtube";
+import { langNameEn, normalizeLang } from "@/lib/lang";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
 
@@ -38,6 +39,8 @@ export interface AskContext {
   /** 卡在第几秒（只用来告诉模型「他卡在 MM:SS」） */
   tS: number;
   title: string | null;
+  /** D42：用户母语 —— 显式指定答案用哪门语言，不靠模型从问句猜。空 = 还不知道 */
+  nativeLang?: string | null;
   /** 逐块回调：流式把答案吐给上层 */
   onChunk: (text: string) => void | Promise<void>;
 }
@@ -55,6 +58,21 @@ export function windowText(segments: TranscriptSegment[], startS: number, endS: 
     .map((s) => s.text)
     .join(" ")
     .trim();
+}
+
+/**
+ * D42 —— **显式告诉模型用哪门语言回答**，别再靠它从问句里猜。
+ *
+ * 原来写的是「用他提问的语言回答」：他要是用英文问一句 "what does XX mean"，
+ * 模型就整段用英文答 —— 而他可能只是懒得切输入法，母语是别的。
+ * 母语是我们知道的事实（浏览器报的 / 他自己设的），没有理由让模型去猜。
+ *
+ * 母语真的还不知道时才退回"用他提问的语言" —— 那是兜底，不是默认。
+ */
+export function answerLanguageRule(nativeLang: string | null | undefined): string {
+  const code = normalizeLang(nativeLang);
+  if (!code) return "用他提问的语言回答。";
+  return `一律用${langNameEn(code)}（${code}）回答 —— 哪怕内容原文和他的提问是别的语言。`;
 }
 
 /** 全文作背景，超预算掐尾。沉浸聊天也复用 */
@@ -82,7 +100,7 @@ function buildPrompt(ctx: AskContext): string {
     "",
     `【他的问题】\n${ctx.question}`,
     "",
-    "要求：直接、简洁地回答，扣住他卡住的那段；别跑题、别编内容里没有的、别反问让他先猜。用他提问的语言回答。",
+    `要求：直接、简洁地回答，扣住他卡住的那段；别跑题、别编内容里没有的、别反问让他先猜。${answerLanguageRule(ctx.nativeLang)}`,
   ].join("\n");
 }
 
