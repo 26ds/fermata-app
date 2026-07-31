@@ -33,6 +33,14 @@ export interface SourceRow {
   transcript: TranscriptSegment[] | null;
   transcript_status: TranscriptStatus;
   created_at: string;
+  // ── 迁移 0007（M3.6 历史与知识库）。写成可选：迁移没跑时这些列根本不存在，
+  //    而查 `select *` 的地方拿到的行就是少这几个键 —— 类型上要允许。
+  /** 最近一次**真正播放**的时刻。null = 还没看过，或这条是加字段之前的老数据 */
+  last_watched_at?: string | null;
+  /** 看过几次。同一天重复播放只算一次（拖进度条不该刷成"看过 40 次"） */
+  watch_count?: number | null;
+  /** 播客封面（导入时从 RSS/苹果接口存）。YouTube 不用，缩略图由 external_id 拼 */
+  thumb_url?: string | null;
 }
 
 /** interrupts 表行：打断点指针 (source, t) + 上下文窗口 [t−15, t+3] */

@@ -520,7 +520,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
   }
 
   return (
-    <main className="relative flex min-h-0 flex-1 flex-col px-5 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-8">
+    <main className="pb-nav relative flex min-h-0 flex-1 flex-col px-5 sm:px-8">
       {/* 抬头 + 状态徽章 */}
       <div className="flex items-center justify-between gap-3 py-1.5">
         <div>

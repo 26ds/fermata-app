@@ -112,5 +112,16 @@ export async function POST(request: Request) {
     );
   }
 
+  // M3.6 封面：**单独一条 update**，故意不并进上面的 insert。
+  // thumb_url 是迁移 0007 才有的列，迁移没跑时并进去会让**整次导入失败** ——
+  // 为了一张缩略图把"贴链接"这件事搞坏，那是本末倒置。写不上就没图，历史页画占位块。
+  if (meta.thumbUrl) {
+    await supabase
+      .from("sources")
+      .update({ thumb_url: meta.thumbUrl })
+      .eq("id", data.id)
+      .eq("user_id", user.id);
+  }
+
   return NextResponse.json({ id: data.id, reused: false });
 }

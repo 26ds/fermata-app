@@ -141,6 +141,20 @@ function joinTitle(episode: string | null, show: string | null): string | null {
   return [episode?.trim(), show?.trim()].filter(Boolean).join(" · ") || null;
 }
 
+/**
+ * M3.6：从 feed 里榨一张封面（单集自己的优先，没有就用整档节目的）。
+ * RSS 这块没有统一写法 —— `itunes:image` 是属性、`<image><url>` 是子节点，
+ * 各家挑着用，所以逐个试、试不出来就 null（历史页会画占位块，不留空白格子）。
+ * 只认 http(s)，免得把 data: 或相对路径塞进 <img src>。
+ */
+function pickImage(...candidates: unknown[]): string | null {
+  for (const c of candidates) {
+    const s = typeof c === "string" ? c.trim() : "";
+    if (/^https?:\/\//i.test(s)) return upgradeToHttps(s);
+  }
+  return null;
+}
+
 async function get(url: string, accept: string): Promise<Response> {
   const res = await fetch(url, {
     signal: AbortSignal.timeout(10_000),
@@ -179,6 +193,12 @@ async function episodeFromFeed(feedUrl: string, xml: string): Promise<ResolvedMe
       typeof feed.title === "string" ? feed.title : null,
     ),
     durationS: parseItunesDuration(item.itunes?.duration),
+    // 单集自己的封面优先，退回整档节目的（M3.6 历史页那张方图）
+    thumbUrl: pickImage(
+      (item.itunes as { image?: unknown } | undefined)?.image,
+      (feed.itunes as { image?: unknown } | undefined)?.image,
+      feed.image?.url,
+    ),
     externalId: episodePointer(feedUrl, guid),
     url: audio,
   };
@@ -229,6 +249,7 @@ export const podcastAdapter: SourceAdapter = {
         return {
           title: joinTitle(episode.title, episode.showTitle),
           durationS: episode.durationS,
+          thumbUrl: pickImage(episode.artworkUrl),
           // 拿得到 feed 就仍按 D23 编成组合指针，M2 还能回到 feed 找字幕。
           // 苹果不给 feed 里的 guid，所以用它自己的 trackId，并标上来源免得跟真 guid 混淆
           externalId: feedUrl
@@ -269,6 +290,7 @@ export const podcastAdapter: SourceAdapter = {
       return {
         title: joinTitle(episode.title, episode.showTitle),
         durationS: episode.durationS,
+        thumbUrl: pickImage(episode.imageUrl),
         // 网页这一档没有 feed 可回，身份就用规范化后的页面地址（不带 # → M2 会知道
         // 这条源没有 feed 可查字幕，走 Whisper 那条 fallback）
         externalId: identity,

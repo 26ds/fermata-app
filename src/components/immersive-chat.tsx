@@ -56,8 +56,6 @@ interface ImmersiveChatProps {
   getCurrentTime: () => number;
   /** 暂停视频 —— 发问前调用（创始人：问答一定要视频处于暂停态） */
   pauseVideo: () => void;
-  /** M3.5：逐字条数变了就报一声 —— 观看页的暂停点回看列表要显示「聊过 N 轮」 */
-  onTurnsChange?: (messageCount: number) => void;
   /** 退出沉浸态（键盘 Esc 可达；主退出走悬浮球长按） */
   onExit: () => void;
 }
@@ -67,7 +65,6 @@ export function ImmersiveChat({
   videoRef,
   getCurrentTime,
   pauseVideo,
-  onTurnsChange,
   onExit,
 }: ImmersiveChatProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -194,10 +191,9 @@ export function ImmersiveChat({
     };
   }, [compact]);
 
-  // M3.5：逐字条数报给观看页，回看列表那一行「聊过 N 轮」才不会停在旧数字
-  useEffect(() => {
-    onTurnsChange?.(turns.length);
-  }, [turns.length, onTurnsChange]);
+  // M3.6：原来这里把逐字条数报给观看页，是给那份暂停点回看列表的「聊过 N 轮」用的。
+  // 那份列表已经搬去 `/library/[id]`（D37/D38），观看页上没有任何东西读这个数了，
+  // 回看页的轮数由服务端首屏直接查 chats.messages 得出 —— 这条回调随之作废。
 
   // ── 进入：取逐字历史 + 配色；顺手无条件兜底 compact（防上次强退没跑成）──
   useEffect(() => {

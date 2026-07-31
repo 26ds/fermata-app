@@ -5,13 +5,13 @@ export default function WatchLoading() {
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-64 opacity-60" />
       <header className="relative flex items-center justify-between px-5 pb-4 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8">
-        <div className="flex min-h-11 items-center gap-2 text-sm text-ink-300">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-ink-500/60 text-base" aria-hidden>←</span>
-          <span>知识库</span>
+        <div className="flex min-h-11 items-center gap-2.5 text-sm text-ink-300">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-400 text-lg leading-none text-teal-950" aria-hidden>𝄐</span>
+          <span className="text-sm font-semibold tracking-[0.12em]">FERMATA</span>
         </div>
         <div className="text-right">
           <p className="eyebrow text-teal-300">watch</p>
-          <p className="mt-1 text-xs text-ink-500">M1a · 播放器</p>
+          <p className="mt-1 text-xs text-ink-500">观看</p>
         </div>
       </header>
 

@@ -21,6 +21,8 @@ export interface WebEpisode {
   durationS: number | null;
   /** 页面自称的规范地址。有就用它当身份，免得同一集因为跟踪参数不同被导入两遍 */
   canonicalUrl: string | null;
+  /** M3.6：封面图。历史与知识库那一列要用，抓不到就 null（那边会画占位块） */
+  imageUrl: string | null;
 }
 
 /** `PT1H2M3S` / `PT43M` → 秒。ISO 8601 的时长写法，JSON-LD 里的 timeRequired 用它 */
@@ -160,6 +162,12 @@ export function extractEpisodeFromHtml(html: string, pageUrl: string): WebEpisod
         showTitle: asString(series?.name),
         durationS: parseIsoDuration(ep.timeRequired),
         canonicalUrl: asString(ep.url),
+        // schema.org 的 image 可能是字符串，也可能是 { url } 对象；两种都认（M3.6 封面）
+        imageUrl:
+          asString(ep.image) ??
+          asString((ep.image as { url?: unknown } | undefined)?.url) ??
+          asString(series?.image) ??
+          null,
       };
     }
   }
@@ -176,6 +184,7 @@ export function extractEpisodeFromHtml(html: string, pageUrl: string): WebEpisod
         showTitle: meta["og:site_name"] ?? null,
         durationS: null,
         canonicalUrl: meta["og:url"] ?? null,
+        imageUrl: meta["og:image"] ?? null,
       };
     }
   }
@@ -229,6 +238,8 @@ export interface AppleEpisode {
   showTitle: string | null;
   durationS: number | null;
   trackId: string | null;
+  /** M3.6：苹果给的封面（artworkUrl600 / 100，取到哪个算哪个） */
+  artworkUrl: string | null;
 }
 
 /** 认不认得出这是一条 Apple Podcasts 链接 */
@@ -254,6 +265,7 @@ function toAppleEpisode(r: Record<string, unknown>): AppleEpisode {
     showTitle: asString(r.collectionName),
     durationS: Number.isFinite(ms) && ms > 0 ? Math.round(ms / 1000) : null,
     trackId: r.trackId != null ? String(r.trackId) : null,
+    artworkUrl: asString(r.artworkUrl600) ?? asString(r.artworkUrl100),
   };
 }
 

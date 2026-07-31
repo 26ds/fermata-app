@@ -24,6 +24,10 @@ const patchSchema = z
     pinned: z.boolean().optional(),
     favorited: z.boolean().optional(),
     transcript: z.array(segmentSchema).min(1).max(5000).optional(),
+    // M3.6 观看历史（迁移 0007）：真播起来了就记一笔"这条什么时候被看的"。
+    // countsAsNewWatch 由客户端算 —— "今天"是**看的人所在时区**的今天，服务端在 UTC 上算不准。
+    watched: z.boolean().optional(),
+    countsAsNewWatch: z.boolean().optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), {
     message: "没有要更新的字段",
@@ -61,12 +65,16 @@ export async function PATCH(
     transcript?: z.infer<typeof segmentSchema>[];
     transcript_status?: string;
   };
+  let watched = false;
+  let countsAsNewWatch = false;
   try {
     const result = patchSchema.safeParse(await request.json());
     if (!result.success) {
       return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
     }
     patch = {};
+    watched = result.data.watched === true;
+    countsAsNewWatch = result.data.countsAsNewWatch === true;
     if (result.data.durationS !== undefined) {
       patch.duration_s = Math.round(result.data.durationS);
     }
@@ -91,14 +99,43 @@ export async function PATCH(
   }
 
   // RLS 已经把范围锁死在本人行上，这里再显式带 user_id 是双保险
-  const { error } = await supabase
-    .from("sources")
-    .update(patch)
-    .eq("id", id)
-    .eq("user_id", user.id);
+  if (Object.keys(patch).length > 0) {
+    const { error } = await supabase
+      .from("sources")
+      .update(patch)
+      .eq("id", id)
+      .eq("user_id", user.id);
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+  }
+
+  // M3.6 观看历史 —— **单独一条 update**，不和上面那条合并。
+  // 迁移 0007 没跑时 last_watched_at / watch_count 这两列并不存在，
+  // 混在一起写会让"回写看到第几秒"跟着一起失败，那才是真损失。
+  let watchHistory = true;
+  if (watched) {
+    const update: { last_watched_at: string; watch_count?: number } = {
+      last_watched_at: new Date().toISOString(),
+    };
+    if (countsAsNewWatch) {
+      // 没有原子自增就先读再写。个人数据、同一时刻不会有第二个写者，够用了
+      const { data: row } = await supabase
+        .from("sources")
+        .select("watch_count")
+        .eq("id", id)
+        .eq("user_id", user.id)
+        .maybeSingle();
+      update.watch_count = ((row as { watch_count?: number | null } | null)?.watch_count ?? 0) + 1;
+    }
+    const { error: watchError } = await supabase
+      .from("sources")
+      .update(update)
+      .eq("id", id)
+      .eq("user_id", user.id);
+    // 写不上不该拦住看视频 —— 如实回报一声，让调用方知道这次没记上
+    if (watchError) watchHistory = false;
   }
 
   // 用户手动粘贴的字幕，也回填跨用户缓存（D31）—— 桌面用户从 YouTube「显示转录」
@@ -115,7 +152,7 @@ export async function PATCH(
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, watchHistory });
 }
 
 export async function DELETE(

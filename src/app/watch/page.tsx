@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
+import { BottomNav } from "@/components/bottom-nav";
 import { SetupNotice } from "@/components/setup-notice";
 import { ImportForm } from "@/components/import-form";
 import { SourceList, type SourceListItem } from "@/components/source-list";
@@ -85,17 +86,19 @@ export default async function WatchPage({
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-64 opacity-60" />
       <header className="relative flex items-center justify-between px-5 pb-4 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8">
-        <Link href="/" className="group flex min-h-11 items-center gap-2 text-sm text-ink-300 hover:text-ink-100">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-ink-500/60 text-base transition-colors group-hover:border-teal-400 group-hover:text-teal-300" aria-hidden>←</span>
-          <span>知识库</span>
+        {/* M3.6：/watch 从"首页的下一级"升成了底部第一个 tab（D37），
+            所以这里不再是「← 返回知识库」，而是回门脸的 logo */}
+        <Link href="/" className="group flex min-h-11 items-center gap-2.5 text-sm text-ink-300 hover:text-ink-100" aria-label="Fermata 首页">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-400 text-lg leading-none text-teal-950" aria-hidden>𝄐</span>
+          <span className="text-sm font-semibold tracking-[0.12em]">FERMATA</span>
         </Link>
         <div className="text-right">
           <p className="eyebrow text-teal-300">watch</p>
-          <p className="mt-1 text-xs text-ink-500">M1a · 播放器</p>
+          <p className="mt-1 text-xs text-ink-500">观看</p>
         </div>
       </header>
 
-      <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
+      <main className="page-enter pb-nav relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 sm:px-8">
         <section className="pt-4">
           <h1 className="display-serif text-[2rem] leading-tight tracking-[-0.04em] text-ink-100">
             看点什么？
@@ -148,6 +151,8 @@ export default async function WatchPage({
           <SourceList items={visible} flagsEnabled={flagsEnabled} />
         </section>
       </main>
+
+      <BottomNav />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { firstSentence, segmentsInWindow } from "@/lib/captions";
 import { mmss } from "@/lib/time";
 import type { InterruptRow, TranscriptSegment } from "@/lib/types";
@@ -58,6 +58,11 @@ interface PauseListProps {
   onDelete(id: string): Promise<void>;
   /** 打开沉浸聊天看历史 */
   onOpenChat(): void;
+  /**
+   * 标题。M3.6 起这个列表的家是 `/library/[id]` 的 tab1，而那里是**按天分堆**的 ——
+   * 一天一个 PauseList，标题就是那天的日期。不传则用默认的那句。
+   */
+  heading?: string;
 }
 
 export function PauseList({
@@ -67,7 +72,10 @@ export function PauseList({
   onSeek,
   onDelete,
   onOpenChat,
+  heading,
 }: PauseListProps) {
+  // 同一页会有好几个（按天分堆），id 必须各不相同，否则 aria-labelledby 全指向第一个
+  const titleId = useId();
   // 默认展开：创始人要的是「点进一条内容就看见列出来的每一个暂停节点」。
   // 它排在点点条下方、视频下方，展开不占画面（D18 不受影响），想清爽可以收起来。
   const [open, setOpen] = useState(true);
@@ -96,10 +104,10 @@ export function PauseList({
   if (sorted.length === 0 && chatRounds <= 0) return null;
 
   return (
-    <section aria-labelledby="pauselist-title" className="mt-1">
+    <section aria-labelledby={titleId} className="mt-1">
       <div className="flex items-center justify-between px-1">
-        <p id="pauselist-title" className="eyebrow">
-          replay / 暂停点回看
+        <p id={titleId} className="eyebrow">
+          {heading ?? "replay / 暂停点回看"}
         </p>
         <button
           type="button"

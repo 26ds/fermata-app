@@ -178,6 +178,14 @@ select:focus-visible {
   }
 }
 
+/* M3.6 底部导航是 fixed 的，它会盖住页面最后一屏内容。
+   凡是挂了 <BottomNav /> 的页面，主体都要留出这块高度：
+   导航自身高度（min-h-11 + py-2 ≈ 3.75rem）+ 它离底缘的距离。
+   写成一个类而不是每页各贴一串 Tailwind —— 导航将来变高，只改这里一处。 */
+.pb-nav {
+  padding-bottom: calc(max(1rem, env(safe-area-inset-bottom)) + 4.5rem);
+}
+
 /* 玻璃材质：只允许用于悬浮操作层（悬浮球/打断面板/底部 tab/访谈控制条）——见 §7 */
 .glass {
   backdrop-filter: blur(18px) saturate(160%);

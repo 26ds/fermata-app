@@ -53,6 +53,12 @@ export interface ResolvedMeta {
    */
   externalId?: string;
   url?: string;
+  /**
+   * M3.6：封面图地址。历史与知识库那一列左边的方图要用（迁移 0007 的 `sources.thumb_url`）。
+   * YouTube **不填**——它的缩略图能由 videoId 直接拼出来，存一份只会过期。
+   * 播客没有这种公共约定，只能导入时从 RSS / 苹果接口顺手抓一张。抓不到就是 null，不猜。
+   */
+  thumbUrl?: string | null;
 }
 
 /**

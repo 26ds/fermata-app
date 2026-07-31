@@ -7,7 +7,7 @@ import { CaptureOrb } from "@/components/capture-orb";
 import { DotBar } from "@/components/dot-bar";
 import { ImmersiveChat } from "@/components/immersive-chat";
 import { InterruptPanel } from "@/components/interrupt-panel";
-import { PauseList, type PausePoint } from "@/components/pause-list";
+import type { PausePoint } from "@/components/pause-list";
 import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
 import { mmss } from "@/lib/time";
@@ -24,12 +24,18 @@ const SAVE_EVERY_MS = 10_000;
 export function WatchStage({
   source,
   interrupts,
-  chatRounds: initialChatRounds,
+  startAtS,
+  startInChat,
 }: {
   source: SourceRow;
   interrupts: PausePoint[];
-  /** M3.5：沉浸聊天聊过多少轮（服务端首屏值，进出沉浸层后由 ImmersiveChat 报回来校正） */
-  chatRounds: number;
+  /**
+   * M3.6：`/watch/[id]?t=<秒>`。从「历史与知识库」里点一个暂停点过来的 ——
+   * 那一页没有播放器，只能真跳页，所以落地时要自己把播放头放到那一秒。
+   */
+  startAtS?: number | null;
+  /** M3.6：`?chat=1`。从回看页点「和这条内容聊过 N 轮」过来的，落地直接进沉浸层 */
+  startInChat?: boolean;
 }) {
   // 只问"用哪个壳"。这条链接是什么平台、叫什么名字，是服务端 registry 的活（M1d）
   const shell = playerFor(source.kind);
@@ -48,7 +54,11 @@ export function WatchStage({
   const resumeOnCloseRef = useRef(false);
   // 沉浸态也走 ref：进入时 pause() 会触发 onPause，必须在那之前就置位，
   // 否则 handlePause 会把短问答面板弹到沉浸层底下（同步判断，state 太慢）
-  const immersiveRef = useRef(false);
+  const immersiveRef = useRef(Boolean(startInChat));
+  // ?t= 只认一次：跳过去之后就作废，别在播放器每次重建时把人拽回原点
+  const startAtRef = useRef(startAtS ?? null);
+  // 观看历史只写一次（每次进这一页），别把「看过 N 次」写成"播放键按了几下"
+  const watchedSentRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
   const [durationS, setDurationS] = useState(source.duration_s ?? 0);
@@ -66,8 +76,6 @@ export function WatchStage({
   const orbReadyRef = useRef(false);
   const [orbReady, setOrbReady] = useState(false);
   const [points, setPoints] = useState<PausePoint[]>(interrupts);
-  // 聊过几轮：首屏来自服务端，之后由沉浸层实时报回来（否则刚聊完退出，那一行还是旧数字）
-  const [chatRounds, setChatRounds] = useState(initialChatRounds);
   const [panel, setPanel] = useState<{
     open: boolean;
     tS: number;
@@ -90,7 +98,7 @@ export function WatchStage({
   });
   // M3 Phase-2：长问答沉浸聊天是观看页上的一层浮层（状态开关，不是新路由）——
   // 播放器实例永不卸载，退出不重载、不跳回开头（WORKORDER D33 / design §99）。
-  const [immersive, setImmersive] = useState(false);
+  const [immersive, setImmersive] = useState(Boolean(startInChat));
   // 量「视频底缘」给沉浸磨砂层用（磨砂从这条线往下铺，不碰视频本体）
   const videoWrapRef = useRef<HTMLDivElement>(null);
 
@@ -110,7 +118,42 @@ export function WatchStage({
 
   const handleReady = useCallback((handle: PlayerHandle) => {
     handleRef.current = handle;
+    // M3.6：带着 ?t= 进来的，就绪的第一件事就是把播放头放到那一秒。
+    // 不自动播放 —— 跳到位置和"替他按播放"是两回事（D18 那条克制的延长线）。
+    const t = startAtRef.current;
+    if (t != null && t > 0) {
+      startAtRef.current = null;
+      handle.seekTo(t);
+      currentTimeRef.current = t;
+      if (clockRef.current) clockRef.current.textContent = mmss(t);
+    }
   }, []);
+
+  /**
+   * M3.6：记下"这条内容什么时候被看的"（迁移 0007）。
+   * 在这之前库里只有 last_position_s（看到第几秒），**没有任何字段记得什么时候看的** ——
+   * 「历史与知识库」按观看日期分组要的就是它。
+   *
+   * 时机：**第一次真正播放**。不是打开页面就写 —— 点进来看了一眼标题就退，那不叫看过。
+   * 计次：同一天再看不 +1（拖两下进度条就写成"看过 40 次"是荒唐的）。
+   * 判据在客户端算，因为"今天"是**看的人所在时区**的今天，服务端在 UTC 上算不准。
+   */
+  const markWatched = useCallback(() => {
+    if (watchedSentRef.current) return;
+    watchedSentRef.current = true;
+    const lastDay = source.last_watched_at
+      ? new Date(source.last_watched_at).setHours(0, 0, 0, 0)
+      : null;
+    const newDay = lastDay == null || lastDay !== new Date().setHours(0, 0, 0, 0);
+    void fetch(`/api/sources/${source.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ watched: true, countsAsNewWatch: newDay }),
+    }).catch(() => {
+      // 迁移 0007 还没跑、或网络抽风：下一次播放再试。写不上不影响看视频
+      watchedSentRef.current = false;
+    });
+  }, [source.id, source.last_watched_at]);
 
   /** 回写"看到第几秒"。keepalive：页面正在被关掉时请求也能发出去 */
   const savePosition = useCallback(
@@ -136,10 +179,12 @@ export function WatchStage({
     (next: boolean) => {
       playingRef.current = next;
       setPlaying(next);
+      // 真播起来了才算"看过这条"（M3.6 观看历史）
+      if (next) markWatched();
       // 暂停的那一刻是最该记住的位置
       if (!next) savePosition();
     },
-    [savePosition],
+    [savePosition, markWatched],
   );
 
   const postInterrupt = useCallback(
@@ -344,20 +389,6 @@ export function WatchStage({
     currentTimeRef.current = t;
     if (clockRef.current) clockRef.current.textContent = mmss(t);
   }, []);
-
-  /**
-   * M3.5：从暂停点回看列表点一行。
-   * 创始人硬约束 2 是"回到原来的观看界面并跳到那一秒" —— 列表排在视频下方，
-   * 手机上多半已经滚出屏幕，光 seek 等于"跳了但看不见"。所以顺手把视频滚回视野。
-   * （播放器实例全程没卸载，这只是滚动，不是路由跳转。）
-   */
-  const handleSeekFromList = useCallback(
-    (t: number) => {
-      handleSeek(t);
-      videoWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    },
-    [handleSeek],
-  );
 
   /** 字幕层自己按 250ms 来取时间。给它 ref 的读法，而不是把秒数灌进 state ——
       灌进去就是每秒 4 次整页重渲染，M0.5 栽过的那个坑 */
@@ -643,16 +674,10 @@ export function WatchStage({
         onDelete={handleDelete}
       />
 
-      {/* M3.5 暂停点回看：点点条是横着的时间轴，这是竖着的同一批数据 —— 所以紧挨着它。
-          停过的每一刻都写清"当时为什么停 + 那一刻在讲什么"，点一行跳回去（D35 复习燃料的出口） */}
-      <PauseList
-        points={points}
-        transcript={transcript}
-        chatRounds={chatRounds}
-        onSeek={handleSeekFromList}
-        onDelete={handleDelete}
-        onOpenChat={enterImmersive}
-      />
+      {/* M3.6：暂停点回看列表**已经从这里搬走**（D37/D38）——
+          创始人真机看过后的原话是"就不应该出现在看视频的界面"。
+          它现在的家是 `/library/[id]` 的 tab1，并且在那里按天分了堆。
+          这一页留下的只有横着的点点条：看的时候要的是位置感，不是一张清单。 */}
 
       {/* D4：字幕可开关、字号可调、行宽自适应 —— 视频与播客共用同一层 */}
       <CaptionLayer
@@ -701,7 +726,6 @@ export function WatchStage({
           videoRef={videoWrapRef}
           getCurrentTime={getCurrentTime}
           pauseVideo={() => handleRef.current?.pause()}
-          onTurnsChange={(count) => setChatRounds(Math.ceil(count / 2))}
           onExit={exitImmersive}
         />
       )}
