@@ -67,7 +67,9 @@ export async function POST(request: Request) {
       window_end_s: t + WINDOW_AFTER_S,
       question_mode: body.questionMode ?? null,
     })
-    .select("id, t_s, question_mode")
+    // question / ai_answer 新点必然是空的，仍然带回来 —— 前端的暂停点回看列表（M3.5）
+    // 要的就是这个形状，少两列就得在客户端补 null，白白多一处"两边形状不一样"的坑
+    .select("id, t_s, question_mode, question, ai_answer")
     .single();
 
   if (error || !data) {

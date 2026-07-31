@@ -4,9 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { activeSegmentIndex } from "@/lib/captions";
 import { CaptionLayer } from "@/components/caption-layer";
 import { CaptureOrb } from "@/components/capture-orb";
-import { DotBar, type InterruptPoint } from "@/components/dot-bar";
+import { DotBar } from "@/components/dot-bar";
 import { ImmersiveChat } from "@/components/immersive-chat";
 import { InterruptPanel } from "@/components/interrupt-panel";
+import { PauseList, type PausePoint } from "@/components/pause-list";
 import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
 import { mmss } from "@/lib/time";
@@ -23,9 +24,12 @@ const SAVE_EVERY_MS = 10_000;
 export function WatchStage({
   source,
   interrupts,
+  chatRounds: initialChatRounds,
 }: {
   source: SourceRow;
-  interrupts: InterruptPoint[];
+  interrupts: PausePoint[];
+  /** M3.5：沉浸聊天聊过多少轮（服务端首屏值，进出沉浸层后由 ImmersiveChat 报回来校正） */
+  chatRounds: number;
 }) {
   // 只问"用哪个壳"。这条链接是什么平台、叫什么名字，是服务端 registry 的活（M1d）
   const shell = playerFor(source.kind);
@@ -61,7 +65,9 @@ export function WatchStage({
   const segmentsRef = useRef<TranscriptSegment[]>(source.transcript ?? []);
   const orbReadyRef = useRef(false);
   const [orbReady, setOrbReady] = useState(false);
-  const [points, setPoints] = useState<InterruptPoint[]>(interrupts);
+  const [points, setPoints] = useState<PausePoint[]>(interrupts);
+  // 聊过几轮：首屏来自服务端，之后由沉浸层实时报回来（否则刚聊完退出，那一行还是旧数字）
+  const [chatRounds, setChatRounds] = useState(initialChatRounds);
   const [panel, setPanel] = useState<{
     open: boolean;
     tS: number;
@@ -137,7 +143,7 @@ export function WatchStage({
   );
 
   const postInterrupt = useCallback(
-    async (tS: number, mode: QuestionMode | null): Promise<InterruptPoint> => {
+    async (tS: number, mode: QuestionMode | null): Promise<PausePoint> => {
       const res = await fetch("/api/interrupts", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -145,7 +151,7 @@ export function WatchStage({
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "没记下来，请重试");
-      return body as InterruptPoint;
+      return body as PausePoint;
     },
     [source.id],
   );
@@ -169,7 +175,10 @@ export function WatchStage({
 
       if (capture) {
         const tempId = `temp-${Date.now()}`;
-        setPoints((prev) => [...prev, { id: tempId, t_s: tS, question_mode: null }]);
+        setPoints((prev) => [
+          ...prev,
+          { id: tempId, t_s: tS, question_mode: null, question: null, ai_answer: null },
+        ]);
         // 落库做成 promise，handleAsk 直接 await —— 避免"点球刚开面板就问"重复落库
         panelIdRef.current = postInterrupt(tS, null)
           .then((saved) => {
@@ -260,6 +269,9 @@ export function WatchStage({
         const decoder = new TextDecoder();
         let buf = "";
         let streamErr = "";
+        // 收全的答案。除了上屏，M3.5 还要拿它就地更新那个暂停点 —— 不然刚问完的这一条
+        // 在回看列表里还写着「只是停了一下」，得刷新页面才对得上
+        let fullAnswer = "";
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -276,17 +288,37 @@ export function WatchStage({
             }
             if (ev.type === "chunk" && ev.text) {
               const piece = ev.text;
+              fullAnswer += piece;
               setAsk((a) => ({ ...a, answer: a.answer + piece }));
             } else if (ev.type === "done") {
               const full = ev.answer;
+              if (full) fullAnswer = full;
               setAsk((a) => ({ asking: false, answer: full ?? a.answer, error: "" }));
             } else if (ev.type === "error") {
               streamErr = ev.message ?? "没答出来，稍后再试";
             }
           }
         }
-        if (streamErr) setAsk({ asking: false, answer: "", error: streamErr });
-        else setAsk((a) => (a.asking ? { ...a, asking: false } : a));
+        if (streamErr) {
+          setAsk({ asking: false, answer: "", error: streamErr });
+        } else {
+          setAsk((a) => (a.asking ? { ...a, asking: false } : a));
+          // 服务端答完整了才落库（/api/ask），这里跟着把本地那一行补齐，口径保持一致
+          if (fullAnswer.trim()) {
+            setPoints((prev) =>
+              prev.map((p) =>
+                p.id === id
+                  ? {
+                      ...p,
+                      question,
+                      ai_answer: fullAnswer,
+                      question_mode: p.question_mode ?? "free",
+                    }
+                  : p,
+              ),
+            );
+          }
+        }
       } catch (e) {
         setAsk({
           asking: false,
@@ -312,6 +344,20 @@ export function WatchStage({
     currentTimeRef.current = t;
     if (clockRef.current) clockRef.current.textContent = mmss(t);
   }, []);
+
+  /**
+   * M3.5：从暂停点回看列表点一行。
+   * 创始人硬约束 2 是"回到原来的观看界面并跳到那一秒" —— 列表排在视频下方，
+   * 手机上多半已经滚出屏幕，光 seek 等于"跳了但看不见"。所以顺手把视频滚回视野。
+   * （播放器实例全程没卸载，这只是滚动，不是路由跳转。）
+   */
+  const handleSeekFromList = useCallback(
+    (t: number) => {
+      handleSeek(t);
+      videoWrapRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    },
+    [handleSeek],
+  );
 
   /** 字幕层自己按 250ms 来取时间。给它 ref 的读法，而不是把秒数灌进 state ——
       灌进去就是每秒 4 次整页重渲染，M0.5 栽过的那个坑 */
@@ -597,6 +643,17 @@ export function WatchStage({
         onDelete={handleDelete}
       />
 
+      {/* M3.5 暂停点回看：点点条是横着的时间轴，这是竖着的同一批数据 —— 所以紧挨着它。
+          停过的每一刻都写清"当时为什么停 + 那一刻在讲什么"，点一行跳回去（D35 复习燃料的出口） */}
+      <PauseList
+        points={points}
+        transcript={transcript}
+        chatRounds={chatRounds}
+        onSeek={handleSeekFromList}
+        onDelete={handleDelete}
+        onOpenChat={enterImmersive}
+      />
+
       {/* D4：字幕可开关、字号可调、行宽自适应 —— 视频与播客共用同一层 */}
       <CaptionLayer
         sourceId={source.id}
@@ -644,6 +701,7 @@ export function WatchStage({
           videoRef={videoWrapRef}
           getCurrentTime={getCurrentTime}
           pauseVideo={() => handleRef.current?.pause()}
+          onTurnsChange={(count) => setChatRounds(Math.ceil(count / 2))}
           onExit={exitImmersive}
         />
       )}

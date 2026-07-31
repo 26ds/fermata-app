@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sourceOriginUrl } from "@/lib/source-origin";
@@ -12,6 +12,8 @@ export interface SourceListItem {
   url: string | null;
   external_id: string | null;
   duration_s: number | null;
+  /** 导入时间。M3.5 分组用的就是它 —— 注意**不是**观看时间，见下方 bucketOf 的说明 */
+  created_at: string | null;
   last_position_s: number | null;
   pinned_at: string | null;
   favorited_at: string | null;
@@ -23,6 +25,42 @@ function mmss(seconds: number): string {
   const m = Math.floor((s % 3600) / 60);
   return `${h > 0 ? `${h}:` : ""}${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
+
+/**
+ * M3.5 内容库分组 —— 按**导入日期**落到「今天 / 昨天 / 本周 / 更早」。
+ *
+ * ⚠️ 创始人要的是"按**观看**的每一天"，但库里目前只有导入时间 `created_at`：
+ * `last_position_s` 只记看到第几秒、不记什么时候看的。所以文案一律如实写「导入」，
+ * **不假装是观看时间**。真要按观看时间，得加迁移 0007 `sources.last_watched_at`
+ * 并在观看页写入 —— 那是另一笔账，先用一阵子再看值不值得（M3.5-plan B 部分）。
+ *
+ * 自动分类（②）和自建文件夹（③）本片不做。
+ */
+function bucketOf(createdAt: string | null, todayStart: number): { key: string; label: string } {
+  if (!createdAt) return { key: "unknown", label: "时间不详" };
+  const day = new Date(createdAt).setHours(0, 0, 0, 0);
+  const days = Math.round((todayStart - day) / 86_400_000);
+  if (days <= 0) return { key: "today", label: "今天导入" };
+  if (days === 1) return { key: "yesterday", label: "昨天导入" };
+  if (days < 7) return { key: "week", label: "本周导入" };
+  return { key: "older", label: "更早导入" };
+}
+
+/**
+ * 「今天零点」按**看的人所在时区**算 —— 服务端在 UTC、手机在 +08，同一条内容
+ * 可能一个说"今天"一个说"昨天"，直接撞 hydration 不一致。
+ *
+ * 所以走 useSyncExternalStore：服务端与水合首帧一律拿 null（不分组、平铺一张列表），
+ * 水合完再换成本地值重排。这是 React 官方给"客户端专属值"的口子，
+ * 比 useEffect 里 setState 干净（那个写法会多一轮级联渲染，lint 也拦）。
+ *
+ * 快照必须稳定，否则 React 会判定"外部源一直在变"而反复重渲染 —— 所以算一次就存住。
+ * 代价：页面开着不动跨过午夜，分组要等下次进页面才刷新。可以接受。
+ */
+let cachedTodayStart: number | null = null;
+const readTodayStart = () => (cachedTodayStart ??= new Date().setHours(0, 0, 0, 0));
+const readServerTodayStart = () => null;
+const subscribeNothing = () => () => {};
 
 /** 与服务端排序保持一致：置顶的在前（按置顶时间倒序），其余保持原顺序 */
 function sortRows(rows: SourceListItem[]): SourceListItem[] {
@@ -61,6 +99,33 @@ export function SourceList({
     setSeen(items);
     setRows(items);
   }
+
+  // 水合前是 null（服务端与首帧都不分组），水合后换成本地"今天零点"再落组
+  const todayStart = useSyncExternalStore(
+    subscribeNothing,
+    readTodayStart,
+    readServerTodayStart,
+  );
+
+  const groups = useMemo(() => {
+    const out: { key: string; label: string; rows: SourceListItem[] }[] = [];
+    const pinned = rows.filter((r) => r.pinned_at);
+    const rest = rows.filter((r) => !r.pinned_at);
+    // 置顶永远排最前，且不进日期分组（D16）
+    if (pinned.length > 0) out.push({ key: "pinned", label: "置顶", rows: pinned });
+    if (todayStart == null) {
+      if (rest.length > 0) out.push({ key: "all", label: "", rows: rest });
+      return out;
+    }
+    // rest 已经是导入时间倒序（服务端排的），顺着连成组即可，组的先后天然就对
+    for (const r of rest) {
+      const b = bucketOf(r.created_at, todayStart);
+      const last = out[out.length - 1];
+      if (last && last.key === b.key) last.rows.push(r);
+      else out.push({ ...b, rows: [r] });
+    }
+    return out;
+  }, [rows, todayStart]);
 
   // 打开面板时锁住背景滚动，并支持 Esc 关闭
   useEffect(() => {
@@ -150,77 +215,86 @@ export function SourceList({
         </p>
       )}
 
-      <ul className="mt-2 flex flex-col">
-        {rows.map((s) => (
-          <li
-            key={s.id}
-            className="flex items-center gap-1 border-b border-ink-700/80"
-          >
-            <Link
-              href={`/watch/${s.id}`}
-              className="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-3 text-sm hover:text-teal-300"
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ink-700 text-ink-300" aria-hidden>
-                ▷
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5">
-                  {s.pinned_at && (
-                    <span className="shrink-0 text-xs text-teal-300" title="已置顶" aria-label="已置顶">
-                      ↑
-                    </span>
-                  )}
-                  {s.favorited_at && (
-                    <span className="shrink-0 text-xs text-teal-300" title="已收藏" aria-label="已收藏">
-                      ★
-                    </span>
-                  )}
-                  <span className="truncate text-ink-100">
-                    {s.title ?? s.url ?? "未命名内容"}
-                  </span>
-                </span>
-                <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
-                  <span>{s.kind}</span>
-                  {s.duration_s ? <span>{mmss(s.duration_s)}</span> : null}
-                  {s.last_position_s && s.last_position_s > 5 ? (
-                    <span className="ui-mono text-teal-300">
-                      watched to {mmss(s.last_position_s)}
-                    </span>
-                  ) : null}
-                </span>
-              </span>
-            </Link>
-
-            {/* ↗ 回到原网页：跟「⋯」一样放在 Link 外面，点它开原站、不误触进播放器 */}
-            {(() => {
-              const origin = sourceOriginUrl(s);
-              return origin ? (
-                <a
-                  href={origin}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`在原网站打开：${s.title ?? "这条内容"}`}
-                  className="flex h-11 w-8 shrink-0 items-center justify-center text-base text-ink-500 hover:text-teal-300"
+      {groups.map((g) => (
+        <section key={g.key} className="mt-4 first:mt-2">
+          {g.label && (
+            <h3 className="px-1 pb-1 text-xs font-semibold tracking-wide text-ink-500">
+              {g.label}
+            </h3>
+          )}
+          <ul className="flex flex-col">
+            {g.rows.map((s) => (
+              <li
+                key={s.id}
+                className="flex items-center gap-1 border-b border-ink-700/80"
+              >
+                <Link
+                  href={`/watch/${s.id}`}
+                  className="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-3 text-sm hover:text-teal-300"
                 >
-                  ↗
-                </a>
-              ) : null;
-            })()}
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ink-700 text-ink-300" aria-hidden>
+                    ▷
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-1.5">
+                      {s.pinned_at && (
+                        <span className="shrink-0 text-xs text-teal-300" title="已置顶" aria-label="已置顶">
+                          ↑
+                        </span>
+                      )}
+                      {s.favorited_at && (
+                        <span className="shrink-0 text-xs text-teal-300" title="已收藏" aria-label="已收藏">
+                          ★
+                        </span>
+                      )}
+                      <span className="truncate text-ink-100">
+                        {s.title ?? s.url ?? "未命名内容"}
+                      </span>
+                    </span>
+                    <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
+                      <span>{s.kind}</span>
+                      {s.duration_s ? <span>{mmss(s.duration_s)}</span> : null}
+                      {s.last_position_s && s.last_position_s > 5 ? (
+                        <span className="ui-mono text-teal-300">
+                          watched to {mmss(s.last_position_s)}
+                        </span>
+                      ) : null}
+                    </span>
+                  </span>
+                </Link>
 
-            {/* 「⋯」必须在 Link 外面，否则点它会先跳转 */}
-            <button
-              type="button"
-              onClick={() => setMenuId(s.id)}
-              disabled={busy}
-              aria-label={`${s.title ?? "这条内容"} 的更多操作`}
-              aria-haspopup="dialog"
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg text-ink-500 hover:bg-ink-700 hover:text-ink-100 disabled:opacity-40"
-            >
-              ⋯
-            </button>
-          </li>
-        ))}
-      </ul>
+                {/* ↗ 回到原网页：跟「⋯」一样放在 Link 外面，点它开原站、不误触进播放器 */}
+                {(() => {
+                  const origin = sourceOriginUrl(s);
+                  return origin ? (
+                    <a
+                      href={origin}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`在原网站打开：${s.title ?? "这条内容"}`}
+                      className="flex h-11 w-8 shrink-0 items-center justify-center text-base text-ink-500 hover:text-teal-300"
+                    >
+                      ↗
+                    </a>
+                  ) : null;
+                })()}
+
+                {/* 「⋯」必须在 Link 外面，否则点它会先跳转 */}
+                <button
+                  type="button"
+                  onClick={() => setMenuId(s.id)}
+                  disabled={busy}
+                  aria-label={`${s.title ?? "这条内容"} 的更多操作`}
+                  aria-haspopup="dialog"
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg text-ink-500 hover:bg-ink-700 hover:text-ink-100 disabled:opacity-40"
+                >
+                  ⋯
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))}
 
       {active && (
         <div

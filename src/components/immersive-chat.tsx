@@ -56,6 +56,8 @@ interface ImmersiveChatProps {
   getCurrentTime: () => number;
   /** 暂停视频 —— 发问前调用（创始人：问答一定要视频处于暂停态） */
   pauseVideo: () => void;
+  /** M3.5：逐字条数变了就报一声 —— 观看页的暂停点回看列表要显示「聊过 N 轮」 */
+  onTurnsChange?: (messageCount: number) => void;
   /** 退出沉浸态（键盘 Esc 可达；主退出走悬浮球长按） */
   onExit: () => void;
 }
@@ -65,6 +67,7 @@ export function ImmersiveChat({
   videoRef,
   getCurrentTime,
   pauseVideo,
+  onTurnsChange,
   onExit,
 }: ImmersiveChatProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -147,8 +150,56 @@ export function ImmersiveChat({
     };
   }, [onExit]);
 
-  // ── 进入：取逐字历史 + 配色；顺手兜底 compact（防上次强退没跑成）。
-  //    退出（卸载）：对本次会话跑 compact，折进 summary。keepalive 保命，跑不成下次进入再兜底。 ──
+  // ── compact 存档（M3.5 修的那个 bug） ──
+  //
+  // 老写法只在**组件卸载**时发一次。生产库实证它漏了：有一行 messages 8 条、
+  // summarized_upto 只有 2 —— 直接关标签页 / 切走 App / 系统回收内存时，React 的卸载回调
+  // 根本不会跑，那几轮就一直没折进 summary。后果不是"用户看不到聊天记录"（逐字原文一直是好的），
+  // 而是 AI 的上下文里 liveTurns 无限长下去：每问一句都把历史逐字全塞回去，token 和钱一起涨。
+  //
+  // 三层保险（创始人 2026-07-25 定：都要）：
+  //   ① visibilitychange(hidden) 与 pagehide 也发一次 —— 手机上这两个才是可靠的"要走了"信号；
+  //   ② 服务端 compact 本来就幂等（没新逐轮直接返回旧 summary、不烧调用），多发几次没副作用；
+  //   ③ 进入时无条件补发一次，兜住"上次强退"。
+  // dirtyRef 只是省无谓的往返：这次会话没新增逐轮就不发（服务端那边也会幂等挡掉）。
+  const dirtyRef = useRef(false);
+  const compact = useCallback(
+    (force = false) => {
+      if (!force && !dirtyRef.current) return;
+      dirtyRef.current = false;
+      void fetch(`/api/chat/compact`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sourceId }),
+        keepalive: true, // 页面正在被关掉时也要发得出去
+      }).catch(() => {
+        dirtyRef.current = true; // 没发成，留着下一个时机再发
+      });
+    },
+    [sourceId],
+  );
+
+  // 切后台 / 关页面 / 卸载 —— 三个出口都补一刀
+  useEffect(() => {
+    const onHide = () => compact();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") compact();
+    };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+      compact(); // 正常退出（长按悬浮球 / Esc / 离开观看页）
+    };
+  }, [compact]);
+
+  // M3.5：逐字条数报给观看页，回看列表那一行「聊过 N 轮」才不会停在旧数字
+  useEffect(() => {
+    onTurnsChange?.(turns.length);
+  }, [turns.length, onTurnsChange]);
+
+  // ── 进入：取逐字历史 + 配色；顺手无条件兜底 compact（防上次强退没跑成）──
   useEffect(() => {
     let alive = true;
     (async () => {
@@ -174,24 +225,14 @@ export function ImmersiveChat({
       if (alive) setLoaded(true);
     })();
 
-    // 进入兜底 compact（幂等：没有未浓缩的新逐轮就不烧调用）
-    void fetch(`/api/chat/compact`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sourceId }),
-    }).catch(() => {});
+    // 进入兜底 compact：**无条件**发一次。它跟上面取历史是并行的，不排在"成功进入"之后 ——
+    // 上次强退欠下的账，进来这一发就补上了（服务端幂等，没新逐轮不烧调用）。
+    compact(true);
 
     return () => {
       alive = false;
-      // 退出 compact：把这次会话浓缩进 summary（给 AI 当往期背景，不喂逐字）
-      void fetch(`/api/chat/compact`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sourceId }),
-        keepalive: true,
-      }).catch(() => {});
     };
-  }, [sourceId]);
+  }, [sourceId, compact]);
 
   // 停在底部就自动跟最新；用户上滑看历史则不抢滚动（design §D）
   useEffect(() => {
@@ -327,6 +368,8 @@ export function ImmersiveChat({
           setError(streamErr);
           dropEmptyTail();
         } else {
+          // 答成了 = 库里多了一问一答两条逐字，等着被折进 summary
+          dirtyRef.current = true;
           // 让打字机把剩下的字吐完，吐完它自己收尾（清定时器 + setSending(false)）
           streamDoneRef.current = true;
         }

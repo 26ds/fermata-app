@@ -4,7 +4,7 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/setup-notice";
 import { WatchStage } from "@/components/watch-stage";
-import type { InterruptPoint } from "@/components/dot-bar";
+import type { PausePoint } from "@/components/pause-list";
 import type { SourceRow } from "@/lib/types";
 import { sourceOriginUrl } from "@/lib/source-origin";
 
@@ -34,13 +34,27 @@ export default async function WatchDetailPage({
   const source = data as SourceRow;
   const origin = sourceOriginUrl(source);
 
-  // 点点条首屏就该有历史点，所以顺手一起取（RLS 保证只查得到自己的）
+  // 点点条 + 暂停点回看列表首屏就该有历史点，所以顺手一起取（RLS 保证只查得到自己的）。
+  // M3.5 多带 question / ai_answer：列表要用它们写「为什么在这儿停」和展开完整问答。
   const { data: interruptRows } = await supabase
     .from("interrupts")
-    .select("id, t_s, question_mode")
+    .select("id, t_s, question_mode, question, ai_answer")
     .eq("source_id", id)
     .order("t_s", { ascending: true });
-  const interrupts = (interruptRows ?? []) as InterruptPoint[];
+  const interrupts = (interruptRows ?? []) as PausePoint[];
+
+  // M3.5：回看列表顶部那一行「和这条内容聊过 N 轮」。
+  // 迁移 0006 没跑时这张表不存在，查询会报错 —— 当作没聊过就行，别让整页塌掉。
+  // 个人数据，user_id 显式写死，不跨用户（D33）。
+  const { data: chatRow } = await supabase
+    .from("chats")
+    .select("messages")
+    .eq("source_id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const chatMessages = (chatRow as { messages?: unknown } | null)?.messages;
+  // 一轮 = 一问一答两条
+  const chatRounds = Array.isArray(chatMessages) ? Math.ceil(chatMessages.length / 2) : 0;
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
@@ -72,7 +86,7 @@ export default async function WatchDetailPage({
       </header>
 
       <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
-        <WatchStage source={source} interrupts={interrupts} />
+        <WatchStage source={source} interrupts={interrupts} chatRounds={chatRounds} />
       </main>
     </div>
   );

@@ -142,6 +142,39 @@ export function parseTranscript(input: string): TranscriptSegment[] {
 }
 
 /**
+ * M3.5 —— 窗口 [start,end] 内（有重叠即算）的原句。
+ *
+ * 暂停点回看的右侧「那一刻的字幕」靠它切：**纯前端、从已加载的 transcript 里取，不发请求**。
+ * 为什么是字幕而不是那一帧画面：D21 —— YouTube 是跨域 iframe 抓不到帧，播客根本没画面，
+ * 硬做只会做出"有的有图、有的空白"。字幕每条内容都一定有。
+ *
+ * 服务端 gemini-ask.windowText 是同一个口径，但那份带 Gemini 客户端依赖，
+ * 客户端不能碰（D24），所以这里独立一份纯函数。
+ */
+export function segmentsInWindow(
+  segments: TranscriptSegment[],
+  startS: number,
+  endS: number,
+): TranscriptSegment[] {
+  return segments.filter((s) => s.start <= endS && s.end >= startS);
+}
+
+/** 句末标点：中英都要认。英文的 . ! ? 要求后面是空白或结尾，免得把 3.5 / U.S. 断开 */
+const SENTENCE_END = /[。！？…；]|[.!?](?=\s|$)/;
+
+/**
+ * 取首句，太长就掐掉。用来做暂停点那一行「为什么在这儿停」的一句话。
+ * 一句话就是一句话 —— 宁可掐尾，也不换行挤成两行把列表撑散。
+ */
+export function firstSentence(text: string, maxLen = 46): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  const m = SENTENCE_END.exec(t);
+  const head = m ? t.slice(0, m.index + 1) : t;
+  return head.length > maxLen ? `${head.slice(0, maxLen)}…` : head;
+}
+
+/**
  * 找出"现在该高亮哪一句"。二分，因为这个函数每 250ms 跑一次。
  * 落在两句之间（说话人换气）时保持上一句亮着 —— 字幕突然全灭比慢半拍难受。
  */
