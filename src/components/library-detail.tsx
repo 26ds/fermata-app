@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { PauseList, type PausePoint } from "@/components/pause-list";
+import { withFrom } from "@/lib/nav";
 import type { TranscriptSegment } from "@/lib/types";
 
 // M3.6 —— `/library/[id]` 的两个 tab（D38）。**这一页没有播放器。**
@@ -130,10 +131,11 @@ export function LibraryDetail({
     }
   }, []);
 
-  // 这一页没有播放器 —— 点一行是真跳页。观看页认 ?t= 并把播放头放过去
+  // 这一页没有播放器 —— 点一行是真跳页。观看页认 ?t= 并把播放头放过去。
+  // 带上 from=library：观看页的返回箭头要退回**这一页**，而不是内容列表（创始人 2026-07-31）
   const handleSeek = useCallback(
     (t: number) => {
-      router.push(`/watch/${sourceId}?t=${Math.round(t)}`);
+      router.push(withFrom(`/watch/${sourceId}?t=${Math.round(t)}`, "library"));
     },
     [router, sourceId],
   );
@@ -141,7 +143,7 @@ export function LibraryDetail({
   // 沉浸聊天是观看页上的一层浮层（D33，它不是路由）——
   // 所以"打开聊天"只能跳回观看页并让它自己进沉浸态
   const openChat = useCallback(() => {
-    router.push(`/watch/${sourceId}?chat=1`);
+    router.push(withFrom(`/watch/${sourceId}?chat=1`, "library"));
   }, [router, sourceId]);
 
   return (

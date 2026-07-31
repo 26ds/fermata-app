@@ -7,27 +7,31 @@ import { WatchStage } from "@/components/watch-stage";
 import type { PausePoint } from "@/components/pause-list";
 import type { SourceRow } from "@/lib/types";
 import { sourceOriginUrl } from "@/lib/source-origin";
+import { watchBackTarget } from "@/lib/nav";
 
 // M1a — 观看页。RLS 保证只能查到自己的 source，查不到就是 404。
 //
-// M3.6 起这一页认两个查询参数（都从「历史与知识库」跳过来）：
-//   ?t=<秒>   落地把播放头放到那一秒（那边没有播放器，只能真跳页）
+// M3.6 起这一页认三个查询参数：
+//   ?t=<秒>   落地把播放头放到那一秒（历史那边没有播放器，只能真跳页）
 //   ?chat=1   落地直接进沉浸聊天（沉浸层是这一页上的浮层，不是独立路由，见 D33）
+//   ?from=…   返回箭头退回哪一层（见 lib/nav.ts）—— 从历史点进来的要退回那条内容的回看页，
+//             而不是一脚踹回内容列表
 export default async function WatchDetailPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ t?: string; chat?: string }>;
+  searchParams: Promise<{ t?: string; chat?: string; from?: string }>;
 }) {
   if (!supabaseConfigured) return <SetupNotice />;
 
   // Next 16：params / searchParams 都是 Promise，必须 await
   const { id } = await params;
-  const { t, chat } = await searchParams;
+  const { t, chat, from } = await searchParams;
   // 认不出来的就当没传 —— 别拿 NaN 去 seek
   const parsedT = Number(t);
   const startAtS = Number.isFinite(parsedT) && parsedT > 0 ? parsedT : null;
+  const back = watchBackTarget(from, id);
 
   const supabase = await createClient();
   const {
@@ -61,7 +65,8 @@ export default async function WatchDetailPage({
           白占掉约 44px 的纵向空间，而那正是视频画面想要的。字幕状态挪进了播放器
           下方的状态条（WatchStage 里），不再单占位置。 */}
       <header className="relative flex items-center gap-3 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-8">
-        <Link href="/watch" aria-label="返回播放器列表" className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300">
+        {/* 返回退一层，不是回首页 —— 从哪儿来退回哪儿去，规则在 lib/nav.ts */}
+        <Link href={back.href} aria-label={back.label} className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300">
           <span aria-hidden>←</span>
         </Link>
         {/* 标题点一下回到原网页（YouTube 观看页 / 小宇宙单集页）。取不到就是纯文字。 */}

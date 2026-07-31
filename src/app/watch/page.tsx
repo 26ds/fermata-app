@@ -148,7 +148,12 @@ export default async function WatchPage({
               。其余功能不受影响。
             </p>
           )}
-          <SourceList items={visible} flagsEnabled={flagsEnabled} />
+          {/* 在「★ 收藏」那一栏点进去，返回时要退回收藏而不是"全部" */}
+          <SourceList
+            items={visible}
+            flagsEnabled={flagsEnabled}
+            from={onlyFavorites ? "favorites" : undefined}
+          />
         </section>
       </main>
 

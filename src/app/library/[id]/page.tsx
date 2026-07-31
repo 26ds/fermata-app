@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/setup-notice";
 import { LibraryDetail, type DatedPausePoint } from "@/components/library-detail";
 import { thumbUrlFor } from "@/lib/thumb";
+import { withFrom } from "@/lib/nav";
 import { hms } from "@/lib/time";
 import type { SourceRow } from "@/lib/types";
 
@@ -104,8 +105,9 @@ export default async function LibraryDetailPage({
                 <span className="text-ink-300">看过 {source.watch_count} 次</span>
               ) : null}
             </p>
+            {/* 带 from=library：在观看页按返回要退回这一页，不是退回内容列表 */}
             <Link
-              href={`/watch/${source.id}`}
+              href={withFrom(`/watch/${source.id}`, "library")}
               className="mt-2 inline-flex min-h-11 items-center text-xs text-teal-300 hover:text-teal-400"
             >
               {COPY.openInWatch}

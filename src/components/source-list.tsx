@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { sourceOriginUrl } from "@/lib/source-origin";
+import { withFrom, type BackFrom } from "@/lib/nav";
 
 export interface SourceListItem {
   id: string;
@@ -80,10 +81,16 @@ function sortRows(rows: SourceListItem[]): SourceListItem[] {
 export function SourceList({
   items,
   flagsEnabled,
+  from,
 }: {
   items: SourceListItem[];
   /** 迁移 0003 跑过了吗。没跑就只留删除，置顶/收藏点了也没用 */
   flagsEnabled: boolean;
+  /**
+   * 当前在哪一栏。传下去挂到每行的链接上，观看页的返回箭头才知道该退回哪 ——
+   * 从「★ 收藏」点进去再返回，不该把筛选状态吃掉（创始人 2026-07-31 那条"一层层返回"的延伸）
+   */
+  from?: BackFrom;
 }) {
   const router = useRouter();
   const [rows, setRows] = useState(items);
@@ -229,7 +236,7 @@ export function SourceList({
                 className="flex items-center gap-1 border-b border-ink-700/80"
               >
                 <Link
-                  href={`/watch/${s.id}`}
+                  href={withFrom(`/watch/${s.id}`, from)}
                   className="flex min-h-14 min-w-0 flex-1 items-center gap-3 py-3 text-sm hover:text-teal-300"
                 >
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-ink-700 text-ink-300" aria-hidden>
