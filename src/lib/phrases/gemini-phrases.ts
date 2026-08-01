@@ -169,9 +169,10 @@ ${modeBrief(ctx.mode)}
 
 RULES
 1. At most ONE pick per numbered line. Aim for roughly one pick every 4 to 8 lines — enough that the reader always has something to collect, few enough that it stays worth collecting. Only return nothing at all if this batch is genuinely filler (silence, names, numbers).
-2. The picked phrase MUST be copied VERBATIM from that line (same spelling, same case, same words, contiguous). Anything not found verbatim in its line is discarded.
-3. Write the explanation in ${nativeName}. One short clause, at most 20 characters if that language is dense (Chinese/Japanese), at most 12 words otherwise. No restating the phrase.
-4. Output ONE LINE per pick, exactly: <number><TAB><phrase><TAB><explanation>
+2. Skip anything whose meaning is already obvious from the ordinary meaning of its own words — a plain label is not a term. Ask: could a reader who knows every word in it still miss what it means? If no, skip it. Also never pick two phrasings of the same idea in one batch.
+3. The picked phrase MUST be copied VERBATIM from that line (same spelling, same case, same words, contiguous). Anything not found verbatim in its line is discarded.
+4. Write the explanation in ${nativeName}. One short clause, at most 20 characters if that language is dense (Chinese/Japanese), at most 12 words otherwise. No restating the phrase.
+5. Output ONE LINE per pick, exactly: <number><TAB><phrase><TAB><explanation>
    Use a real TAB between the three fields. Output nothing else — no headers, no markdown, no commentary. Lines with no pick are simply omitted.
 
 EXAMPLE (format only — the fields are separated by a real TAB)

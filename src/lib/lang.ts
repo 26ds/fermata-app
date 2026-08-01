@@ -79,7 +79,17 @@ export function normalizeLang(raw: string | null | undefined): string {
   if (lower === "zh" || lower.startsWith("zh-")) {
     return /hant|-tw|-hk|-mo/.test(lower) ? "zh-Hant" : "zh-Hans";
   }
-  return code;
+
+  // **地区子标签一律丢掉**（`en-US` → `en`）。BCP-47 里主子标签才是"语言"，
+  // `US` 只是"在哪儿说的"。2026-08-01 真机撞到的就是这个：`navigator.language`
+  // 探到 `en-US` 存进了母语，而语言选择器的选项只有 `en` —— 值对不上任何一个选项，
+  // **下拉框直接显示成空的**，用户根本看不出自己的母语被设成了什么。
+  // 提示词那边同样受害（"用 en-US 解释"）。
+  // 字形子标签（`zh-Hant` 的 `Hant`、`sr-Latn` 的 `Latn`）**保留** —— 那是真区别，不是地区。
+  const [primary, ...rest] = code.split("-");
+  const script = rest.find((p) => /^[a-z]{4}$/i.test(p));
+  const lang = primary.toLowerCase();
+  return script ? `${lang}-${script[0].toUpperCase()}${script.slice(1).toLowerCase()}` : lang;
 }
 
 /** 主子标签。"zh-Hans" / "zh-CN" / "zh" 都是 "zh" */
