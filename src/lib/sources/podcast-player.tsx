@@ -8,9 +8,13 @@ import type { PlayerProps } from "./types";
 //
 // 为什么自己画控件而不是用 <audio controls>：原生控件在 iOS 上是一条白色胶囊，
 // 跟整个深色界面打架，且高度不受控 —— 而 D18 刚把纵向空间抠出来给内容。
-// 这里只做四件事：播/停、±15 秒、拖动进度、看时间。
+// 这里只做三件事：播/停、拖动进度、看时间。
+//
+// ±秒 与 倍速**不在这里**：它们是观看页那条共用控制条的活（components/player-controls.tsx，
+// 视频和播客同一套、步长可调）。原来这里另有一对 ±15 —— 手机上两套跳跃键上下并排、
+// 数字还不一样，是明摆着的灾难，所以这一版把它撤了。
 
-/** 播客的跳跃步长。15 秒是播客客户端的通用口径（一句话/一个广告的量级） */
+/** 只剩系统键在用的步长（锁屏 / 控制中心的快退快进）。15 秒是播客客户端的通用口径 */
 const SKIP_S = 15;
 
 export function PodcastPlayer({ source, onReady, onPlayingChange, onPause }: PlayerProps) {
@@ -67,6 +71,10 @@ export function PodcastPlayer({ source, onReady, onPlayingChange, onPause }: Pla
         },
         play: () => void audio.play().catch(() => {}),
         pause: () => audio.pause(),
+        setRate: (rate) => {
+          audio.playbackRate = rate;
+        },
+        getRate: () => audio.playbackRate || 1,
       });
     };
 
@@ -167,29 +175,11 @@ export function PodcastPlayer({ source, onReady, onPlayingChange, onPause }: Pla
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => seekBy(-SKIP_S)}
-          aria-label={`后退 ${SKIP_S} 秒`}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-ink-700 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
-        >
-          −{SKIP_S}
-        </button>
-
-        <button
-          type="button"
           onClick={toggle}
           aria-label={playing ? "暂停" : "播放"}
           className="teal-halo flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-teal-400 text-xl text-teal-950"
         >
           <span aria-hidden>{playing ? "❚❚" : "▶"}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => seekBy(SKIP_S)}
-          aria-label={`前进 ${SKIP_S} 秒`}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-ink-700 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
-        >
-          +{SKIP_S}
         </button>
 
         <p className="ui-mono ml-auto text-sm text-ink-100">

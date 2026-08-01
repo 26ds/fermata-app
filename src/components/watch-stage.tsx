@@ -8,8 +8,10 @@ import { DotBar } from "@/components/dot-bar";
 import { ImmersiveChat } from "@/components/immersive-chat";
 import { InterruptPanel, type PanelLine } from "@/components/interrupt-panel";
 import type { PausePoint } from "@/components/pause-list";
+import { PlayerControls } from "@/components/player-controls";
 import { DEFAULT_LANG_PREFS, type LangPrefs } from "@/lib/lang";
 import { isPhraseScan, resolvePhrases, type PhraseItem, type PhraseScan } from "@/lib/phrases/types";
+import { DEFAULT_PLAY_PREFS, type PlayPrefs } from "@/lib/play-prefs";
 import { putSettings } from "@/lib/settings-client";
 import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
@@ -30,6 +32,7 @@ export function WatchStage({
   startAtS,
   startInChat,
   prefs = DEFAULT_LANG_PREFS,
+  play = DEFAULT_PLAY_PREFS,
   savedAtoms = [],
 }: {
   source: SourceRow;
@@ -43,6 +46,8 @@ export function WatchStage({
   startInChat?: boolean;
   /** M3.7 / D42：三个语言（母语 / 目标语言 / 译文语言），服务端读出来传下来 */
   prefs?: LangPrefs;
+  /** 倍速 + 一跳几秒。服务端首屏就给，省得进来先显示 1× 再"跳"成 1.5× */
+  play?: PlayPrefs;
   /** M3.7：这条内容里已经收进词库的词组（决定 ✓ 是实心还是空心） */
   savedAtoms?: { id: string; term: string }[];
 }) {
@@ -109,6 +114,16 @@ export function WatchStage({
   // 播放器实例永不卸载，退出不重载、不跳回开头（WORKORDER D33 / design §99）。
   const [immersive, setImmersive] = useState(Boolean(startInChat));
 
+  // === 倍速 + 一跳几秒（2026-08-01 真机反馈第二轮） ===
+  // rate 这个 state 是**播放器实测值的镜子**，不是"我们请求的值"：YouTube 有权不认某个倍速，
+  // 而显示一个按不出来的数比不显示还糟。rateRef 才记着"用户选的"，播放器每次就绪都按它重设一遍
+  // （换片 / 从沉浸态回来 / iOS 回收后重建，倍速都会被打回 1）。
+  const [rate, setRate] = useState(play.rate);
+  const [skipStep, setSkipStep] = useState(play.skipStep);
+  const rateRef = useRef(play.rate);
+  /** 牌子上正显示的那个数（给 250ms 那轮比对用，走 ref 才不会读到过期闭包） */
+  const shownRateRef = useRef(play.rate);
+
   // === M3.7 词库（D40 + D42） ===
   // 整片扫出来的词组。首屏直接吃服务端那份（`sources.phrases`）—— 扫过的片子
   // **一进来高亮就在**，不用等任何请求（验收⑤"重看不再花钱"的可见部分）。
@@ -165,6 +180,8 @@ export function WatchStage({
       currentTimeRef.current = t;
       if (clockRef.current) clockRef.current.textContent = mmss(t);
     }
+    // 播放器每次就绪都把用户选的倍速重设一遍 —— 它自己不记，默认永远是 1
+    if (rateRef.current !== 1) handle.setRate(rateRef.current);
   }, []);
 
   /**
@@ -558,6 +575,33 @@ export function WatchStage({
     if (clockRef.current) clockRef.current.textContent = mmss(t);
   }, []);
 
+  /** ±N 秒。夹在 [0, 时长) 里 —— 往前跳过头会让 YouTube 直接判"播完了" */
+  const seekBy = useCallback(
+    (deltaS: number) => {
+      const handle = handleRef.current;
+      if (!handle) return;
+      const duration = handle.getDuration();
+      const raw = (handle.getCurrentTime() || currentTimeRef.current) + deltaS;
+      const ceiling = duration > 0 ? Math.max(0, duration - 0.5) : raw;
+      handleSeek(Math.max(0, Math.min(ceiling, raw)));
+    },
+    [handleSeek],
+  );
+
+  /** 换倍速：先落到播放器，再记进偏好（换台设备也是这个速度） */
+  const changeRate = useCallback((next: number) => {
+    rateRef.current = next;
+    shownRateRef.current = next;
+    setRate(next);
+    handleRef.current?.setRate(next);
+    void putSettings({ playRate: next });
+  }, []);
+
+  const changeStep = useCallback((next: number) => {
+    setSkipStep(next);
+    void putSettings({ skipStep: next });
+  }, []);
+
   /** 字幕层自己按 250ms 来取时间。给它 ref 的读法，而不是把秒数灌进 state ——
       灌进去就是每秒 4 次整页重渲染，M0.5 栽过的那个坑 */
   const getCurrentTime = useCallback(() => currentTimeRef.current, []);
@@ -731,6 +775,16 @@ export function WatchStage({
       const duration = handle.getDuration();
       if (duration > 0 && totalRef.current) totalRef.current.textContent = mmss(duration);
 
+      // 倍速牌子照实说：用户可能在 YouTube 自带的齿轮菜单里改了速度，
+      // 我们这块牌子就得跟着改口 —— 写着 1× 却在 1.5× 播，是骗人。
+      // **只镜像、不回存偏好**：播放器自己把倍速打回 1 的情况（换片 / 重建）很常见，
+      // 那不是用户的意思，存下去等于把他选的速度悄悄抹了。要恢复，点一下就好。
+      const actualRate = handle.getRate();
+      if (actualRate > 0 && Math.abs(actualRate - shownRateRef.current) > 0.01) {
+        shownRateRef.current = actualRate;
+        setRate(actualRate);
+      }
+
       // 时长只 setState 一次 —— 点点条要用它算百分比
       if (!durationKnownRef.current && duration > 0) {
         durationKnownRef.current = true;
@@ -823,7 +877,8 @@ export function WatchStage({
         />
       </div>
 
-      <div className="flex items-center justify-between rounded-2xl border border-ink-700 px-4 py-2.5">
+      <div className="rounded-2xl border border-ink-700 px-4 py-2.5">
+        <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <span
             className={`h-2 w-2 rounded-full ${playing ? "bg-teal-400" : "bg-ink-500"}`}
@@ -850,6 +905,16 @@ export function WatchStage({
             {source.duration_s ? mmss(source.duration_s) : "--:--"}
           </span>
         </p>
+        </div>
+
+        {/* 倍速 + ±N 秒。挤在同一条胶囊的第二行 —— 不另开一块地（D18） */}
+        <PlayerControls
+          step={skipStep}
+          rate={rate}
+          onStep={changeStep}
+          onRate={changeRate}
+          onSeekBy={seekBy}
+        />
       </div>
 
       <DotBar

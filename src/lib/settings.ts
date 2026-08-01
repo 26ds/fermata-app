@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_LANG_PREFS, readLangPrefs, type LangPrefs } from "@/lib/lang";
+import { DEFAULT_PLAY_PREFS, readPlayPrefs, type PlayPrefs } from "@/lib/play-prefs";
 
 // M3.7 —— 服务端读用户设置（`user_settings.settings`，迁移 0006 的表，**零新迁移**）。
 //
@@ -37,5 +38,21 @@ export async function getLangPrefs(
     return readLangPrefs(await getSettings(supabase, userId));
   } catch {
     return DEFAULT_LANG_PREFS;
+  }
+}
+
+/**
+ * 观看页要的两坨偏好，**一次查询取齐**（三个语言 + 倍速/跳跃步长）。
+ * 分两个函数各查一次是白多一趟往返 —— 它们本来就存在同一行 jsonb 里。
+ */
+export async function getWatchPrefs(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<{ lang: LangPrefs; play: PlayPrefs }> {
+  try {
+    const settings = await getSettings(supabase, userId);
+    return { lang: readLangPrefs(settings), play: readPlayPrefs(settings) };
+  } catch {
+    return { lang: DEFAULT_LANG_PREFS, play: DEFAULT_PLAY_PREFS };
   }
 }

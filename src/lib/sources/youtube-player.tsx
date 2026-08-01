@@ -12,6 +12,8 @@ interface YTPlayer {
   seekTo(seconds: number, allowSeekAhead: boolean): void;
   playVideo(): void;
   pauseVideo(): void;
+  setPlaybackRate(rate: number): void;
+  getPlaybackRate(): number;
   destroy(): void;
 }
 
@@ -113,6 +115,17 @@ export function YouTubePlayer({ source, onReady, onPlayingChange, onPause }: Pla
               seekTo: (seconds) => player.seekTo(Math.max(0, seconds), true),
               play: () => player.playVideo(),
               pause: () => player.pauseVideo(),
+              // 用官方 JS API 换倍速，不魔改 embed（D15 那条合规红线只禁"改播放体验/藏控件"，
+              // setPlaybackRate 是 IFrame API 明写支持的一等公民）。它只认自己给的档位，
+              // 给了不认的会**静默不生效** —— 所以界面必须回读 getPlaybackRate()，别自说自话。
+              setRate: (rate) => {
+                try {
+                  player.setPlaybackRate(rate);
+                } catch {
+                  // 老 embed / 还没加载完：换不了就维持原速，不该让一个倍速拖垮播放器
+                }
+              },
+              getRate: () => player.getPlaybackRate?.() || 1,
             });
           },
           onStateChange: (e) => {

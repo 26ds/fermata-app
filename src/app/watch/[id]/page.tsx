@@ -7,7 +7,7 @@ import { SetupNotice } from "@/components/setup-notice";
 import { WatchStage } from "@/components/watch-stage";
 import type { PausePoint } from "@/components/pause-list";
 import type { SourceRow } from "@/lib/types";
-import { getLangPrefs } from "@/lib/settings";
+import { getWatchPrefs } from "@/lib/settings";
 import { sourceOriginUrl } from "@/lib/source-origin";
 import { watchBackTarget } from "@/lib/nav";
 
@@ -62,7 +62,8 @@ export default async function WatchDetailPage({
 
   // M3.7 / D42：三个语言（母语 / 目标语言 / 译文语言）。
   // 词库要标什么、AI 用哪门语言答、字幕译成什么，全从这里推 —— 不许硬编码。
-  const prefs = await getLangPrefs(supabase, user.id);
+  // 同一行 jsonb 里还存着倍速与「一跳几秒」，一次查齐（getWatchPrefs）。
+  const { lang: prefs, play } = await getWatchPrefs(supabase, user.id);
 
   // M3.7：这条内容里已经收进词库的（首屏 ✓ 就该是实心的，不能等请求回来才补上）。
   // 表还没建 / 查失败一律当"一个都没收"，别让词库把观看页拖下水。
@@ -111,6 +112,7 @@ export default async function WatchDetailPage({
           startAtS={startAtS}
           startInChat={chat === "1"}
           prefs={prefs}
+          play={play}
           savedAtoms={savedAtoms}
         />
       </main>

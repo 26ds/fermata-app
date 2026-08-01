@@ -15,6 +15,13 @@ export interface PlayerHandle {
   seekTo(seconds: number): void;
   play(): void;
   pause(): void;
+  /**
+   * 倍速。**可能被平台拒**（YouTube 只认它自己给的那几档，且换片后会回 1），
+   * 所以设完不许假定成功 —— 界面上显示的那个数一律以 `getRate()` 的实测为准。
+   */
+  setRate(rate: number): void;
+  /** 当前真实倍速。未就绪返回 1 */
+  getRate(): number;
 }
 
 export interface PlayerProps {

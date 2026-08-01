@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { putSettings } from "@/lib/settings-client";
 
 // M3 Phase-2 长问答沉浸聊天层（design/long-qa-immersive-chat.md）。
 //
@@ -27,6 +28,25 @@ const GLOW_PRESETS: { id: string; name: string; colors: [string, string, string,
   { id: "ink", name: "素墨", colors: ["#b4b2a9", "#9fe1cb", "#f1efe8", "#888780"] },
 ];
 const DEFAULT_GLOW = GLOW_PRESETS[0].colors;
+
+/**
+ * 字号档位（2026-08-01 创始人要的）。一个数带动整条文字流 ——
+ * AI 用它，提问用它的 0.84 倍，两者的比例是设计定死的，不给两个滑块让人自己去配。
+ */
+const CHAT_FONTS = [
+  { px: 20, name: "小" },
+  { px: 24, name: "中" },
+  { px: 28, name: "大" },
+  { px: 32, name: "特大" },
+] as const;
+const DEFAULT_CHAT_FONT = 24;
+
+/** 新加的界面文案集中放这儿（D42：以后 i18n 抽表就从这些常量抽） */
+const COPY = {
+  paletteLabel: "更换流光配色",
+  fontLabel: "调字号",
+  fontHint: "字号",
+};
 
 /** 剥掉 markdown 记号，像人聊天一样纯文字（引擎已被提示词禁 markdown，这是兜底；
  *  且流式半截收到 `**` 也不会闪出星号 —— 全局去掉 * 和行首 #/项目符号/序号）。 */
@@ -76,6 +96,8 @@ export function ImmersiveChat({
   const [top, setTop] = useState(0); // 磨砂面板顶 = 视频底缘 px
   const [atBottom, setAtBottom] = useState(true);
   const [showPalette, setShowPalette] = useState(false);
+  const [fontPx, setFontPx] = useState(DEFAULT_CHAT_FONT);
+  const [showFont, setShowFont] = useState(false);
   const [burst, setBurst] = useState(true); // 进入时的扩散光，放完卸载
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -214,6 +236,9 @@ export function ImmersiveChat({
           if (alive && Array.isArray(g) && g.length === 4) {
             setGlow(g as [string, string, string, string]);
           }
+          // 字号只认档位表里的数 —— 库里存着个 9px 不该被端上来
+          const f = Number(b?.settings?.chatFont);
+          if (alive && CHAT_FONTS.some((o) => o.px === f)) setFontPx(f);
         }
       } catch {
         // 取不到历史不致命：空着接着聊
@@ -257,6 +282,12 @@ export function ImmersiveChat({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ settings: { chatGlow: colors } }),
     }).catch(() => {});
+  };
+
+  const pickFont = (px: number) => {
+    setFontPx(px);
+    setShowFont(false);
+    void putSettings({ chatFont: px });
   };
 
   // 把最后一条 AI 的正文设为 text（打字机每帧调用）
@@ -408,17 +439,55 @@ export function ImmersiveChat({
         role="dialog"
         aria-label="长问答沉浸聊天"
       >
-        {/* 配色（右上角克制入口）：满足「颜色后台设置用户可自定义」，落 /api/settings */}
+        {/* 右上角两颗克制的入口：字号 + 配色。同一时刻只摊开一个 */}
         <div className="absolute right-3 top-2 z-10 flex flex-col items-end gap-2">
-          <button
-            type="button"
-            onClick={() => setShowPalette((v) => !v)}
-            aria-label="更换流光配色"
-            className="h-7 w-7 rounded-full border border-ink-100/20"
-            style={{
-              background: `conic-gradient(from 210deg, ${glow[0]}, ${glow[1]}, ${glow[2]}, ${glow[3]}, ${glow[0]})`,
-            }}
-          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowFont((v) => !v);
+                setShowPalette(false);
+              }}
+              aria-label={COPY.fontLabel}
+              aria-expanded={showFont}
+              className="glass flex h-7 w-7 items-center justify-center rounded-full text-[13px] font-semibold leading-none text-ink-100"
+            >
+              <span aria-hidden>A</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowPalette((v) => !v);
+                setShowFont(false);
+              }}
+              aria-label={COPY.paletteLabel}
+              aria-expanded={showPalette}
+              className="h-7 w-7 rounded-full border border-ink-100/20"
+              style={{
+                background: `conic-gradient(from 210deg, ${glow[0]}, ${glow[1]}, ${glow[2]}, ${glow[3]}, ${glow[0]})`,
+              }}
+            />
+          </div>
+          {showFont && (
+            <div className="glass flex items-center gap-1.5 rounded-2xl px-2.5 py-2">
+              <span className="mr-0.5 text-[0.68rem] text-ink-100/50">{COPY.fontHint}</span>
+              {CHAT_FONTS.map((o) => (
+                <button
+                  key={o.px}
+                  type="button"
+                  onClick={() => pickFont(o.px)}
+                  aria-label={`${COPY.fontHint}：${o.name}`}
+                  className={`min-h-8 rounded-full px-2.5 text-xs font-semibold transition-colors ${
+                    o.px === fontPx
+                      ? "bg-teal-400 text-teal-950"
+                      : "border border-ink-100/20 text-ink-100/80"
+                  }`}
+                >
+                  {o.name}
+                </button>
+              ))}
+            </div>
+          )}
           {showPalette && (
             <div className="glass flex gap-2 rounded-2xl px-2.5 py-2">
               {GLOW_PRESETS.map((p) => (
@@ -438,16 +507,22 @@ export function ImmersiveChat({
           )}
         </div>
 
-        {/* 歌词式文字流：同一左侧网格，无气泡/头像/名称/边框（design §1） */}
+        {/* 歌词式文字流：无气泡/头像/名称/边框（design §1）。
+            **提问靠右、回答靠左** —— 2026-08-01 创始人真机反馈：全都贴着左边，
+            读起来分不清哪句是自己问的。左右分家是最省笔墨的区分，比加气泡、加名字都轻。
+            字号由 --chat-fs 一个变量带动，AI 用整数、提问用它的 0.84 倍。 */}
         <div
           ref={scrollRef}
           onScroll={onScroll}
           className="lyric-flow min-h-0 flex-1 overflow-y-auto px-5 pt-9"
-          style={{ paddingBottom: 232 }}
+          style={{ paddingBottom: 232, "--chat-fs": `${fontPx}px` } as React.CSSProperties}
         >
           <div className="mx-auto w-full max-w-[88%]">
             {loaded && n === 0 && (
-              <p className="pt-6 text-[22px] leading-snug text-ink-100/45">
+              <p
+                className="pt-6 leading-snug text-ink-100/45"
+                style={{ fontSize: "calc(var(--chat-fs) * 0.92)" }}
+              >
                 有什么想问的？扣着当前进度，接着聊。
               </p>
             )}
@@ -465,23 +540,23 @@ export function ImmersiveChat({
                   : Math.max(0.34, 0.72 - fromEnd * 0.11);
               const streaming = isLast && !isUser && sending;
               const segs = toSegments(t.text);
-              // 用户 = 窄一档 + 右侧留白 + 上方大间距（和 AI 明显分开，创始人反馈 2a）；
-              // AI = 满宽最亮，紧贴它回答的那句问题。首条不留上边距。
+              // 用户 = 靠右 + 窄一档 + 上方大间距；AI = 靠左满宽最亮，紧贴它回答的那句问题。
+              // 首条不留上边距。
               const blockCls = isUser
-                ? `${i === 0 ? "" : "mt-9"} mr-[22%]`
+                ? `${i === 0 ? "" : "mt-9"} ml-[22%] text-right`
                 : `${i === 0 ? "" : "mt-3"}`;
-              const lineCls = isUser
-                ? "text-[20px] leading-[1.32] text-ink-100"
-                : "text-[24px] leading-[1.32] text-ink-100";
+              const lineStyle = {
+                fontSize: isUser ? "calc(var(--chat-fs) * 0.84)" : "var(--chat-fs)",
+              };
               return (
                 <div key={i} className={blockCls} style={{ opacity }}>
                   {segs.length === 0 && streaming ? (
-                    <p className="text-[24px] leading-[1.32] text-ink-100">
+                    <p className="leading-[1.32] text-ink-100" style={lineStyle}>
                       <span className="animate-pulse text-teal-300">正在想…</span>
                     </p>
                   ) : (
                     segs.map((s, j) => (
-                      <p key={j} className={lineCls}>
+                      <p key={j} className="leading-[1.32] text-ink-100" style={lineStyle}>
                         {s}
                         {streaming && j === segs.length - 1 && (
                           <span className="ml-0.5 animate-pulse text-teal-300">▍</span>
