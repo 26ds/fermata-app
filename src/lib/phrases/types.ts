@@ -30,12 +30,27 @@ export interface PhraseScan {
   contentLang: string;
   /** 解释用的语言（= 当时的母语） */
   supportLang: string;
-  /** 扫的时候字幕有多少段 —— 和现在对不上就说明字幕换过了 */
+  /** 扫的时候字幕有多少段。字幕**变长**是正常的（还在转），**变短或换头**才说明整份被换掉了 */
   segCount: number;
+  /**
+   * 第一段字幕的开头几十个字。字幕从 partial 长到 ready 时头部不变，
+   * 重新粘一份则多半会变 —— 靠它区分「接着长」和「整份换掉」，
+   * 决定是**续扫**还是**从头重扫**（续扫能省掉一整份的钱）。
+   */
+  head?: string;
   /** 已经扫到第几段（不含）。< segCount 说明预算用完了，下次接着扫 */
   scannedThrough: number;
   scannedAt: string;
   items: PhraseItem[];
+}
+
+/** 字幕的"头"，用来判断整份有没有被换掉。取前两段就够，长度掐在 120 字 */
+export function headOf(segments: { text: string }[]): string {
+  return segments
+    .slice(0, 2)
+    .map((s) => s.text)
+    .join(" ")
+    .slice(0, 120);
 }
 
 /** 版本对得上、形状像样，才认它是一份扫描结果 */

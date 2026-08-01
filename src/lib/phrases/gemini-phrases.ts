@@ -102,19 +102,35 @@ function modeBrief(mode: StudyMode): string {
   ].join(" ");
 }
 
-/** `<行号>\t<词组>\t<解释>`。行号必须落在这一批里（挡住模型偶尔吐的野号） */
-const LINE = /^\s*(\d+)\t([^\t]+)\t(.+)$/;
+/**
+ * `<行号><分隔><词组><分隔><解释>`。
+ *
+ * **分隔符要认得宽**（M3.7 真机第一轮的教训）：只认 `\t` 时，模型偶尔改用竖线、
+ * 破折号或几个空格，整批就一条都解析不出来 —— 而症状是"扫了但什么都没标出来"，
+ * 从外面看和"这段确实没词可标"一模一样，根本查不出来。宁可认宽一点。
+ */
+const SEPARATOR = /\t+|\s*\|\s*|\s+[—–]\s+|\s{2,}/;
+
+/** 行首的序号/项目符号：`3.` `- 3:` `* 3 ` 都要剥掉，只留数字 */
+const LEADING = /^\s*[-*•]?\s*(\d+)\s*[.:、)\]]?\s*/;
 
 function parsePicks(raw: string, valid: Set<number>): Map<number, { text: string; gloss: string }> {
   const out = new Map<number, { text: string; gloss: string }>();
-  for (const line of raw.split("\n")) {
-    const m = LINE.exec(line);
-    if (!m) continue;
-    const i = Number(m[1]);
-    const text = m[2].trim();
-    const gloss = m[3].trim();
-    // 每行封顶 1 个（D40）—— 模型不听话时这里兜住：同一行只留第一条
-    if (text && gloss && valid.has(i) && !out.has(i)) out.set(i, { text, gloss });
+  // 模型有时会把整段裹进 ``` 代码块里
+  const body = raw.replace(/^\s*```[a-z]*\s*/i, "").replace(/```\s*$/, "");
+  for (const rawLine of body.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const head = LEADING.exec(line);
+    if (!head) continue;
+    const i = Number(head[1]);
+    if (!valid.has(i) || out.has(i)) continue; // 每行封顶 1 个（D40）：同一行只留第一条
+    const rest = line.slice(head[0].length);
+    const parts = rest.split(SEPARATOR).map((p) => p.trim()).filter(Boolean);
+    if (parts.length < 2) continue; // 只有词组没有解释：宁可丢，不给一条没解释的词
+    const text = parts[0];
+    const gloss = parts.slice(1).join(" ");
+    if (text && gloss) out.set(i, { text, gloss });
   }
   return out;
 }
@@ -152,11 +168,14 @@ WHAT TO PICK
 ${modeBrief(ctx.mode)}
 
 RULES
-1. At most ONE pick per numbered line, and MOST LINES SHOULD HAVE NONE. Be strict — quality over quantity. Skipping a whole batch is a valid answer.
+1. At most ONE pick per numbered line. Aim for roughly one pick every 4 to 8 lines — enough that the reader always has something to collect, few enough that it stays worth collecting. Only return nothing at all if this batch is genuinely filler (silence, names, numbers).
 2. The picked phrase MUST be copied VERBATIM from that line (same spelling, same case, same words, contiguous). Anything not found verbatim in its line is discarded.
 3. Write the explanation in ${nativeName}. One short clause, at most 20 characters if that language is dense (Chinese/Japanese), at most 12 words otherwise. No restating the phrase.
 4. Output ONE LINE per pick, exactly: <number><TAB><phrase><TAB><explanation>
-   Output nothing else — no headers, no markdown, no commentary. Lines with no pick are simply omitted.
+   Use a real TAB between the three fields. Output nothing else — no headers, no markdown, no commentary. Lines with no pick are simply omitted.
+
+EXAMPLE (format only — the fields are separated by a real TAB)
+12${"\t"}<phrase copied verbatim from line 12>${"\t"}<short explanation written in ${nativeName}>
 
 TRANSCRIPT LINES
 ${numbered}`;

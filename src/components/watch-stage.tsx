@@ -115,7 +115,16 @@ export function WatchStage({
   const [scan, setScan] = useState<PhraseScan | null>(
     isPhraseScan(source.phrases) ? source.phrases : null,
   );
-  const [scanning, setScanning] = useState(false);
+  /**
+   * 扫描这件事**必须能被看见**（M3.7 真机第一轮的教训）。
+   * 原来失败一律静默，于是"扫描中闪一下然后什么都没有"可能是四种完全不同的原因 ——
+   * 字幕没转完 / 上次崩了留下并发锁 / 真的一个词都没标出来 / 报错 ——
+   * 而用户和我都无从分辨。**说不清楚的失败等于没做。**
+   */
+  const [scanState, setScanState] = useState<{
+    status: "idle" | "scanning" | "ready" | "empty" | "not-ready" | "running" | "failed";
+    count: number;
+  }>({ status: "idle", count: isPhraseScan(source.phrases) ? source.phrases.items.length : 0 });
   /** D42：内容不是他母语、又没问过 —— 有值时面板上弹那一句问询。答完即定 */
   const [needTargetLang, setNeedTargetLang] = useState("");
   /** 已收进词库的：词组原文 → atom id（取消勾选要用 id） */
@@ -229,33 +238,56 @@ export function WatchStage({
       if (scanTriedRef.current && !force) return;
       scanTriedRef.current = true;
       scanRunningRef.current = true;
-      setScanning(true);
+      setScanState((s) => ({ ...s, status: "scanning" }));
+      let outcome: (typeof scanState)["status"] = "failed";
+      let count = 0;
       try {
         // 长内容一轮扫不完（服务端有 150 秒软预算），最多接力 3 轮
         for (let round = 0; round < 3; round++) {
           const res = await fetch("/api/phrases", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ sourceId: source.id }),
+            // force 只在用户按「再扫一次」时为真 —— 破锁 + 从头重扫，是花钱的动作
+            body: JSON.stringify({ sourceId: source.id, force: force || undefined }),
           });
           const body = await res.json().catch(() => ({}));
-          if (!res.ok) break;
+          if (!res.ok) break; // outcome 留在 failed
           if (body.status === "need-target") {
             setNeedTargetLang(String(body.contentLang ?? ""));
+            outcome = "idle"; // 等他答完那一句再扫，这不算失败
             break;
           }
-          if (isPhraseScan(body.phrases)) setScan(body.phrases);
-          if (body.status !== "partial") break; // ready / not-ready / running 都不用再打
+          if (isPhraseScan(body.phrases)) {
+            setScan(body.phrases);
+            count = body.phrases.items.length;
+          }
+          if (body.status === "not-ready" || body.status === "running") {
+            outcome = body.status;
+            break;
+          }
+          if (body.status !== "partial") {
+            // 扫完了。**一个都没标出来要单独说** —— 它和"没扫"长得一样，但原因完全不同
+            outcome = count > 0 ? "ready" : "empty";
+            break;
+          }
+          // partial：预算用完了，下一轮接着扫
+          outcome = count > 0 ? "ready" : "empty";
         }
       } catch {
-        // 网络抽风：下次暂停再说
+        // 网络抽风：outcome 留在 failed，界面会给一个「再扫一次」
       } finally {
         scanRunningRef.current = false;
-        setScanning(false);
+        setScanState({ status: outcome, count });
       }
     },
     [source.id],
   );
+
+  /** 用户按「再扫一次」：破锁 + 从头重扫。**花钱的动作，只由人触发** */
+  const rescan = useCallback(() => {
+    scanTriedRef.current = false;
+    void ensurePhrases(true);
+  }, [ensurePhrases]);
 
   /** D42 那一句问询的答案。答完立刻存，并接着把这条内容按正确的模式扫一遍 */
   const answerTarget = useCallback(
@@ -877,7 +909,8 @@ export function WatchStage({
         onEnterImmersive={enterImmersive}
         onClose={closePanel}
         lines={panelLines}
-        scanning={scanning}
+        scan={scanState}
+        onRescan={rescan}
         onToggleTerm={toggleTerm}
         needTargetLang={needTargetLang}
         onAnswerTarget={answerTarget}

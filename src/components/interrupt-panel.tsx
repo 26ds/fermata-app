@@ -26,13 +26,24 @@ const COPY = {
   stuckAt: "卡在",
   askHint: "问一句，我扣着这段字幕答你。",
   lastTwoSeconds: "刚才这两秒",
-  scanning: "正在把这条内容里值得收的表达标出来…",
   noCaptionHere: "这一刻附近没有字幕。",
-  collapse: "收起面板，让字幕露出来",
-  expand: "展开面板",
+  collapse: "点我收起，去看字幕",
+  expand: "展开",
+  expandLabel: "展开面板",
   close: "关闭",
   askShort: "问一句",
   addWord: "＋词",
+  chat: "沉浸聊天",
+  rescan: "再扫一次",
+  // 扫描的四种结局，每一种都得说人话 —— 说不清楚的失败等于没做
+  scanStates: {
+    scanning: "正在把这条内容里值得收的表达标出来…",
+    ready: (n: number) => `全片标出 ${n} 个，下面的字幕里也都标了`,
+    empty: "整片扫完了，一个都没标出来。",
+    "not-ready": "字幕还太少，等它多转出一段再来扫。",
+    running: "上一次扫描还没结束（或卡住了）。",
+    failed: "这次没扫成。",
+  },
   targetTitle: (lang: string) => `这条内容是 ${lang}。`,
   targetQuestion: "你是想学这门语言，还是只想搞懂内容？",
   targetLearn: (lang: string) => `我想学 ${lang}`,
@@ -76,8 +87,10 @@ interface InterruptPanelProps {
   // ── M3.7 / D39：面板里读字幕、挑词组 ──
   /** `[t−2, t]` 的原句（D39 定死的窗口）。纯前端从已加载的字幕里切，不发请求 */
   lines?: PanelLine[];
-  /** 整片扫描还在跑（第一次在这片子里暂停时后台触发） */
-  scanning?: boolean;
+  /** 整片扫描的结局 + 标出了几个。**四种失败要分得开**，否则查不出问题 */
+  scan?: { status: "idle" | "scanning" | "ready" | "empty" | "not-ready" | "running" | "failed"; count: number };
+  /** 「再扫一次」：破锁 + 从头重扫（花钱的动作，所以是一个按钮而不是自动重试） */
+  onRescan?: () => void;
   /** 勾 / 取消勾一个词组 */
   onToggleTerm?: (phrase: PhraseItem) => void;
   /**
@@ -100,7 +113,8 @@ export function InterruptPanel({
   onEnterImmersive,
   onClose,
   lines = [],
-  scanning = false,
+  scan = { status: "idle", count: 0 },
+  onRescan,
   onToggleTerm,
   needTargetLang = "",
   onAnswerTarget,
@@ -175,16 +189,17 @@ export function InterruptPanel({
   if (collapsed) {
     return (
       <div className="fixed inset-x-0 bottom-0 z-[60] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <div role="dialog" aria-label="打断面板（已收起）" className="glass flex items-center gap-2 rounded-2xl px-3 py-2">
+        <div role="dialog" aria-label="打断面板（已收起）" className="glass flex items-center gap-1.5 rounded-2xl px-2.5 py-2">
+          {/* 带字的胶囊，不是一根光秃秃的横线 —— 一条没标注的细线没人知道它能点 */}
           <button
             type="button"
             onClick={() => setCollapsed(false)}
-            aria-label={COPY.expand}
-            className="flex h-8 w-10 shrink-0 items-center justify-center"
+            aria-label={COPY.expandLabel}
+            className="flex min-h-9 shrink-0 items-center gap-1 rounded-xl border border-ink-500/60 px-2.5 text-xs text-ink-100 transition-colors hover:border-teal-400 hover:text-teal-300"
           >
-            <span className="h-1 w-7 rounded-full bg-ink-500/60" aria-hidden />
+            <span aria-hidden>▲</span>
+            <span className="ui-mono text-teal-300">{mmss(tS)}</span>
           </button>
-          <span className="ui-mono shrink-0 text-xs text-teal-300">{mmss(tS)}</span>
           <span className="flex-1" />
           <button
             type="button"
@@ -193,7 +208,7 @@ export function InterruptPanel({
               // 展开后把光标送进输入框 —— 少一次点击
               window.setTimeout(() => inputRef.current?.focus(), 60);
             }}
-            className="min-h-9 shrink-0 rounded-xl border border-ink-500/60 px-3 text-xs text-ink-100 hover:border-teal-400 hover:text-teal-300"
+            className="min-h-9 shrink-0 rounded-xl border border-ink-500/60 px-2.5 text-xs text-ink-100 hover:border-teal-400 hover:text-teal-300"
           >
             {COPY.askShort}
           </button>
@@ -201,15 +216,25 @@ export function InterruptPanel({
             type="button"
             onClick={() => setCollapsed(false)}
             aria-label="回到暂停那两秒挑词"
-            className="min-h-9 shrink-0 rounded-xl border border-ink-500/60 px-3 text-xs text-ink-100 hover:border-teal-400 hover:text-teal-300"
+            className="min-h-9 shrink-0 rounded-xl border border-ink-500/60 px-2.5 text-xs text-ink-100 hover:border-teal-400 hover:text-teal-300"
           >
             {COPY.addWord}
+          </button>
+          {/* 创始人真机反馈：细条上得能直接进沉浸聊天。
+              收起状态下悬浮球可能正被这条挡着，而"长按球"本来就是个不好发现的动作 */}
+          <button
+            type="button"
+            onClick={onEnterImmersive}
+            aria-label={COPY.chat}
+            className="siri-orb flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm text-teal-950"
+          >
+            <span aria-hidden>◉</span>
           </button>
           <button
             type="button"
             onClick={onClose}
             aria-label={COPY.close}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-base text-ink-500 hover:text-teal-300"
+            className="flex h-9 w-7 shrink-0 items-center justify-center rounded-xl text-base text-ink-500 hover:text-teal-300"
           >
             ×
           </button>
@@ -241,10 +266,10 @@ export function InterruptPanel({
             const to = e.changedTouches[0]?.clientY;
             if (from != null && to != null && to - from > 30) setCollapsed(true);
           }}
-          aria-label={COPY.collapse}
-          className="mx-auto mb-3 flex h-6 w-16 shrink-0 items-center justify-center"
+          className="mx-auto mb-3 flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border border-ink-500/50 bg-ink-700/60 px-3.5 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
         >
-          <span className="h-1 w-10 rounded-full bg-ink-500/60" aria-hidden />
+          <span aria-hidden>▽</span>
+          {COPY.collapse}
         </button>
 
         {/* 横杠改成"收起"之后，关掉面板本来要滑到最底下按「取消」——
@@ -298,14 +323,9 @@ export function InterruptPanel({
             盖住下面的字幕条就无所谓了，因为要读的已经在这儿了。 ── */}
         {!needTargetLang && !showAnswer && (
           <div className="mt-3 shrink-0 rounded-2xl border border-ink-500/50 bg-ink-900/50 px-3 py-2.5">
-            <div className="flex items-baseline justify-between">
-              <p className="eyebrow">{COPY.lastTwoSeconds}</p>
-              {scanning && <span className="ui-mono text-[0.62rem] text-teal-300/80">扫描中…</span>}
-            </div>
+            <p className="eyebrow">{COPY.lastTwoSeconds}</p>
             {lines.length === 0 ? (
-              <p className="mt-1.5 text-xs leading-5 text-ink-500">
-                {scanning ? COPY.scanning : COPY.noCaptionHere}
-              </p>
+              <p className="mt-1.5 text-xs leading-5 text-ink-500">{COPY.noCaptionHere}</p>
             ) : (
               <ul className="mt-1.5 flex flex-col gap-1.5">
                 {lines.map((l) => (
@@ -330,6 +350,29 @@ export function InterruptPanel({
                   </li>
                 ))}
               </ul>
+            )}
+
+            {/* 扫描到底发生了什么，如实写一行。
+                原来这里什么都不说 —— 于是"扫描中闪一下然后没有高亮"可能是四种完全不同的
+                原因，用户和我都没法分辨。**说不清楚的失败等于没做。** */}
+            {scan.status !== "idle" && (
+              <div className="mt-2 flex items-center gap-2 border-t border-ink-500/30 pt-2">
+                <p className="min-w-0 flex-1 text-[0.68rem] leading-4 text-ink-500">
+                  {scan.status === "ready"
+                    ? COPY.scanStates.ready(scan.count)
+                    : COPY.scanStates[scan.status]}
+                </p>
+                {/* 只在"扫了却没结果"或"出岔子"时给重扫 —— 它要花钱，不该天天摆着 */}
+                {onRescan && (scan.status === "empty" || scan.status === "failed" || scan.status === "running") && (
+                  <button
+                    type="button"
+                    onClick={onRescan}
+                    className="min-h-8 shrink-0 rounded-lg border border-teal-400/50 px-2.5 text-[0.68rem] text-teal-300"
+                  >
+                    {COPY.rescan}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}

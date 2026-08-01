@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { normalizeLang, sameLang, studyMode } from "@/lib/lang";
 import { detectContentLang, PhraseError, scanPhrases } from "@/lib/phrases/gemini-phrases";
-import { isPhraseScan, type PhraseScan } from "@/lib/phrases/types";
+import { headOf, isPhraseScan, type PhraseScan } from "@/lib/phrases/types";
 import { getLangPrefs } from "@/lib/settings";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
@@ -26,7 +26,18 @@ const BUDGET_MS = 150_000;
 /** 并发锁多久算死锁（上一次跑到一半函数被掐了，不能永远锁着） */
 const LOCK_STALE_MS = 5 * 60_000;
 
-const schema = z.object({ sourceId: z.string().uuid() });
+/** 字幕还没转完时，至少要有这么多段才值得扫（转写刚起步就扫等于白花一次） */
+const MIN_SEGMENTS_FOR_PARTIAL = 20;
+
+const schema = z.object({
+  sourceId: z.string().uuid(),
+  /**
+   * 用户按了「再扫一次」。**破锁 + 无视已存的结果，从头重扫。**
+   * 这是花钱的动作，所以只由人显式触发，代码自己永远不传 true ——
+   * 但必须有：上一次扫崩在半路会留下一个 5 分钟的锁，没有这条路人就只能干等。
+   */
+  force: z.boolean().optional(),
+});
 
 /** `running@<ISO>` —— 锁和时间戳挤在同一个 text 列里，**零新字段**（0007 不用重跑） */
 function lockAge(status: string | null | undefined): number | null {
@@ -40,7 +51,7 @@ export async function POST(request: Request) {
 
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
-  const { sourceId } = parsed.data;
+  const { sourceId, force } = parsed.data;
 
   const supabase = await createClient();
   const {
@@ -59,8 +70,16 @@ export async function POST(request: Request) {
   const source = data as SourceRow;
 
   const segments: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
-  // D40：**字幕转好了才扫**。转到一半就扫，后半截将来还得再扫一遍 —— 同一支付两次钱
-  if (source.transcript_status !== "ready" || segments.length === 0) {
+  const captionsReady = source.transcript_status === "ready";
+
+  // D40 原话是"字幕转好了才扫"，理由是扫一半将来要重扫 = 付两次钱。
+  // **M3.7 真机第一轮改了这条**：字幕停在 partial 是很常见的状态（转到一半退出、
+  // 长内容分轮转），死等 ready 会让整个词库功能在这些片子上**永远不出现**，
+  // 而且什么都不说。真正该解决的是"别付两次钱"，那靠续扫（`scannedThrough` + `head`）
+  // 就够了 —— 字幕后来长长了，只扫新长出来的那截。
+  //
+  // 只挡两种：一段字幕都没有；以及刚开头那几句（转写刚起步，扫了也没意义还占一次锁）。
+  if (segments.length === 0 || (!captionsReady && segments.length < MIN_SEGMENTS_FOR_PARTIAL)) {
     return NextResponse.json({ status: "not-ready" });
   }
 
@@ -93,27 +112,33 @@ export async function POST(request: Request) {
 
   const mode = studyMode(contentLang, prefs.nativeLang, prefs.targetLang);
   const existing = isPhraseScan(source.phrases) ? (source.phrases as PhraseScan) : null;
+  const head = headOf(segments);
 
-  // 已经扫好了就直接给 —— 重看同一支不再花钱（验收⑤）。
-  // 三个条件都要满足：扫完了、字幕没换过、模式没变（他改了目标语言，该标的东西就变了）。
-  if (
-    existing &&
-    existing.scannedThrough >= existing.segCount &&
-    existing.segCount === segments.length &&
-    existing.mode === mode
-  ) {
-    return NextResponse.json({ status: "ready", phrases: existing });
+  // 这份旧结果还能不能接着用：模式没变（改了目标语言该标的东西就变了）+ 字幕是**同一份**
+  // （开头没变、且只多不少 —— 字幕转到一半会继续往后长，那是正常的；变短或换头
+  // 说明整份被替换了，只能从头重扫）。旧数据没存 head 的按老规矩要求长度完全一致。
+  const sameCaptions = existing
+    ? existing.head
+      ? existing.head === head && existing.segCount <= segments.length
+      : existing.segCount === segments.length
+    : false;
+  const reusable = !force && existing && existing.mode === mode && sameCaptions ? existing : null;
+
+  // 已经把**当前这份**字幕扫完了就直接给 —— 重看同一支不再花钱（验收⑤）
+  if (reusable && reusable.scannedThrough >= segments.length) {
+    return NextResponse.json({ status: "ready", phrases: reusable, count: reusable.items.length });
   }
 
-  // 并发锁：连点两下暂停、或两个标签页同时开着，不该付两次钱
+  // 并发锁：连点两下暂停、或两个标签页同时开着，不该付两次钱。
+  // 「再扫一次」能破锁 —— 上一次扫崩在半路会留下一个锁，没有破锁的路人就只能干等 5 分钟
   const age = lockAge(source.phrases_status);
-  if (age !== null && age < LOCK_STALE_MS) {
+  if (!force && age !== null && age < LOCK_STALE_MS) {
     return NextResponse.json({ status: "running" });
   }
 
-  // 接着扫哪儿：字幕没换过、模式没变，就从上次停下的地方续；否则从头来
-  const resumable =
-    existing && existing.segCount === segments.length && existing.mode === mode ? existing : null;
+  // 接着扫哪儿：能复用就从上次停下的地方续（字幕后来长长的那截才要花钱）；否则从头来。
+  // 强制重扫一律从 0 开始 —— 人点「再扫一次」就是因为上次那份不对
+  const resumable = reusable;
   const from = resumable?.scannedThrough ?? 0;
 
   const lockValue = `running@${new Date().toISOString()}`;
@@ -155,11 +180,14 @@ export async function POST(request: Request) {
     contentLang,
     supportLang: prefs.nativeLang,
     segCount: segments.length,
+    head,
     scannedThrough: scanned.scannedThrough,
     scannedAt: new Date().toISOString(),
     items: [...(resumable?.items ?? []), ...scanned.items],
   };
-  const complete = scan.scannedThrough >= scan.segCount;
+  // 「扫完了」= 这一份字幕扫到底了 **且** 字幕本身也转完了。
+  // 字幕还在长的时候标 partial，下次进来只扫新长出来的那截（不重复付费）
+  const complete = scan.scannedThrough >= scan.segCount && captionsReady;
 
   let persisted = false;
   if (persistable) {
@@ -174,6 +202,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     status: complete ? "ready" : "partial",
     phrases: scan,
+    count: scan.items.length,
     // 存不下来要说实话：这一次看得到高亮，下次进来还得重扫（会再花一次钱）
     persisted,
   });
