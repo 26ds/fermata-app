@@ -11,7 +11,7 @@
 //   别的一律当没传，回默认那一层。
 
 /** 认识的来路。加新值时同步改 backTarget，别在别处另写一套判断 */
-export type BackFrom = "library" | "favorites" | "vocab";
+export type BackFrom = "library" | "favorites" | "vocab" | "watch";
 
 export interface BackTarget {
   href: string;
@@ -34,6 +34,19 @@ export function watchBackTarget(from: string | undefined, sourceId: string): Bac
     return { href: "/library/vocab", label: "返回全部词库" };
   }
   return { href: "/watch", label: "返回观看列表" };
+}
+
+/**
+ * 设置页 `/settings` 的返回箭头该去哪（M3.9 片 a）。
+ *
+ * 设置页有三个入口，退回去必须是**进来的那个**：
+ *   `/library` 的「设置」那一行、`/watch` 顶上那条母语横幅、`/library/vocab` 的指路条。
+ * 不认的值一律退回 `/library`（设置那一行就挂在那儿，退到它旁边最不迷路）。
+ */
+export function settingsBackTarget(from: string | undefined): BackTarget {
+  if (from === "watch") return { href: "/watch", label: "返回观看" };
+  if (from === "vocab") return { href: "/library/vocab", label: "返回全部词库" };
+  return { href: "/library", label: "返回历史与知识库" };
 }
 
 /** 给链接挂上来路。`from` 为空就原样返回，别在地址里留一个空参数 */

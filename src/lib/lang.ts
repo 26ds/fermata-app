@@ -155,6 +155,22 @@ export interface LangPrefs {
   /** 母语。空 = 还没探到（LangBootstrap 会用 navigator.language 补上） */
   nativeLang: string;
   /**
+   * 上面那个母语**他本人确认过了吗**（M3.9 / D42 修订①）。
+   *
+   * 为什么非记这一位不可：`navigator.language` 报的是"这台设备设成了哪国语言"，
+   * 不是"这个人的母语"。2026-08-01 真机上就撞了 —— 创始人手机是英文的，
+   * 母语被自动写成 `en-US`，于是 AI 全程用英文给一个中文母语的人写注释，
+   * **而他无从知道这是怎么来的**。自动探测的上限就到这儿，
+   * 但**后果不许是静默的**（D44 的脾气）：猜了就得说一声，并给一条改回来的路。
+   *
+   * **为什么记的是"确认过"而不是"猜的"**：这一位是 M3.9 才加的，
+   * 在它之前存下的母语**全都是 `LangBootstrap` 自动填的**（那时唯一的手填入口
+   * `LangSettings` 是 M3.7 末尾才有的，且没人用过）。记成"猜的=true"的话，
+   * 键不存在只能当 false，**那条横幅就正好躲开了唯一真被坑到的那个账号**。
+   * 记成"确认过"，键不存在 = 没确认过 = 该问一句，老账号才补得上。
+   */
+  nativeLangConfirmed: boolean;
+  /**
    * 想学的语言。三态，别合并：
    *   `null` = **还没问过他**（该弹那一句问询）
    *   `""`   = 问过了，他说只想搞懂内容（**别再问**）
@@ -177,6 +193,7 @@ export interface LangPrefs {
 
 export const DEFAULT_LANG_PREFS: LangPrefs = {
   nativeLang: "",
+  nativeLangConfirmed: false,
   targetLang: null,
   uiLang: "",
   captionLang: null,
@@ -185,6 +202,16 @@ export const DEFAULT_LANG_PREFS: LangPrefs = {
 /** 已经问过目标语言了吗（`""` 也算问过 —— 他明确说了不学语言） */
 export function targetAsked(prefs: LangPrefs): boolean {
   return prefs.targetLang !== null;
+}
+
+/**
+ * 该不该跟他说一句「你的母语现在是 X，是自动填的」（M3.9 / D42 修订①）。
+ *
+ * **母语是空的就闭嘴** —— 探测失败（比如 `navigator.language` 给了句认不出的东西）
+ * 时那句话会变成"我猜你的母语是 "，一个比不说更糟的句子。
+ */
+export function shouldConfirmNativeLang(prefs: LangPrefs): boolean {
+  return prefs.nativeLang !== "" && !prefs.nativeLangConfirmed;
 }
 
 /** 界面该用哪门语言（M3.9 消费）。uiLang 空就跟母语 */
@@ -201,6 +228,8 @@ export function readLangPrefs(settings: Record<string, unknown> | null | undefin
   const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
   return {
     nativeLang: normalizeLang(str(s.nativeLang)),
+    // 只认显式的 `true`；键不存在 = 还没确认过（见 LangPrefs 上的说明）
+    nativeLangConfirmed: s.nativeLangConfirmed === true,
     // 键不存在 → null（还没问）；存在但是空串 → ""（问过了，不学语言）
     targetLang: typeof s.targetLang === "string" ? normalizeLang(s.targetLang) : null,
     uiLang: normalizeLang(str(s.uiLang)),

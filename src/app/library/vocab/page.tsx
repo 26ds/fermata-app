@@ -2,10 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
-import { LangSettings } from "@/components/lang-settings";
 import { SetupNotice } from "@/components/setup-notice";
 import { VocabList, type VocabItem } from "@/components/vocab-list";
-import { getLangPrefs } from "@/lib/settings";
 
 // M3.7 —— 全部词库（D40）。**跨视频**：背词是跨视频的事，
 // 所以除了每条内容底下那份（`/library/[id]` tab2），这里再给一份合起来的。
@@ -19,6 +17,7 @@ const COPY = {
   lede: "每一条都记得它出现在哪、那句话原本怎么说 —— 点一下就回到那一秒。",
   back: "返回历史与知识库",
   count: (n: number) => `${n} 条`,
+  langMoved: "母语 / 想学的语言 / 字幕译文 —— 搬到「设置」里了",
 };
 
 export default async function VocabPage() {
@@ -56,8 +55,6 @@ export default async function VocabPage() {
     source_title: a.source_id ? (titles.get(a.source_id) ?? null) : null,
   }));
 
-  const prefs = await getLangPrefs(supabase, user.id);
-
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-48 opacity-50" />
@@ -84,10 +81,17 @@ export default async function VocabPage() {
           <p className="mt-2 max-w-md text-sm leading-6 text-ink-300">{COPY.lede}</p>
         </section>
 
-        {/* D42：目标语言是靠一句问询定的，这里是唯一能改回来的地方（见组件里的说明） */}
-        <div className="mt-5">
-          <LangSettings prefs={prefs} />
-        </div>
+        {/* M3.9 片 a：语言设置搬去 `/settings` 了。**不直接删这一条** ——
+            创始人已经知道它在这儿，删干净了他只会以为功能没了。留一行指路 */}
+        <Link
+          href="/settings?from=vocab"
+          className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-ink-700 px-4 py-3 text-xs transition-colors hover:border-teal-400/60"
+        >
+          <span className="text-ink-300">{COPY.langMoved}</span>
+          <span aria-hidden className="shrink-0 text-ink-500">
+            →
+          </span>
+        </Link>
 
         <VocabList items={items} from="vocab" showSource emptyAll />
       </main>

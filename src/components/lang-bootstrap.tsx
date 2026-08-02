@@ -24,6 +24,10 @@ export function LangBootstrap({ prefs }: { prefs: LangPrefs }) {
     const guess = normalizeLang(typeof navigator === "undefined" ? "" : navigator.language);
     if (!guess) return; // 探不到就算了，别塞一个 "en" 进去（D42 红线）
 
+    // ⚠️ **故意不写 `nativeLangConfirmed`**（M3.9 / D42 修订①）。
+    // 这里写下的是一个**猜测** —— 键留空就是"还没跟他确认过"，
+    // `<LangGuessBanner />` 靠这一点决定要不要说那句「这是自动填的」。
+    // 别顺手补一个 `nativeLangConfirmed: true` 让它闭嘴，那就退回到静默了。
     void putSettings({ nativeLang: guess }).then((ok) => {
       if (ok) router.refresh();
     });

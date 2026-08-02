@@ -19,6 +19,8 @@ const COPY = {
   lede: "停下来想过的每一刻、存下来的每一个词，都跟着它那条内容。",
   atomsTitle: "知识原子",
   atomsHint: "看的时候存下来的词和概念，会长在这里",
+  settingsTitle: "设置",
+  settingsHint: "母语、想学的语言、字幕译文",
   tabByDate: "按日期",
   tabFolders: "智能分类",
   migrationNotice: "「什么时候看的」还没启用：去 Supabase → SQL Editor 跑一次",
@@ -147,6 +149,22 @@ export default async function LibraryPage({
             <span aria-hidden className="text-ink-500">
               →
             </span>
+          </span>
+        </Link>
+
+        {/* M3.9 片 a：设置终于有了一个正经的门（在这之前语言选择器塞在词库页顶上，
+            没人找得到 —— 母语被猜错一路瞒到 2026-08-01 才发现，这是原因之一）。
+            挂在这个 tab 是因为「我的东西」都在这儿 */}
+        <Link
+          href="/settings?from=library"
+          className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-ink-500/50 px-4 py-3 transition-colors hover:border-teal-400/60"
+        >
+          <span className="min-w-0">
+            <span className="block text-sm font-semibold text-ink-100">{COPY.settingsTitle}</span>
+            <span className="mt-0.5 block truncate text-xs text-ink-500">{COPY.settingsHint}</span>
+          </span>
+          <span aria-hidden className="shrink-0 text-ink-500">
+            →
           </span>
         </Link>
 

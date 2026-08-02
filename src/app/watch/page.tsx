@@ -4,6 +4,7 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { BottomNav } from "@/components/bottom-nav";
 import { LangBootstrap } from "@/components/lang-bootstrap";
+import { LangGuessBanner } from "@/components/lang-guess-banner";
 import { SetupNotice } from "@/components/setup-notice";
 import { getLangPrefs } from "@/lib/settings";
 import { ImportForm } from "@/components/import-form";
@@ -106,6 +107,10 @@ export default async function WatchPage({
       </header>
 
       <main className="page-enter pb-nav relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 sm:px-8">
+        {/* D42 修订① / D44：母语是自动填的就说一声。**只在他没确认过时出现**，
+            确认过或点了 ✕ 就永远不再来（D18：别常驻挤压画面） */}
+        <LangGuessBanner prefs={prefs} from="watch" />
+
         <section className="pt-4">
           <h1 className="display-serif text-[2rem] leading-tight tracking-[-0.04em] text-ink-100">
             看点什么？
