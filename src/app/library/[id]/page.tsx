@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/setup-notice";
+import { SettingsLink } from "@/components/settings-link";
 import { LibraryDetail, type DatedPausePoint } from "@/components/library-detail";
 import type { VocabItem } from "@/components/vocab-list";
 import { thumbUrlFor } from "@/lib/thumb";
@@ -90,6 +91,7 @@ export default async function LibraryDetailPage({
           <span aria-hidden>←</span>
         </Link>
         <p className="eyebrow flex-1 text-teal-300">{COPY.eyebrow}</p>
+        <SettingsLink from="libraryitem" sid={source.id} />
       </header>
 
       <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">

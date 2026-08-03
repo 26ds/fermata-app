@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { LangSettings } from "@/components/lang-settings";
+import { SettingsBack } from "@/components/settings-back";
 import { SetupNotice } from "@/components/setup-notice";
 import { getLangPrefs } from "@/lib/settings";
 import { settingsBackTarget } from "@/lib/nav";
@@ -26,12 +26,12 @@ export default async function SettingsPage({
   searchParams,
 }: {
   // Next 16：searchParams 是 Promise，必须 await
-  searchParams: Promise<{ from?: string }>;
+  searchParams: Promise<{ from?: string; sid?: string }>;
 }) {
   if (!supabaseConfigured) return <SetupNotice />;
 
-  const { from } = await searchParams;
-  const back = settingsBackTarget(from);
+  const { from, sid } = await searchParams;
+  const back = settingsBackTarget(from, sid);
 
   const supabase = await createClient();
   const {
@@ -45,14 +45,9 @@ export default async function SettingsPage({
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-48 opacity-50" />
       <header className="relative flex items-center gap-3 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-8">
-        {/* D43：进来的是哪条路，退回去就是哪条路 */}
-        <Link
-          href={back.href}
-          aria-label={back.label}
-          className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
-        >
-          <span aria-hidden>←</span>
-        </Link>
+        {/* D43：进来的是哪条路，退回去就是哪条路。
+            退出去之前会先把服务端数据作废（见组件）—— 否则改完设置退回去还是老样子 */}
+        <SettingsBack href={back.href} label={back.label} />
         <p className="eyebrow flex-1 text-teal-300">{COPY.eyebrow}</p>
       </header>
 

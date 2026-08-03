@@ -81,6 +81,12 @@ export function WatchStage({
   const watchedSentRef = useRef(false);
 
   const [playing, setPlaying] = useState(false);
+  /**
+   * 这一次进来，画面**真的动过**吗（收到过一次 PLAYING）。
+   * 只用来拦 ±N 秒 —— 从没播过的播放器一 seek 就变黑（见 seekBy 上的说明）。
+   * 暂停之后仍然是 true：播过一帧之后再跳，画面是好的（复现验过）。
+   */
+  const [started, setStarted] = useState(false);
   const [durationS, setDurationS] = useState(source.duration_s ?? 0);
   // M2a：字幕不再是一份死数据，它会边转边长 —— 收进 state 才能实时往下传
   const [transcript, setTranscript] = useState<TranscriptSegment[] | null>(source.transcript);
@@ -239,13 +245,15 @@ export function WatchStage({
   const handlePlayingChange = useCallback(
     (next: boolean) => {
       playingRef.current = next;
+      // 这条内容**这一次进来有没有真的播出过画面**。±N 秒要靠它把自己拦住 —— 见 seekBy
+      if (next && !started) setStarted(true);
       setPlaying(next);
       // 真播起来了才算"看过这条"（M3.6 观看历史）
       if (next) markWatched();
       // 暂停的那一刻是最该记住的位置
       if (!next) savePosition();
     },
-    [savePosition, markWatched],
+    [savePosition, markWatched, started],
   );
 
   /**
@@ -590,17 +598,27 @@ export function WatchStage({
     if (clockRef.current) clockRef.current.textContent = mmss(t);
   }, []);
 
-  /** ±N 秒。夹在 [0, 时长) 里 —— 往前跳过头会让 YouTube 直接判"播完了" */
+  /**
+   * ±N 秒。夹在 [0, 时长) 里 —— 往前跳过头会让 YouTube 直接判"播完了"。
+   *
+   * ⚠️ **视频还没播过就不许跳**（创始人 2026-08-02 报「视频播放都是黑色的」，已复现）：
+   * `seekTo()` 打在一个"已载入但一次都没播过"的 YouTube 播放器上，会**把封面图掀掉**，
+   * 而它又没法在没有 iframe 内手势的情况下自己播起来 —— 结果就是**一整块黑的**，
+   * 而且回不去（封面图不会再回来）。复现边界很干净：正在播的时候跳，一切正常；
+   * 从没播过的时候跳，必黑。
+   * 所以这里直接拦住，按钮那边同步变灰并写明"先播起来"，**不做静默的空动作**（D44）。
+   */
   const seekBy = useCallback(
     (deltaS: number) => {
       const handle = handleRef.current;
       if (!handle) return;
+      if (!started && source.kind === "youtube") return;
       const duration = handle.getDuration();
       const raw = (handle.getCurrentTime() || currentTimeRef.current) + deltaS;
       const ceiling = duration > 0 ? Math.max(0, duration - 0.5) : raw;
       handleSeek(Math.max(0, Math.min(ceiling, raw)));
     },
-    [handleSeek],
+    [handleSeek, started, source.kind],
   );
 
   /** 换倍速：先落到播放器，再记进偏好（换台设备也是这个速度） */
@@ -924,6 +942,9 @@ export function WatchStage({
 
         {/* 倍速 + ±N 秒。挤在同一条胶囊的第二行 —— 不另开一块地（D18） */}
         <PlayerControls
+          // 只有 YouTube 嵌入有这个毛病（没播过就 seek → 封面被掀掉、剩一块黑）。
+          // 播客是 <audio>，没有封面这一层，没播就跳完全正常 —— 别连坐
+          canSeek={started || source.kind !== "youtube"}
           step={skipStep}
           rate={rate}
           onStep={changeStep}

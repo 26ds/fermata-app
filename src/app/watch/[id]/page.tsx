@@ -4,6 +4,7 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { LangBootstrap } from "@/components/lang-bootstrap";
 import { SetupNotice } from "@/components/setup-notice";
+import { SettingsLink } from "@/components/settings-link";
 import { WatchStage } from "@/components/watch-stage";
 import type { PausePoint } from "@/components/pause-list";
 import type { SourceRow } from "@/lib/types";
@@ -102,6 +103,7 @@ export default async function WatchDetailPage({
             (source.title ?? "未命名内容")
           )}
         </h1>
+        <SettingsLink from="player" sid={source.id} />
       </header>
 
       <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/setup-notice";
+import { SettingsLink } from "@/components/settings-link";
 import { VocabList, type VocabItem } from "@/components/vocab-list";
 
 // M3.7 —— 全部词库（D40）。**跨视频**：背词是跨视频的事，
@@ -17,7 +18,6 @@ const COPY = {
   lede: "每一条都记得它出现在哪、那句话原本怎么说 —— 点一下就回到那一秒。",
   back: "返回历史与知识库",
   count: (n: number) => `${n} 条`,
-  langMoved: "母语 / 想学的语言 —— 搬到「设置」里了（右上角齿轮也能进）",
 };
 
 export default async function VocabPage() {
@@ -71,6 +71,7 @@ export default async function VocabPage() {
         <span className="shrink-0 rounded-full border border-ink-500/50 px-2.5 py-1 text-xs tabular-nums text-ink-300">
           {COPY.count(items.length)}
         </span>
+        <SettingsLink from="vocab" />
       </header>
 
       <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
@@ -80,18 +81,6 @@ export default async function VocabPage() {
           </h1>
           <p className="mt-2 max-w-md text-sm leading-6 text-ink-300">{COPY.lede}</p>
         </section>
-
-        {/* M3.9 片 a：语言设置搬去 `/settings` 了。**不直接删这一条** ——
-            创始人已经知道它在这儿，删干净了他只会以为功能没了。留一行指路 */}
-        <Link
-          href="/settings?from=vocab"
-          className="mt-5 flex items-center justify-between gap-3 rounded-2xl border border-ink-700 px-4 py-3 text-xs transition-colors hover:border-teal-400/60"
-        >
-          <span className="text-ink-300">{COPY.langMoved}</span>
-          <span aria-hidden className="shrink-0 text-ink-500">
-            →
-          </span>
-        </Link>
 
         <VocabList items={items} from="vocab" showSource emptyAll />
       </main>

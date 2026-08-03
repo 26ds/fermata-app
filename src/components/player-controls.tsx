@@ -20,6 +20,9 @@ const COPY = {
   rateMenu: "改播放倍速",
   stepHint: "按一下箭头跳多少秒",
   rateHint: "播放速度（听不清就慢下来）",
+  // 还没播过就跳，YouTube 会把封面掀掉又放不出来，只剩一块黑的（2026-08-02 复现）。
+  // 所以这时候两颗箭头是灰的 —— 但**必须写清楚为什么**，灰着不说话就是另一种静默失败（D44）
+  notStarted: "先点播放，这两颗才跳得动",
 };
 
 /** 环形箭头 + 中间的秒数 —— 手机播放器上通用的那个「跳一段」记号，一眼不会读成"重播" */
@@ -58,6 +61,7 @@ export function PlayerControls({
   onStep,
   onRate,
   onSeekBy,
+  canSeek = true,
 }: {
   /** 当前步长（秒）。写在两颗箭头里 */
   step: number;
@@ -66,7 +70,17 @@ export function PlayerControls({
   onStep(next: number): void;
   onRate(next: number): void;
   onSeekBy(deltaS: number): void;
+  /**
+   * 这一次进来画面**真的动过**吗。false 时两颗箭头是灰的并给一行说明 ——
+   * 从没播过的 YouTube 播放器一 seek 就整块变黑，且封面回不来（观看页 seekBy 上有全文）。
+   */
+  canSeek?: boolean;
 }) {
+  const skipBtn = `flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-colors ${
+    canSeek
+      ? "border-ink-700 text-ink-300 hover:border-teal-400 hover:text-teal-300 active:bg-ink-700/50"
+      : "border-ink-700/50 text-ink-500/50"
+  }`;
   const [open, setOpen] = useState<"none" | "step" | "rate">("none");
   const toggle = (which: "step" | "rate") => setOpen((o) => (o === which ? "none" : which));
 
@@ -83,19 +97,25 @@ export function PlayerControls({
         <button
           type="button"
           onClick={() => onSeekBy(-step)}
+          disabled={!canSeek}
           aria-label={COPY.back(step)}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-ink-700 text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 active:bg-ink-700/50"
+          className={skipBtn}
         >
           <SkipGlyph seconds={step} back />
         </button>
         <button
           type="button"
           onClick={() => onSeekBy(step)}
+          disabled={!canSeek}
           aria-label={COPY.forward(step)}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-ink-700 text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 active:bg-ink-700/50"
+          className={skipBtn}
         >
           <SkipGlyph seconds={step} />
         </button>
+
+        {!canSeek && (
+          <span className="min-w-0 text-[0.68rem] leading-4 text-ink-500">{COPY.notStarted}</span>
+        )}
 
         {/* 两颗设置钮靠右。倍速不是 1 时点亮 —— 忘了自己开着 1.5 倍速然后
             怪"这人怎么说这么快"，是每个播放器都出过的洋相 */}

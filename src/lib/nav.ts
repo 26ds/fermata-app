@@ -10,8 +10,21 @@
 // 为什么**不接受任意 URL**：那是开放重定向的口子。这里只认下面这几个固定值，
 //   别的一律当没传，回默认那一层。
 
-/** 认识的来路。加新值时同步改 backTarget，别在别处另写一套判断 */
-export type BackFrom = "library" | "favorites" | "vocab" | "watch";
+/**
+ * 认识的来路。加新值时同步改 backTarget，别在别处另写一套判断。
+ * `player` / `libraryitem` 指向**某一条内容**，所以还要带一个 `sid`（见 settingsBackTarget）。
+ */
+export type BackFrom =
+  | "library"
+  | "favorites"
+  | "vocab"
+  | "watch"
+  | "live"
+  | "player"
+  | "libraryitem";
+
+/** 只认长得像 UUID 的东西。**绝不把外面传进来的字符串直接拼进路径** —— 那是开放重定向的口子 */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface BackTarget {
   href: string;
@@ -43,8 +56,17 @@ export function watchBackTarget(from: string | undefined, sourceId: string): Bac
  *   `/library` 的「设置」那一行、`/watch` 顶上那条母语横幅、`/library/vocab` 的指路条。
  * 不认的值一律退回 `/library`（设置那一行就挂在那儿，退到它旁边最不迷路）。
  */
-export function settingsBackTarget(from: string | undefined): BackTarget {
+export function settingsBackTarget(from: string | undefined, sid?: string): BackTarget {
+  // 从某一条内容里进来的 —— 退回**那一条**，不是退回列表。
+  // 改个设置就被扔回列表、还得重新找回刚才那支视频，是最招人烦的一种"返回"
+  if (from === "player" && sid && UUID.test(sid)) {
+    return { href: `/watch/${sid}`, label: "返回刚才那条内容" };
+  }
+  if (from === "libraryitem" && sid && UUID.test(sid)) {
+    return { href: `/library/${sid}`, label: "返回这条内容的暂停点与聊天" };
+  }
   if (from === "watch") return { href: "/watch", label: "返回观看" };
+  if (from === "live") return { href: "/lab/live", label: "返回 Live 实验" };
   if (from === "vocab") return { href: "/library/vocab", label: "返回全部词库" };
   return { href: "/library", label: "返回历史与知识库" };
 }

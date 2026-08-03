@@ -11,10 +11,10 @@ import type { BackFrom } from "@/lib/nav";
 
 const LABEL = "设置";
 
-export function SettingsLink({ from }: { from: BackFrom }) {
+export function SettingsLink({ from, sid }: { from: BackFrom; sid?: string }) {
   return (
     <Link
-      href={`/settings?from=${from}`}
+      href={sid ? `/settings?from=${from}&sid=${sid}` : `/settings?from=${from}`}
       aria-label={LABEL}
       title={LABEL}
       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"

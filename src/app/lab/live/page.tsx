@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { BottomNav } from "@/components/bottom-nav";
+import { SettingsLink } from "@/components/settings-link";
 import { SetupNotice } from "@/components/setup-notice";
 import { LiveConsole } from "@/components/live-console";
 
@@ -26,9 +27,12 @@ export default async function LiveLabPage() {
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-400 text-lg leading-none text-teal-950" aria-hidden>𝄐</span>
           <span className="text-sm font-semibold tracking-[0.12em]">FERMATA</span>
         </Link>
-        <div className="text-right">
-          <p className="eyebrow text-teal-300">live / voice lab</p>
-          <p className="mt-1 text-xs text-ink-500">M0.5 · {user.email?.split("@")[0]}</p>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <p className="eyebrow text-teal-300">live / voice lab</p>
+            <p className="mt-1 text-xs text-ink-500">M0.5 · {user.email?.split("@")[0]}</p>
+          </div>
+          <SettingsLink from="live" />
         </div>
       </header>
       <LiveConsole geminiConfigured={Boolean(process.env.GEMINI_API_KEY)} />
