@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { BottomNav } from "@/components/bottom-nav";
 import { LangBootstrap } from "@/components/lang-bootstrap";
 import { LangGuessBanner } from "@/components/lang-guess-banner";
+import { SettingsLink } from "@/components/settings-link";
 import { SetupNotice } from "@/components/setup-notice";
 import { getLangPrefs } from "@/lib/settings";
 import { ImportForm } from "@/components/import-form";
@@ -100,9 +101,13 @@ export default async function WatchPage({
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-400 text-lg leading-none text-teal-950" aria-hidden>𝄐</span>
           <span className="text-sm font-semibold tracking-[0.12em]">FERMATA</span>
         </Link>
-        <div className="text-right">
-          <p className="eyebrow text-teal-300">watch</p>
-          <p className="mt-1 text-xs text-ink-500">观看</p>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <p className="eyebrow text-teal-300">watch</p>
+            <p className="mt-1 text-xs text-ink-500">观看</p>
+          </div>
+          {/* 创始人 2026-08-02：设置得在一眼看得到的地方 */}
+          <SettingsLink from="watch" />
         </div>
       </header>
 

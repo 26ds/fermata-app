@@ -10,7 +10,13 @@ import { InterruptPanel, type PanelLine } from "@/components/interrupt-panel";
 import type { PausePoint } from "@/components/pause-list";
 import { PlayerControls } from "@/components/player-controls";
 import { DEFAULT_LANG_PREFS, type LangPrefs } from "@/lib/lang";
-import { isPhraseScan, resolvePhrases, type PhraseItem, type PhraseScan } from "@/lib/phrases/types";
+import {
+  isPhraseScan,
+  resolvePhrases,
+  scanDrift,
+  type PhraseItem,
+  type PhraseScan,
+} from "@/lib/phrases/types";
 import { DEFAULT_PLAY_PREFS, type PlayPrefs } from "@/lib/play-prefs";
 import { putSettings } from "@/lib/settings-client";
 import { playerFor } from "@/lib/sources/players";
@@ -299,6 +305,15 @@ export function WatchStage({
     },
     [source.id],
   );
+
+  /**
+   * 这份扫描是不是按**旧的语言设置**扫的（M3.9，创始人 2026-08-02 反馈）。
+   *
+   * 他把母语改回简体中文之后，**找不到任何重扫的入口** —— 「再扫一次」只在
+   * empty / failed / running 时出现，而他那份是 `ready`。于是一份按错的语言扫出来的
+   * 结果就永远钉死在那儿了。现在语言对不上时也给按钮，并**说清楚为什么给**。
+   */
+  const drift = scan ? scanDrift(scan, prefs, source.content_lang) : "";
 
   /** 用户按「再扫一次」：破锁 + 从头重扫。**花钱的动作，只由人触发** */
   const rescan = useCallback(() => {
@@ -975,6 +990,7 @@ export function WatchStage({
         onClose={closePanel}
         lines={panelLines}
         scan={scanState}
+        drift={drift}
         onRescan={rescan}
         onToggleTerm={toggleTerm}
         needTargetLang={needTargetLang}

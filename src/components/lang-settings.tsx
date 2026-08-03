@@ -13,9 +13,15 @@ import { TARGET_LANGS } from "@/lib/translate/langs";
 // D43 定的通则「任何页面都必须有走得出去的路」，在这里的延伸就是
 // **任何一次性选择都必须有改回来的地方**。
 //
-// ⚠️ **这里没有「界面语言」选择器**（计划 C 写了四个，实际先做三个）。
-// 理由与 D44 是同一条：`uiLang` 要等片 b 的文案表落地才真的会改变什么，
-// **提前摆一个选了没反应的开关，就是在骗人**。片 b 补上。
+// ⚠️ **这里只有两个选择器，不是计划 C 写的四个。**
+//
+// 「界面语言」没做：`uiLang` 要等片 b 的文案表落地才真的会改变什么，
+// **提前摆一个选了没反应的开关，就是在骗人**（D44 的脾气）。片 b 补上。
+//
+// 「字幕译文译成」做了又撤了 —— 创始人 2026-08-02 一句话点破：
+// **「不是用户在每个视频播放界面就有这个选项吗，直接选那个不就好了」**。他是对的。
+// 它和播放器里那一栏是**同一个值**（M3.7 起就存后台了），在这儿再摆一份不增加任何能力，
+// 只增加"改哪个才算数"的困惑。设置页最容易长成杂物间，第一件杂物就是这么进来的。
 
 // D42：文案集中在这里，片 d 换 t() 时只动这一处
 const COPY = {
@@ -26,10 +32,6 @@ const COPY = {
   targetHint: "留空 = 我只想搞懂内容，不是来学语言的",
   unset: "还没定（看到非母语内容时会问你一次）",
   none: "不学语言，只想搞懂内容",
-  caption: "字幕译文译成",
-  captionHint: "播放器里那一栏双语字幕；在那儿选过也会记到这儿",
-  captionUnset: "还没设过",
-  captionOff: "不显示译文",
   saving: "已保存",
 };
 
@@ -39,7 +41,6 @@ export function LangSettings({ prefs }: { prefs: LangPrefs }) {
   const router = useRouter();
   const [nativeLang, setNativeLang] = useState(prefs.nativeLang);
   const [targetLang, setTargetLang] = useState<string>(prefs.targetLang ?? UNSET);
-  const [captionLang, setCaptionLang] = useState<string>(prefs.captionLang ?? UNSET);
   const [saved, setSaved] = useState(false);
 
   const save = (patch: Record<string, unknown>) => {
@@ -106,31 +107,6 @@ export function LangSettings({ prefs }: { prefs: LangPrefs }) {
             ))}
           </select>
           <span>{COPY.targetHint}</span>
-        </label>
-
-        <label className="flex min-w-0 flex-col gap-1 text-xs text-ink-500">
-          <span className="text-ink-300">{COPY.caption}</span>
-          <select
-            value={captionLang}
-            onChange={(e) => {
-              const v = e.target.value;
-              setCaptionLang(v);
-              save({ captionLang: v === UNSET ? "" : v });
-            }}
-            className="min-h-11 w-full min-w-0 rounded-xl border border-ink-700 bg-ink-900 px-3 text-sm text-ink-100 outline-none focus:border-teal-400"
-          >
-            {/* 和 targetLang 同一套三态：键不存在 ≠ 他关掉了译文。
-                键不存在时旧值可能还躺在别的设备的 localStorage 里（M2.9 的账），
-                字幕层挂载时会搬一次 —— 这里显示成"不显示译文"就等于替他做了决定 */}
-            {prefs.captionLang === null && <option value={UNSET}>{COPY.captionUnset}</option>}
-            <option value="">{COPY.captionOff}</option>
-            {TARGET_LANGS.map((l) => (
-              <option key={l.code} value={l.code}>
-                {l.label}
-              </option>
-            ))}
-          </select>
-          <span>{COPY.captionHint}</span>
         </label>
       </div>
     </section>

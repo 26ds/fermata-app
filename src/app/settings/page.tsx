@@ -19,7 +19,7 @@ import { settingsBackTarget } from "@/lib/nav";
 const COPY = {
   eyebrow: "settings",
   title: "设置",
-  lede: "现在只有语言。改完立刻生效，不用重新登录。",
+  lede: "母语，和你看这些东西是为了什么。改完立刻生效，不用重新登录。",
 };
 
 export default async function SettingsPage({

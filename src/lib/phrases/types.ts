@@ -1,5 +1,5 @@
 import { activeSegmentIndex } from "@/lib/captions";
-import type { StudyMode } from "@/lib/lang";
+import { sameLang, studyMode, type LangPrefs, type StudyMode } from "@/lib/lang";
 import type { TranscriptSegment } from "@/lib/types";
 
 // M3.7 词库 —— 扫描结果的形状 + **把它对齐回当前字幕**的纯函数（D40）。
@@ -58,6 +58,34 @@ export function isPhraseScan(v: unknown): v is PhraseScan {
   if (!v || typeof v !== "object") return false;
   const s = v as Partial<PhraseScan>;
   return s.v === 1 && Array.isArray(s.items);
+}
+
+/** 这份扫描结果和现在的语言设置对不上了 —— 对不上在哪一处 */
+export type ScanDrift = "" | "mode" | "support";
+
+/**
+ * 存着的这份扫描，是不是按**旧的语言设置**扫的（M3.9，创始人 2026-08-02 真机反馈）。
+ *
+ * 起因：他把母语从（被误猜的）English 改成简体中文之后，**没有任何办法重扫** ——
+ * 「再扫一次」按钮只在 empty / failed / running 时出现，而他那份是 `ready`（标出了 19 个）。
+ * 于是一份按「学知识 + 英文注释」扫出来的结果，就永远钉在那儿了。
+ * `PhraseScan.mode` 上早就写着"用户改了目标语言就得重扫"，只是一直没人接线。
+ *
+ * **为什么不干脆永远显示那个按钮**：扫描花钱（D44）。只在**确实过期**时才提，
+ * 才不会变成一个随手就点、点一次付一次的按钮。
+ */
+export function scanDrift(
+  scan: PhraseScan,
+  prefs: LangPrefs,
+  contentLang: string | null | undefined,
+): ScanDrift {
+  // 内容语言以**扫的时候认定的那个**为准。现在这条内容的 content_lang 可能还是空的
+  // （YouTube 粘字幕那条路要等 detectContentLang），拿空值去重算模式只会误报过期。
+  const now = studyMode(scan.contentLang || contentLang, prefs.nativeLang, prefs.targetLang);
+  if (scan.mode !== now) return "mode";
+  // 注释是用当时的母语写的。母语换了，那 19 条解释就还是旧语言的
+  if (prefs.nativeLang && !sameLang(scan.supportLang, prefs.nativeLang)) return "support";
+  return "";
 }
 
 /**

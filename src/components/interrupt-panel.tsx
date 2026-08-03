@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PhraseCheck, PhraseText } from "@/components/phrase-line";
 import { langLabel } from "@/lib/lang";
-import type { PhraseItem } from "@/lib/phrases/types";
+import type { PhraseItem, ScanDrift } from "@/lib/phrases/types";
 import { mmss } from "@/lib/time";
 
 // M3 打断问答 —— 面板从「只记类型的壳」变成「当场问、AI 扣着字幕答」。
@@ -44,6 +44,10 @@ const COPY = {
     running: "上一次扫描还没结束（或卡住了）。",
     failed: "这次没扫成。",
   },
+  // M3.9：这一份是按**旧的语言设置**扫的。说清楚是哪儿旧了，别只丢一个按钮
+  driftMode: "你改过语言设置了 —— 这一份是按之前那套标的。",
+  driftSupport: "你换了母语 —— 这些解释还是用之前那门语言写的。",
+  driftRescan: "按新的重扫",
   targetTitle: (lang: string) => `这条内容是 ${lang}。`,
   targetQuestion: "你是想学这门语言，还是只想搞懂内容？",
   targetLearn: (lang: string) => `我想学 ${lang}`,
@@ -89,6 +93,12 @@ interface InterruptPanelProps {
   lines?: PanelLine[];
   /** 整片扫描的结局 + 标出了几个。**四种失败要分得开**，否则查不出问题 */
   scan?: { status: "idle" | "scanning" | "ready" | "empty" | "not-ready" | "running" | "failed"; count: number };
+  /**
+   * M3.9：这一份是按**旧的语言设置**扫的吗（`""` = 没过期）。
+   * `"mode"` = 学知识/学语言的判定变了；`"support"` = 解释用的语言变了。
+   * 有值时即便扫描是成功的也要给重扫入口 —— 否则改完母语根本没有路重来。
+   */
+  drift?: ScanDrift;
   /** 「再扫一次」：破锁 + 从头重扫（花钱的动作，所以是一个按钮而不是自动重试） */
   onRescan?: () => void;
   /** 勾 / 取消勾一个词组 */
@@ -114,11 +124,18 @@ export function InterruptPanel({
   onClose,
   lines = [],
   scan = { status: "idle", count: 0 },
+  drift = "",
   onRescan,
   onToggleTerm,
   needTargetLang = "",
   onAnswerTarget,
 }: InterruptPanelProps) {
+  /**
+   * 扫成功了、但语言设置后来变了 —— 这一份已经不是他要的那一版。
+   * **只在 `ready` 上判**：还在扫的时候提"过期了"只会让人以为出错了。
+   */
+  const stale = drift !== "" && scan.status === "ready";
+
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -361,17 +378,30 @@ export function InterruptPanel({
                   {scan.status === "ready"
                     ? COPY.scanStates.ready(scan.count)
                     : COPY.scanStates[scan.status]}
+                  {/* M3.9：扫成功了但语言设置后来变了 —— 这一份已经不是他要的那一版了。
+                      不说这一句的后果 2026-08-02 真机验证过：他改完母语，**根本找不到重扫的入口**，
+                      因为按钮只在"扫失败"时出现 */}
+                  {stale && (
+                    <span className="mt-0.5 block text-teal-300/80">
+                      {drift === "support" ? COPY.driftSupport : COPY.driftMode}
+                    </span>
+                  )}
                 </p>
-                {/* 只在"扫了却没结果"或"出岔子"时给重扫 —— 它要花钱，不该天天摆着 */}
-                {onRescan && (scan.status === "empty" || scan.status === "failed" || scan.status === "running") && (
-                  <button
-                    type="button"
-                    onClick={onRescan}
-                    className="min-h-8 shrink-0 rounded-lg border border-teal-400/50 px-2.5 text-[0.68rem] text-teal-300"
-                  >
-                    {COPY.rescan}
-                  </button>
-                )}
+                {/* 只在"扫了却没结果"、"出岔子"、或"语言设置变了"时给重扫 ——
+                    它要花钱（D44），不该天天摆着让人随手点 */}
+                {onRescan &&
+                  (stale ||
+                    scan.status === "empty" ||
+                    scan.status === "failed" ||
+                    scan.status === "running") && (
+                    <button
+                      type="button"
+                      onClick={onRescan}
+                      className="min-h-8 shrink-0 rounded-lg border border-teal-400/50 px-2.5 text-[0.68rem] text-teal-300"
+                    >
+                      {stale ? COPY.driftRescan : COPY.rescan}
+                    </button>
+                  )}
               </div>
             )}
           </div>

@@ -17,7 +17,7 @@ const COPY = {
   lede: "每一条都记得它出现在哪、那句话原本怎么说 —— 点一下就回到那一秒。",
   back: "返回历史与知识库",
   count: (n: number) => `${n} 条`,
-  langMoved: "母语 / 想学的语言 / 字幕译文 —— 搬到「设置」里了",
+  langMoved: "母语 / 想学的语言 —— 搬到「设置」里了（右上角齿轮也能进）",
 };
 
 export default async function VocabPage() {
