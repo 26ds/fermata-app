@@ -14,12 +14,20 @@ import { hms } from "@/lib/time";
 
 // D42：文案集中在这里，M3.9 抽语言表时只动这一处
 const COPY = {
-  empty: "还没收过词。看视频时停下来，面板里高亮的词组点一下、或者行尾打个勾，就收到这儿了。",
-  emptyAll: "词库还是空的。任意一条内容里停一下，面板里会把值得收的表达标出来，点一下就收进来。",
+  // M3.10 / D45：这两句原来写的是"面板里高亮的词组点一下"—— 而 AI 标词现在**默认关着**，
+  // 照着做根本不会有高亮出现。空状态在教一个不存在的动作，是最坏的一种文案
+  empty: "还没收过词。看视频时停一下，在字幕里点一个词就收到这儿了；想收一整段，就再点一个词。",
+  emptyAll: "词库还是空的。任意一条内容里停一下，在字幕里点一个词就收进来了。",
   remove: "从词库去掉",
   removeFailed: "没删掉，请重试",
   noTime: "—",
   jumpHint: "跳回原声",
+  // D44：取不到解释要**说出来**，并给一条自己动手的路。空着的话，
+  // "还没取"和"这个词本来就没解释"从外面看一模一样
+  glossMissing: "解释还没取到",
+  glossRetry: "再试一次",
+  glossBusy: "取解释中…",
+  glossFailed: "还是没取到，等会儿再试",
 };
 
 export interface VocabItem {
@@ -75,6 +83,34 @@ export function VocabList({
     }
   }, []);
 
+  /**
+   * M3.10：这条词还没有解释 —— 再要一次。
+   *
+   * **只有人点了才发**（D44）：它花钱。所以没有任何自动重试、没有轮询、
+   * 也不在页面加载时偷偷补一遍；这一页可能列着几十条没解释的词。
+   */
+  const [glossing, setGlossing] = useState<Record<string, "busy" | "failed">>({});
+  const refetchGloss = useCallback(async (id: string) => {
+    setGlossing((prev) => ({ ...prev, [id]: "busy" }));
+    try {
+      const res = await fetch(`/api/atoms/${id}/gloss`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      const gloss = typeof body?.atom?.gloss === "string" ? body.atom.gloss : "";
+      if (!res.ok || !gloss) throw new Error(body?.error ?? COPY.glossFailed);
+      setRows((prev) => prev.map((r) => (r.id === id ? { ...r, gloss } : r)));
+      setGlossing((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (e) {
+      setGlossing((prev) => ({ ...prev, [id]: "failed" }));
+      // 服务端已经把"是哪一种失败"写成人话了（没配 key / 超时 / 模型给了空答案），
+      // 原样转达，别在这里统一压成一句"失败"
+      setError(e instanceof Error ? e.message : COPY.glossFailed);
+    }
+  }, []);
+
   const open = useCallback(
     (row: VocabItem) => {
       if (!row.source_id) return;
@@ -121,7 +157,30 @@ export function VocabList({
                   {row.t_s != null ? hms(row.t_s) : COPY.noTime}
                 </span>
               </p>
-              {row.gloss && <p className="mt-0.5 text-xs leading-5 text-ink-300">{row.gloss}</p>}
+              {row.gloss ? (
+                <p className="mt-0.5 text-xs leading-5 text-ink-300">{row.gloss}</p>
+              ) : (
+                // 手动划下来的词，解释是后台补的 —— 补不到就得**说出来**（D44）。
+                // 空着一行的话，"还没取到"和"这个词本来就不需要解释"分不出来
+                <p className="mt-0.5 flex items-center gap-2 text-xs leading-5 text-ink-500">
+                  <span>
+                    {glossing[row.id] === "busy"
+                      ? COPY.glossBusy
+                      : glossing[row.id] === "failed"
+                        ? COPY.glossFailed
+                        : COPY.glossMissing}
+                  </span>
+                  {glossing[row.id] !== "busy" && (
+                    <button
+                      type="button"
+                      onClick={() => refetchGloss(row.id)}
+                      className="pointer-events-auto relative z-10 min-h-7 shrink-0 rounded-lg border border-teal-400/50 px-2 text-[0.68rem] text-teal-300 transition-colors hover:bg-teal-400/10"
+                    >
+                      {COPY.glossRetry}
+                    </button>
+                  )}
+                </p>
+              )}
               {row.context_quote && (
                 <p className="mt-1 line-clamp-2 text-xs leading-5 text-ink-500">「{row.context_quote}」</p>
               )}

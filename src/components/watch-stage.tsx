@@ -18,6 +18,7 @@ import {
   type PhraseScan,
 } from "@/lib/phrases/types";
 import { DEFAULT_PLAY_PREFS, type PlayPrefs } from "@/lib/play-prefs";
+import { findTerms } from "@/lib/segment";
 import { putSettings } from "@/lib/settings-client";
 import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
@@ -417,6 +418,17 @@ export function WatchStage({
         const body = await res.json().catch(() => ({}));
         if (!res.ok || !body?.atom?.id) throw new Error("save failed");
         setSavedMap((prev) => new Map(prev).set(phrase.text, String(body.atom.id)));
+
+        // M3.10 / D45：手动划下来的没有解释（AI 标的是扫描时顺手生成的）。
+        // **先存后补**：词已经在库里了，这一步只是给它补一句话。
+        // 失败了这里**故意不弹任何东西** —— 他正在看视频，为一句注释盖一层报错
+        // 是喧宾夺主。留白落在词库那一页：那条会写「解释还没取到」并给一个「再试一次」，
+        // 由人来点（D44：花钱的重试只能人点，代码永不自动重来）
+        // `existed` = 这条词库里本来就有（`POST /api/atoms` 的去重）。
+        // 那就别再要一次解释了 —— 这一步花钱，只该为**新收进来的**那条花
+        if (!phrase.gloss && body.existed !== true) {
+          void fetch(`/api/atoms/${body.atom.id}/gloss`, { method: "POST" }).catch(() => {});
+        }
       } catch {
         setSavedMap((prev) => {
           const next = new Map(prev);
@@ -920,7 +932,16 @@ export function WatchStage({
     return segmentsInWindow(segs, panel.tS - 2, panel.tS).map((seg) => {
       const i = segs.indexOf(seg);
       const phrase = highlights.get(i);
-      return { i, text: seg.text, phrase, saved: !!phrase && savedTerms.has(phrase.text) };
+      return {
+        i,
+        t: seg.start,
+        text: seg.text,
+        phrase,
+        saved: !!phrase && savedTerms.has(phrase.text),
+        // M3.10：手动划下来的词在字幕里没有坐标（AI 标的自带 `start`），只能拿词回来找。
+        // 这里只有一两行，`findTerms` 的开销可以忽略
+        savedSpans: findTerms(seg.text, savedTerms),
+      };
     });
   }, [panel.open, panel.tS, transcript, highlights, savedTerms]);
 
@@ -1014,6 +1035,7 @@ export function WatchStage({
         highlights={highlights}
         savedTerms={savedTerms}
         onToggleTerm={toggleTerm}
+        contentLang={source.content_lang}
         autoScan={autoScan}
         onToggleAutoScan={toggleAutoScan}
         scanning={scanState.status === "scanning"}
@@ -1054,6 +1076,7 @@ export function WatchStage({
         drift={drift}
         onRescan={rescan}
         onToggleTerm={toggleTerm}
+        contentLang={source.content_lang}
         needTargetLang={needTargetLang}
         onAnswerTarget={answerTarget}
       />

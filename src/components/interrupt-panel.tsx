@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { PhraseCheck, PhraseText } from "@/components/phrase-line";
+import { PhraseCheck } from "@/components/phrase-line";
+import { SelectableLine } from "@/components/selectable-line";
 import { langLabel } from "@/lib/lang";
 import type { PhraseItem, ScanDrift } from "@/lib/phrases/types";
+import type { TermSpan } from "@/lib/segment";
 import { mmss } from "@/lib/time";
 
 // M3 打断问答 —— 面板从「只记类型的壳」变成「当场问、AI 扣着字幕答」。
@@ -26,6 +28,8 @@ const COPY = {
   stuckAt: "卡在",
   askHint: "问一句，我扣着这段字幕答你。",
   lastTwoSeconds: "刚才这两秒",
+  // M3.10 / D45：手动选词是主路径，所以入口得说出口 —— 一个没人知道存在的手势等于没做
+  pickHint: "点一个词就能收进词库",
   noCaptionHere: "这一刻附近没有字幕。",
   collapse: "点我收起，去看字幕",
   expand: "展开",
@@ -67,9 +71,13 @@ const QUICK: { label: string; hint: string; question: string }[] = [
 /** 面板里那两秒的一行字幕 */
 export interface PanelLine {
   i: number;
+  /** 这一段的起始秒 —— 手动划下来的词也要能跳回原声（M3.10） */
+  t: number;
   text: string;
   phrase?: PhraseItem;
   saved: boolean;
+  /** M3.10：这一行里已经收进词库的词都在哪儿（父组件用 `findTerms` 算好） */
+  savedSpans?: TermSpan[];
 }
 
 interface InterruptPanelProps {
@@ -110,6 +118,8 @@ interface InterruptPanelProps {
   onRescan?: () => void;
   /** 勾 / 取消勾一个词组 */
   onToggleTerm?: (phrase: PhraseItem) => void;
+  /** M3.10：这条内容是什么语言 —— 划词切块的 locale 用它（D42：不许假设英文） */
+  contentLang?: string | null;
   /**
    * D42：还没问过他"想学这门语言还是只想搞懂内容"。
    * 有值 = 这条内容的语言码，**只问这一次**，答完即定。
@@ -134,6 +144,7 @@ export function InterruptPanel({
   drift = "",
   onRescan,
   onToggleTerm,
+  contentLang,
   needTargetLang = "",
   onAnswerTarget,
 }: InterruptPanelProps) {
@@ -347,7 +358,12 @@ export function InterruptPanel({
             盖住下面的字幕条就无所谓了，因为要读的已经在这儿了。 ── */}
         {!needTargetLang && !showAnswer && (
           <div className="mt-3 shrink-0 rounded-2xl border border-ink-500/50 bg-ink-900/50 px-3 py-2.5">
-            <p className="eyebrow">{COPY.lastTwoSeconds}</p>
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="eyebrow">{COPY.lastTwoSeconds}</p>
+              {lines.length > 0 && onToggleTerm && (
+                <p className="shrink-0 text-[0.68rem] leading-4 text-ink-500">{COPY.pickHint}</p>
+              )}
+            </div>
             {lines.length === 0 ? (
               <p className="mt-1.5 text-xs leading-5 text-ink-500">{COPY.noCaptionHere}</p>
             ) : (
@@ -355,12 +371,17 @@ export function InterruptPanel({
                 {lines.map((l) => (
                   <li key={l.i}>
                     <div className="flex items-start gap-2">
-                      <PhraseText
+                      {/* M3.10 / D45：**这几行就是划词的地方**，不另开界面 ——
+                          暂停的那一刻正是最想问"这个词什么意思"的时候 */}
+                      <SelectableLine
                         text={l.text}
+                        i={l.i}
+                        t={l.t}
+                        contentLang={contentLang}
                         phrase={l.phrase}
-                        saved={l.saved}
-                        onToggle={onToggleTerm}
-                        className="min-w-0 flex-1 text-sm leading-6 text-ink-100"
+                        savedSpans={l.savedSpans}
+                        onToggleTerm={onToggleTerm}
+                        className="min-w-0 flex-1 text-sm leading-9 text-ink-100"
                       />
                       <PhraseCheck phrase={l.phrase} saved={l.saved} onToggle={onToggleTerm} />
                     </div>

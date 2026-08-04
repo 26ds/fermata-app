@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -10,9 +11,11 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { activeSegmentIndex, parseTranscript } from "@/lib/captions";
-import { PhraseCheck, PhraseText } from "@/components/phrase-line";
+import { PhraseCheck } from "@/components/phrase-line";
+import { SelectableLine } from "@/components/selectable-line";
 import { Toggle } from "@/components/toggle";
 import type { PhraseItem } from "@/lib/phrases/types";
+import { findTerms, type TermSpan } from "@/lib/segment";
 import { putSettings } from "@/lib/settings-client";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
@@ -23,6 +26,14 @@ import { TARGET_LANGS } from "@/lib/translate/langs";
 //
 // M1 阶段字幕靠手贴（.srt / .vtt），目的是**先把渲染与同步验对**；
 // M2 的自动转写写同一个字段、同一个形状，这个组件届时一个字都不用改。
+
+/**
+ * D42：新加的文案集中放这儿，M3.9 抽语言表时只动这一处。
+ * （这个文件里还有大量早于 D42 的散装中文，那是 M3.9 片 c「只搬家」要处理的，不在本片。）
+ */
+const COPY = {
+  pickHint: "点字幕里的词就能收进词库 · 点行首的时间戳跳到那一句",
+};
 
 const SIZE_KEY = "fermata.captions.size";
 const SIZE_MIN = 14;
@@ -92,6 +103,8 @@ interface CaptionLayerProps {
   /** 已经收进词库的词组原文 —— 决定高亮是实心还是虚线 */
   savedTerms?: Set<string>;
   onToggleTerm?: (phrase: PhraseItem) => void;
+  /** M3.10 / D42：这条内容是什么语言。划词切块的 locale 用它，**不许假设英文** */
+  contentLang?: string | null;
   /**
    * D45：AI 自动标词开着吗（**默认关**）。创始人 2026-08-02 指名把这颗开关
    * 放在「字幕」这一块里 —— 它管的就是字幕上那些高亮，摆在这儿才对得上。
@@ -114,6 +127,7 @@ export function CaptionLayer({
   highlights,
   savedTerms,
   onToggleTerm,
+  contentLang,
   autoScan = false,
   onToggleAutoScan,
   scanning = false,
@@ -313,6 +327,24 @@ export function CaptionLayer({
     // block:"nearest" —— 只在字幕框内滚，不把整个页面往上拽（视频还在上面呢）
     activeRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [active, follow]);
+
+  /**
+   * M3.10：每一行里，已经收进词库的词都在哪儿（`段下标 → 位置`）。
+   *
+   * 手动划的词在字幕里没有坐标（AI 标的自带 `PhraseItem.start`），只能拿词回来找。
+   * **必须 memo**：整份字幕可能几百行，而这个列表跟着 250ms 的当前行一起重渲染 ——
+   * 每次都全表扫一遍，手机会烫。这里只在「字幕变了」或「词库变了」时算一次。
+   * 一个词都没收过就直接空表返回，绝大多数情况连循环都不进。
+   */
+  const savedSpansByLine = useMemo(() => {
+    const m = new Map<number, TermSpan[]>();
+    if (!savedTerms || savedTerms.size === 0) return m;
+    segments.forEach((seg, i) => {
+      const found = findTerms(seg.text, savedTerms);
+      if (found.length > 0) m.set(i, found);
+    });
+    return m;
+  }, [segments, savedTerms]);
 
   async function submitDraft() {
     const parsed = parseTranscript(draft);
@@ -616,6 +648,14 @@ export function CaptionLayer({
             {trNote && !trRunning && <span className="text-ink-400">{trNote}</span>}
           </div>
 
+          {/* M3.10 / D45：字幕列表是划词的**第二个入口** —— D39 把暂停面板收成细条，
+              为的就是往回翻着划。手势不说出口就等于没做（创始人上一轮真机反馈的原话是
+              「我好像没看到重新扫描在哪里」），所以这行小字必须在 */}
+          {onToggleTerm && (
+            <p className="mt-2 text-[0.68rem] leading-4 text-ink-500">
+              {COPY.pickHint}
+            </p>
+          )}
           <div className="mt-2 max-h-64 overflow-y-auto rounded-2xl border border-ink-700 p-2">
             <ul className="caption-copy flex flex-col">
               {segments.map((seg, i) => {
@@ -627,17 +667,28 @@ export function CaptionLayer({
                 const phrase = highlights?.get(i);
                 const saved = !!phrase && !!savedTerms?.has(phrase.text);
                 // 原文那一段的样式（有译文时缩约 13% 给译文让位）
+                // M3.10：能划词的时候把行高从 1.5 撑到 1.85 —— 一行才 22px 高的时候
+                // 手指点词很容易点到上下那一行去。撑到 ~28px 是折中：再高列表就长得
+                // 翻不动了（往回翻找一句话是这个列表的另一半用途）
+                const lh = onToggleTerm ? 1.85 : 1.5;
                 const originalStyle = lineShowsTr
-                  ? { fontSize: "calc(var(--caption-size) * 0.87)" }
-                  : { fontSize: "var(--caption-size)", lineHeight: 1.5 };
+                  ? { fontSize: "calc(var(--caption-size) * 0.87)", lineHeight: lh }
+                  : { fontSize: "var(--caption-size)", lineHeight: lh };
                 const original = (
-                  <PhraseText
+                  <SelectableLine
                     text={seg.text}
+                    i={i}
+                    t={seg.start}
+                    contentLang={contentLang}
                     phrase={phrase}
-                    saved={saved}
-                    onToggle={onToggleTerm}
+                    savedSpans={savedSpansByLine.get(i)}
+                    onToggleTerm={onToggleTerm}
                     className={flip && lineShowsTr ? "opacity-65" : undefined}
-                    style={flip && lineShowsTr ? { fontSize: "calc(var(--caption-size) * 0.61)" } : originalStyle}
+                    style={
+                      flip && lineShowsTr
+                        ? { fontSize: "calc(var(--caption-size) * 0.61)", lineHeight: lh }
+                        : originalStyle
+                    }
                   />
                 );
                 const translated = (
@@ -647,6 +698,9 @@ export function CaptionLayer({
                       fontSize: flip
                         ? "calc(var(--caption-size) * 0.87)"
                         : "calc(var(--caption-size) * 0.61)",
+                      // 原来这一位挂在外层容器上，现在原文那一行要自己撑高行高（划词用），
+                      // 所以译文得自己带一份，否则它会跟着一起被撑开
+                      lineHeight: 1.4,
                     }}
                   >
                     {translation}
@@ -671,17 +725,29 @@ export function CaptionLayer({
                         isActive ? "text-ink-100" : "text-ink-500"
                       }`}
                     >
-                      <span className="ui-mono shrink-0 pt-0.5 text-[0.68rem] text-ink-500">
+                      {/* M3.10：字里的词现在自己接住点击了，整行那层覆盖按钮只剩空白处能点到。
+                          于是「跳到这一句」必须有一个**一定点得中**的地方 —— 就是这个时间戳。
+                          它原来只是一段死文字，现在是真按钮（`pointer-events-auto` 才收得到点击，
+                          正文那一层是 `pointer-events-none`）。 */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onSeek(seg.start);
+                        }}
+                        aria-label={`跳到 ${mmss(seg.start)}`}
+                        className="ui-mono pointer-events-auto relative z-10 -mt-0.5 shrink-0 rounded-lg px-1 py-1 text-[0.68rem] text-ink-500 transition-colors hover:bg-ink-900 hover:text-teal-300"
+                      >
                         {mmss(seg.start)}
-                      </span>
+                      </button>
                       {lineShowsTr ? (
                         // 原文大译文小；flip 后对调谁大、谁在上。高亮永远跟着**原文**走
-                        <span className="flex min-w-0 flex-1 flex-col gap-0.5" style={{ lineHeight: 1.4 }}>
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                           {flip ? translated : original}
                           {flip ? original : translated}
-                        </span>
+                        </div>
                       ) : (
-                        <span className="min-w-0 flex-1">{original}</span>
+                        <div className="min-w-0 flex-1">{original}</div>
                       )}
                       <PhraseCheck phrase={phrase} saved={saved} onToggle={onToggleTerm} />
                     </div>

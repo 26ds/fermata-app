@@ -135,6 +135,82 @@ function parsePicks(raw: string, valid: Set<number>): Map<number, { text: string
   return out;
 }
 
+/** 一句解释最多留多长。模型偶尔会写成一段小作文，截住它，别把词库撑成文章 */
+const GLOSS_MAX_CHARS = 200;
+const GLOSS_TIMEOUT_MS = 20_000;
+
+/**
+ * M3.10 —— 给**用户自己划下来的**那一段补一句解释（D45 + D42）。
+ *
+ * 为什么单独一支而不是复用整片扫描：手动划的词是**一条一条来的**，
+ * 整片扫描那套（分批、编号、verbatim 校验）在这里全是多余的开销。
+ * 单条几乎不要钱，而且**是用户主动要的**，值。
+ *
+ * ⚠️ 这支只由人的动作触发（划完词一次、或词库里点「再试一次」）。
+ * **代码永远不许自己重试**（D44：花钱的动作只能人点）。
+ */
+export async function glossTerm(input: {
+  term: string;
+  /** 它出现的那句原话 —— 没有上下文，一个多义词只能瞎猜 */
+  context: string;
+  mode: StudyMode;
+  contentLang: string;
+  nativeLang: string;
+  targetLang: string;
+}): Promise<string> {
+  const ai = clientFor();
+  const contentName = langNameEn(input.contentLang) || "the language of the transcript";
+  const nativeName = langNameEn(input.nativeLang) || "the language of the transcript";
+  const targetName = langNameEn(input.targetLang);
+
+  const prompt = `A learner just saved this expression from a transcript. Explain it to them.
+
+Content language: ${contentName}
+Learner's native language: ${nativeName}
+Language they are learning: ${targetName || "(none — they only want to understand the content)"}
+
+WHAT THEY SAVED
+${input.term}
+
+THE SENTENCE IT CAME FROM
+${input.context || "(not available)"}
+
+WHAT TO SAY
+${modeBrief(input.mode)}
+
+RULES
+1. Explain what it means HERE, in this sentence — not every meaning it could ever have.
+2. Write in ${nativeName}. One short clause: at most 20 characters if that language is dense (Chinese/Japanese), at most 12 words otherwise.
+3. Do NOT restate the expression, do not quote it back, do not add labels like "meaning:".
+4. Output the explanation ONLY. No markdown, no quotes, no commentary.`;
+
+  const res = await ai.models.generateContent({
+    model: MODEL,
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    config: {
+      temperature: 0.2,
+      maxOutputTokens: 256,
+      thinkingConfig: { thinkingBudget: 0 },
+      abortSignal: AbortSignal.timeout(GLOSS_TIMEOUT_MS),
+    },
+  });
+
+  // 模型偶尔还是会裹一层引号 / 代码块 / 写成好几行 —— 只取第一行，剥掉包装
+  const gloss = (res.text ?? "")
+    .replace(/^\s*```[a-z]*\s*/i, "")
+    .replace(/```\s*$/, "")
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l.length > 0)
+    ?.replace(/^["'「『]+|["'」』]+$/g, "")
+    .trim();
+
+  // **空答案不许当成功**：写一条空解释进库，界面上会显示成"已经有解释了"，
+  // 而实际上什么都没有 —— 那正是 D44 要根除的静默失败。宁可报错，让人自己再点一次
+  if (!gloss) throw new PhraseError("模型这次没给出解释。");
+  return gloss.slice(0, GLOSS_MAX_CHARS);
+}
+
 export interface ScanContext {
   segments: TranscriptSegment[];
   /** 从第几段开始扫（断点续扫：上次预算用完停在哪儿） */
