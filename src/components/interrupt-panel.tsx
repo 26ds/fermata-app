@@ -35,15 +35,12 @@ const COPY = {
   addWord: "＋词",
   chat: "沉浸聊天",
   rescan: "再扫一次",
-  // D45：自动标词的开关。**关着也要说出来** —— 默默什么都不做，和"扫了但一个都没标出来"
-  // 在屏幕上长得一模一样。开了就当场扫这一片
-  autoScanOn: "开",
-  autoScanOff: "关",
-  autoScanOnLabel: "打开自动标词，并马上扫这一片",
-  autoScanOffLabel: "关掉自动标词（已经标出来的不会删）",
   // 扫描的几种结局，每一种都得说人话 —— 说不清楚的失败等于没做
   scanStates: {
-    off: "AI 自动标词关着。开了它会把这一片里值得收的词标出来（要花钱，只扫一次）。",
+    // D45：开关本身搬去「字幕」那一块了（创始人 2026-08-02 指名的位置），
+    // 所以这里只剩一句"为什么这片没有高亮"，并把人指过去 —— 面板本来就挤（D18），
+    // 同一颗开关不该在两个地方各摆一份（上一轮撤掉重复入口时定的规矩）
+    off: "AI 标词关着 —— 开关在下面「字幕」那一行。",
     scanning: "正在把这条内容里值得收的表达标出来…",
     ready: (n: number) => `全片标出 ${n} 个，下面的字幕里也都标了`,
     empty: "整片扫完了，一个都没标出来。",
@@ -103,10 +100,6 @@ interface InterruptPanelProps {
     status: "idle" | "off" | "scanning" | "ready" | "empty" | "not-ready" | "running" | "failed";
     count: number;
   };
-  /** D45：自动标词开着吗（默认关）。这一行右边那颗开关照它显示 开 / 关 */
-  autoScan?: boolean;
-  /** 拨这颗开关。**开 = 顺便当场扫这一片**（花钱，所以只由人点） */
-  onToggleAutoScan?: () => void;
   /**
    * M3.9：这一份是按**旧的语言设置**扫的吗（`""` = 没过期）。
    * `"mode"` = 学知识/学语言的判定变了；`"support"` = 解释用的语言变了。
@@ -139,8 +132,6 @@ export function InterruptPanel({
   lines = [],
   scan = { status: "idle", count: 0 },
   drift = "",
-  autoScan = false,
-  onToggleAutoScan,
   onRescan,
   onToggleTerm,
   needTargetLang = "",
@@ -420,22 +411,6 @@ export function InterruptPanel({
                     </button>
                   )}
 
-                {/* D45：那一颗开关。关着的时候是唯一的按钮（点它 = 开 + 当场扫这一片） */}
-                {onToggleAutoScan && (
-                  <button
-                    type="button"
-                    onClick={onToggleAutoScan}
-                    aria-pressed={autoScan}
-                    aria-label={autoScan ? COPY.autoScanOffLabel : COPY.autoScanOnLabel}
-                    className={`min-h-8 shrink-0 rounded-lg border px-2.5 text-[0.68rem] ${
-                      autoScan
-                        ? "border-ink-500/60 text-ink-500"
-                        : "border-teal-400/50 text-teal-300"
-                    }`}
-                  >
-                    {autoScan ? COPY.autoScanOff : COPY.autoScanOn}
-                  </button>
-                )}
               </div>
             )}
           </div>

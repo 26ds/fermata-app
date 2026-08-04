@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { activeSegmentIndex, parseTranscript } from "@/lib/captions";
 import { PhraseCheck, PhraseText } from "@/components/phrase-line";
+import { Toggle } from "@/components/toggle";
 import type { PhraseItem } from "@/lib/phrases/types";
 import { putSettings } from "@/lib/settings-client";
 import { mmss } from "@/lib/time";
@@ -91,6 +92,15 @@ interface CaptionLayerProps {
   /** 已经收进词库的词组原文 —— 决定高亮是实心还是虚线 */
   savedTerms?: Set<string>;
   onToggleTerm?: (phrase: PhraseItem) => void;
+  /**
+   * D45：AI 自动标词开着吗（**默认关**）。创始人 2026-08-02 指名把这颗开关
+   * 放在「字幕」这一块里 —— 它管的就是字幕上那些高亮，摆在这儿才对得上。
+   */
+  autoScan?: boolean;
+  /** 拨这颗开关。**开 = 顺便当场扫这一片**（花钱，所以只由人点，代码永不自动开） */
+  onToggleAutoScan?: () => void;
+  /** 正在扫。开关旁边那行小字要如实说「正在扫这一片…」，别让人以为点了没反应 */
+  scanning?: boolean;
 }
 
 export function CaptionLayer({
@@ -104,6 +114,9 @@ export function CaptionLayer({
   highlights,
   savedTerms,
   onToggleTerm,
+  autoScan = false,
+  onToggleAutoScan,
+  scanning = false,
 }: CaptionLayerProps) {
   // YouTube 视频自己带 CC，用户粘贴过来免费又快；只有没 CC 的才值得花钱走 Gemini。
   // 所以 YouTube 默认引导粘贴，把"自动生成"降为次选。
@@ -506,6 +519,31 @@ export function CaptionLayer({
         )
       ) : !on ? null : (
         <>
+          {/* D45 —— AI 自动标词的开关（创始人 2026-08-02 指名放在「字幕」这儿，
+              并且要做成拨动开关的样子）。**默认关**：手动选词才是主路径，
+              一个降级成"顺带提示"的功能不该在背后自己花钱。
+              开 = 当场就把这一片扫了。关 = 只是不再自动跑，**已经标出来的不删**。 */}
+          {onToggleAutoScan && (
+            <div className="mt-2 flex items-center gap-2.5 px-1">
+              <Toggle
+                id="autoscan-toggle"
+                on={autoScan}
+                onChange={onToggleAutoScan}
+                label={autoScan ? "关掉 AI 自动标词" : "打开 AI 自动标词，并马上扫这一片"}
+              />
+              <label htmlFor="autoscan-toggle" className="min-w-0 text-[0.68rem] leading-4">
+                <span className="text-ink-300">AI 标词</span>
+                <span className="ml-1.5 text-ink-500">
+                  {scanning
+                    ? "正在扫这一片…"
+                    : autoScan
+                      ? "开着，会把值得收的词标出来"
+                      : "关着（开了要花钱，每片只扫一次）"}
+                </span>
+              </label>
+            </div>
+          )}
+
           <div className="mt-2 flex items-center gap-3 px-1">
             <span className="text-[0.68rem] text-ink-500">字号</span>
             <input

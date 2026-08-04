@@ -1014,6 +1014,9 @@ export function WatchStage({
         highlights={highlights}
         savedTerms={savedTerms}
         onToggleTerm={toggleTerm}
+        autoScan={autoScan}
+        onToggleAutoScan={toggleAutoScan}
+        scanning={scanState.status === "scanning"}
         generation={{
           running: gen.running,
           coveredS: gen.coveredS,
@@ -1049,8 +1052,6 @@ export function WatchStage({
         lines={panelLines}
         scan={scanState}
         drift={drift}
-        autoScan={autoScan}
-        onToggleAutoScan={toggleAutoScan}
         onRescan={rescan}
         onToggleTerm={toggleTerm}
         needTargetLang={needTargetLang}
