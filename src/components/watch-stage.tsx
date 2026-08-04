@@ -39,6 +39,7 @@ export function WatchStage({
   startInChat,
   prefs = DEFAULT_LANG_PREFS,
   play = DEFAULT_PLAY_PREFS,
+  autoScan: autoScanInitial = false,
   savedAtoms = [],
 }: {
   source: SourceRow;
@@ -54,6 +55,11 @@ export function WatchStage({
   prefs?: LangPrefs;
   /** 倍速 + 一跳几秒。服务端首屏就给，省得进来先显示 1× 再"跳"成 1.5× */
   play?: PlayPrefs;
+  /**
+   * AI 自动标词开着吗（D45）。**默认关** —— 手动选词才是主路径，
+   * 一个降级成"顺带提示"的功能不该还在背后自己花钱。开关在暂停面板里那一行。
+   */
+  autoScan?: boolean;
   /** M3.7：这条内容里已经收进词库的词组（决定 ✓ 是实心还是空心） */
   savedAtoms?: { id: string; term: string }[];
 }) {
@@ -149,9 +155,17 @@ export function WatchStage({
    * 而用户和我都无从分辨。**说不清楚的失败等于没做。**
    */
   const [scanState, setScanState] = useState<{
-    status: "idle" | "scanning" | "ready" | "empty" | "not-ready" | "running" | "failed";
+    status: "idle" | "off" | "scanning" | "ready" | "empty" | "not-ready" | "running" | "failed";
     count: number;
-  }>({ status: "idle", count: isPhraseScan(source.phrases) ? source.phrases.items.length : 0 });
+  }>({
+    // D45：关着的时候也要**说出来**。默默什么都不做，和"扫了但什么都没标出来"
+    // 在屏幕上长得一模一样 —— 那正是 D44 要根除的那种沉默。
+    status: autoScanInitial ? "idle" : "off",
+    count: isPhraseScan(source.phrases) ? source.phrases.items.length : 0,
+  });
+  /** 自动标词的开关（D45，默认关）。ref 给 openPanel 用 —— 那里读 state 会读到旧闭包 */
+  const [autoScan, setAutoScan] = useState(autoScanInitial);
+  const autoScanRef = useRef(autoScanInitial);
   /** D42：内容不是他母语、又没问过 —— 有值时面板上弹那一句问询。答完即定 */
   const [needTargetLang, setNeedTargetLang] = useState("");
   /** 已收进词库的：词组原文 → atom id（取消勾选要用 id） */
@@ -323,6 +337,27 @@ export function WatchStage({
    */
   const drift = scan ? scanDrift(scan, prefs, source.content_lang) : "";
 
+  /**
+   * 自动标词的开 / 关（D45，创始人 2026-08-02：「做一个按钮，默认关闭，点击后打开就开始运行」）。
+   *
+   * **开** = 存进偏好 + **当场就把这一片扫了**（他要的就是"点开就跑"，不是"下次进来才跑"）。
+   * **关** = 只是不再自动跑；**已经标出来的一个都不删** —— 存在 `sources.phrases` 里的照旧高亮、
+   * 照旧能收。花过的钱不该因为关了个开关就白花。
+   */
+  const toggleAutoScan = useCallback(() => {
+    const next = !autoScanRef.current;
+    autoScanRef.current = next;
+    setAutoScan(next);
+    void putSettings({ autoScan: next });
+    if (next) {
+      scanTriedRef.current = false;
+      void ensurePhrases();
+    } else {
+      // 关了就把那一行退回"关着"，别让它继续显示上一次的结局
+      setScanState((s) => ({ ...s, status: "off" }));
+    }
+  }, [ensurePhrases]);
+
   /** 用户按「再扫一次」：破锁 + 从头重扫。**花钱的动作，只由人触发** */
   const rescan = useCallback(() => {
     scanTriedRef.current = false;
@@ -423,8 +458,10 @@ export function WatchStage({
       }
       setAsk({ asking: false, answer: "", error: "" }); // 新一轮问答，清掉上次答案
       setPanel({ open: true, tS, id: null, captured: capture });
-      // D40 懒触发：**第一次在这片子里停下来**才去扫词组。打开页面就扫等于替他花钱
-      void ensurePhrases();
+      // D40 懒触发：**第一次在这片子里停下来**才去扫词组。打开页面就扫等于替他花钱。
+      // D45（2026-08-02）：而且**默认根本不扫** —— 自动标词降级成一个默认关着的开关，
+      // 他自己按下「开」才跑。一个已经不是主路径的功能，不该还在背后自己花钱。
+      if (autoScanRef.current) void ensurePhrases();
 
       if (capture) {
         const tempId = `temp-${Date.now()}`;
@@ -1012,6 +1049,8 @@ export function WatchStage({
         lines={panelLines}
         scan={scanState}
         drift={drift}
+        autoScan={autoScan}
+        onToggleAutoScan={toggleAutoScan}
         onRescan={rescan}
         onToggleTerm={toggleTerm}
         needTargetLang={needTargetLang}

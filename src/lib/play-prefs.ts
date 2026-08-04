@@ -38,3 +38,17 @@ export function readPlayPrefs(settings: Record<string, unknown> | null | undefin
     skipStep: (SKIP_STEPS as readonly number[]).includes(step) ? step : DEFAULT_SKIP,
   };
 }
+
+/**
+ * AI 自动标词开着吗（创始人 2026-08-02 拍板：**做成开关，默认关**）。
+ *
+ * 为什么默认关：扫一次要花钱，而 D45 已经把手动选词定成主路径 ——
+ * **一个降级成"顺带提示"的功能，不该还在背后自己花钱**。
+ * 键不存在 = 关，所以老账号不用迁移、不用改任何数据就直接是关的。
+ *
+ * ⚠️ **关掉只是不再自动跑，已经标出来的不删** —— 存在 `sources.phrases` 里的照旧高亮、照旧能收。
+ * 花过的钱不该因为关了个开关就白花。
+ */
+export function readAutoScan(settings: Record<string, unknown> | null | undefined): boolean {
+  return (settings ?? {}).autoScan === true;
+}

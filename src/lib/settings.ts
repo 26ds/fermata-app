@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_LANG_PREFS, readLangPrefs, type LangPrefs } from "@/lib/lang";
-import { DEFAULT_PLAY_PREFS, readPlayPrefs, type PlayPrefs } from "@/lib/play-prefs";
+import { DEFAULT_PLAY_PREFS, readAutoScan, readPlayPrefs, type PlayPrefs } from "@/lib/play-prefs";
 
 // M3.7 —— 服务端读用户设置（`user_settings.settings`，迁移 0006 的表，**零新迁移**）。
 //
@@ -48,11 +48,16 @@ export async function getLangPrefs(
 export async function getWatchPrefs(
   supabase: SupabaseClient,
   userId: string,
-): Promise<{ lang: LangPrefs; play: PlayPrefs }> {
+): Promise<{ lang: LangPrefs; play: PlayPrefs; autoScan: boolean }> {
   try {
     const settings = await getSettings(supabase, userId);
-    return { lang: readLangPrefs(settings), play: readPlayPrefs(settings) };
+    return {
+      lang: readLangPrefs(settings),
+      play: readPlayPrefs(settings),
+      autoScan: readAutoScan(settings),
+    };
   } catch {
-    return { lang: DEFAULT_LANG_PREFS, play: DEFAULT_PLAY_PREFS };
+    // 取不到设置就当自动扫描是关的 —— **默认必须偏向"不花钱"**（D45）
+    return { lang: DEFAULT_LANG_PREFS, play: DEFAULT_PLAY_PREFS, autoScan: false };
   }
 }
