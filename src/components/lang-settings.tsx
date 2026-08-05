@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { LangPrefs } from "@/lib/lang";
+import { useCopy } from "@/components/copy-provider";
+import { UI_LOCALES } from "@/lib/copy";
+import { langLabel, type LangPrefs } from "@/lib/lang";
 import { putSettings } from "@/lib/settings-client";
 import { TARGET_LANGS } from "@/lib/translate/langs";
 
@@ -13,34 +15,29 @@ import { TARGET_LANGS } from "@/lib/translate/langs";
 // D43 定的通则「任何页面都必须有走得出去的路」，在这里的延伸就是
 // **任何一次性选择都必须有改回来的地方**。
 //
-// ⚠️ **这里只有两个选择器，不是计划 C 写的四个。**
+// ⚠️ **三个选择器，不是计划 C 写的四个。**
 //
-// 「界面语言」没做：`uiLang` 要等片 b 的文案表落地才真的会改变什么，
-// **提前摆一个选了没反应的开关，就是在骗人**（D44 的脾气）。片 b 补上。
+// 「界面语言」片 b 补上了 —— 片 a 当时故意没做，因为 `uiLang` 要等文案表落地才真的
+// 会改变什么，**提前摆一个选了没反应的开关就是在骗人**（D44 的脾气）。现在它真的管用了。
 //
 // 「字幕译文译成」做了又撤了 —— 创始人 2026-08-02 一句话点破：
 // **「不是用户在每个视频播放界面就有这个选项吗，直接选那个不就好了」**。他是对的。
 // 它和播放器里那一栏是**同一个值**（M3.7 起就存后台了），在这儿再摆一份不增加任何能力，
 // 只增加"改哪个才算数"的困惑。设置页最容易长成杂物间，第一件杂物就是这么进来的。
-
-// D42：文案集中在这里，片 d 换 t() 时只动这一处
-const COPY = {
-  title: "语言",
-  native: "我的母语",
-  nativeHint: "AI 用它解释、译文译成它",
-  target: "我想学的语言",
-  targetHint: "留空 = 我只想搞懂内容，不是来学语言的",
-  unset: "还没定（看到非母语内容时会问你一次）",
-  none: "不学语言，只想搞懂内容",
-  saving: "已保存",
-};
+//
+// M3.9 片 b：本文件是**第一个吃文案表的组件**（`COPY` 常量已删，全部走 `t()`）——
+// 选了「English」之后当场变英文的正是这一块，端到端的证据就在这儿。
 
 const UNSET = "__unset";
+/** 界面语言选择器里「跟着我的母语」那一项。存进去是空串（D42：留空才会跟着母语走） */
+const FOLLOW_NATIVE = "";
 
 export function LangSettings({ prefs }: { prefs: LangPrefs }) {
+  const t = useCopy();
   const router = useRouter();
   const [nativeLang, setNativeLang] = useState(prefs.nativeLang);
   const [targetLang, setTargetLang] = useState<string>(prefs.targetLang ?? UNSET);
+  const [uiLang, setUiLang] = useState(prefs.uiLang);
   const [saved, setSaved] = useState(false);
 
   const save = (patch: Record<string, unknown>) => {
@@ -57,14 +54,14 @@ export function LangSettings({ prefs }: { prefs: LangPrefs }) {
     <section aria-labelledby="lang-settings-title" className="rounded-2xl border border-ink-700 px-4 py-3">
       <div className="flex items-baseline justify-between">
         <p id="lang-settings-title" className="eyebrow">
-          {COPY.title}
+          {t("settings.lang.title")}
         </p>
-        {saved && <span className="text-[0.68rem] text-teal-300">{COPY.saving}</span>}
+        {saved && <span className="text-[0.68rem] text-teal-300">{t("settings.lang.saved")}</span>}
       </div>
 
       <div className="mt-2 grid gap-3 sm:grid-cols-2">
         <label className="flex min-w-0 flex-col gap-1 text-xs text-ink-500">
-          <span className="text-ink-300">{COPY.native}</span>
+          <span className="text-ink-300">{t("settings.lang.native")}</span>
           <select
             value={nativeLang}
             onChange={(e) => {
@@ -83,11 +80,11 @@ export function LangSettings({ prefs }: { prefs: LangPrefs }) {
               </option>
             ))}
           </select>
-          <span>{COPY.nativeHint}</span>
+          <span>{t("settings.lang.nativeHint")}</span>
         </label>
 
         <label className="flex min-w-0 flex-col gap-1 text-xs text-ink-500">
-          <span className="text-ink-300">{COPY.target}</span>
+          <span className="text-ink-300">{t("settings.lang.target")}</span>
           <select
             value={targetLang}
             onChange={(e) => {
@@ -98,15 +95,43 @@ export function LangSettings({ prefs }: { prefs: LangPrefs }) {
             }}
             className="min-h-11 w-full min-w-0 rounded-xl border border-ink-700 bg-ink-900 px-3 text-sm text-ink-100 outline-none focus:border-teal-400"
           >
-            {prefs.targetLang === null && <option value={UNSET}>{COPY.unset}</option>}
-            <option value="">{COPY.none}</option>
+            {prefs.targetLang === null && (
+              <option value={UNSET}>{t("settings.lang.targetUnset")}</option>
+            )}
+            <option value="">{t("settings.lang.targetNone")}</option>
             {TARGET_LANGS.map((l) => (
               <option key={l.code} value={l.code}>
                 {l.label}
               </option>
             ))}
           </select>
-          <span>{COPY.targetHint}</span>
+          <span>{t("settings.lang.targetHint")}</span>
+        </label>
+
+        {/* 界面语言（M3.9 片 b）。**只列真有整套人工文案的语言** —— 现在是简体中文和
+            English 两套。`TARGET_LANGS` 那 15 种是给"母语/想学的语言"用的，
+            照搬到这里就会出现「选了 ไทย，界面还是英文」这种选了等于没选的选项（D44）。
+            所以这里按 `UI_LOCALES` 过滤，并在下面一行小字里如实说清楚。 */}
+        <label className="flex min-w-0 flex-col gap-1 text-xs text-ink-500">
+          <span className="text-ink-300">{t("settings.lang.ui")}</span>
+          <select
+            value={uiLang}
+            onChange={(e) => {
+              const v = e.target.value;
+              setUiLang(v);
+              // 空串 = 跟着母语走（别存一份母语的副本进去，那样以后改母语界面就不跟了）
+              save({ uiLang: v });
+            }}
+            className="min-h-11 w-full min-w-0 rounded-xl border border-ink-700 bg-ink-900 px-3 text-sm text-ink-100 outline-none focus:border-teal-400"
+          >
+            <option value={FOLLOW_NATIVE}>{t("settings.lang.uiFollowNative")}</option>
+            {UI_LOCALES.map((code) => (
+              <option key={code} value={code}>
+                {langLabel(code)}
+              </option>
+            ))}
+          </select>
+          <span>{t("settings.lang.uiHint")}</span>
         </label>
       </div>
     </section>

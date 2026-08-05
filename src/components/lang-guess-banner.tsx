@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { makeT } from "@/lib/copy";
 import { langLabel, shouldConfirmNativeLang, type LangPrefs } from "@/lib/lang";
 import { putSettings } from "@/lib/settings-client";
 
@@ -19,37 +20,16 @@ import { putSettings } from "@/lib/settings-client";
 //      一条可关的细横幅，看见了就看见了。
 //   ③ **✕ 也算一个回答**。看见了并且不在意 = 确认过了，和去改一次一样算数，从此不再问。
 
-// 这张小表是 M3.9 文案表（`src/lib/copy/`）的种子 —— 片 b 建好表之后**搬进去、这里删掉**。
-// 现在单独放着是因为片 a 要先于文案表落地，而这句话恰恰是最不能等的一句。
-// 没有人工文案的语言回落 `en`（D42：不假装支持 15 种）。
-const MSG: Record<string, { lead: (lang: string) => string; cta: string; close: string }> = {
-  "zh-Hans": {
-    lead: (lang) => `你的母语现在是「${lang}」，是照你设备的语言自动填的。`,
-    cta: "不对就去改",
-    close: "知道了，别再提",
-  },
-  "zh-Hant": {
-    lead: (lang) => `你的母語現在是「${lang}」，是照你裝置的語言自動填的。`,
-    cta: "不對就去改",
-    close: "知道了，別再提",
-  },
-  en: {
-    lead: (lang) => `Your native language is set to ${lang} — filled in from your device's language.`,
-    cta: "Not right? Change it",
-    close: "Got it, stop asking",
-  },
-};
-
-function pick(lang: string) {
-  return MSG[lang] ?? MSG[lang.split("-")[0]] ?? MSG.en;
-}
-
 export function LangGuessBanner({ prefs, from }: { prefs: LangPrefs; from: string }) {
   const [gone, setGone] = useState(false);
 
   if (gone || !shouldConfirmNativeLang(prefs)) return null;
 
-  const m = pick(prefs.nativeLang);
+  // ⚠️ **这里故意不用 `useCopy()`**。全站唯一一处不跟界面语言走的文案 ——
+  // 它要说的正是"你的母语可能被猜错了"，只有用**猜出来的那门语言**说才有意义。
+  // 界面语言此刻多半也是从这个错猜的母语推出来的，用它反而是同一个错误说两遍。
+  // 认不出的语言由 `getCopy` 回落英文（D42：不假装支持 15 种）。
+  const t = makeT(prefs.nativeLang);
   const label = langLabel(prefs.nativeLang);
 
   const dismiss = () => {
@@ -64,19 +44,19 @@ export function LangGuessBanner({ prefs, from }: { prefs: LangPrefs; from: strin
       className="mt-4 flex items-start gap-3 rounded-2xl border border-teal-400/40 bg-teal-400/[0.06] px-4 py-3"
     >
       <p className="min-w-0 flex-1 text-xs leading-5 text-ink-300">
-        {m.lead(label)}{" "}
+        {t("lang.guess.lead", label)}{" "}
         <Link
           href={`/settings?from=${from}`}
           className="whitespace-nowrap font-semibold text-teal-300 underline underline-offset-2"
         >
-          {m.cta} →
+          {t("lang.guess.cta")} →
         </Link>
       </p>
       <button
         type="button"
         onClick={dismiss}
-        aria-label={m.close}
-        title={m.close}
+        aria-label={t("lang.guess.close")}
+        title={t("lang.guess.close")}
         className="-my-1 -mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-ink-500 transition-colors hover:text-ink-100"
       >
         <span aria-hidden>✕</span>

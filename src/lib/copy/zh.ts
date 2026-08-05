@@ -1,0 +1,32 @@
+// M3.9 片 b —— 简体中文文案。**这一份是 key 的来源**（`CopyKey = keyof typeof zh`）。
+//
+// 规矩三条：
+//   ① key 命名 `<区域>.<意思>`，扁平，不搞嵌套 —— 嵌套读起来像目录，查起来要跳三层。
+//   ② 值是字符串，或者**吃参数的函数**（`(n) => \`标出 ${n} 个\``）。
+//      不要在调用处拼字符串 —— 语序在别的语言里会变（英文的 "3 words found" 和中文的
+//      "标出 3 个词" 参数位置不同），拼在外面就没法翻。
+//   ③ **搬家就是搬家**：从组件里挪过来的中文一个字都不改。想改文案，本片之外单提。
+//
+// D24：这份是纯数据，客户端要 import 它，一行服务端依赖都不许有。
+
+export const zh = {
+  // ── 母语猜测横幅（M3.9 片 a，D42 修订① / D44）──────────────────────────
+  // ⚠️ 这三条**不用界面语言渲染，用「猜出来的那门母语」渲染**（见 lang-guess-banner.tsx）。
+  // 用他看不懂的语言告诉他"我可能猜错了你的语言"，是这件事最荒谬的失败方式。
+  "lang.guess.lead": (label: string) => `你的母语现在是「${label}」，是照你设备的语言自动填的。`,
+  "lang.guess.cta": "不对就去改",
+  "lang.guess.close": "知道了，别再提",
+
+  // ── 设置页 · 语言那一块 ────────────────────────────────────────────────
+  "settings.lang.title": "语言",
+  "settings.lang.saved": "已保存",
+  "settings.lang.native": "我的母语",
+  "settings.lang.nativeHint": "AI 用它解释、译文译成它",
+  "settings.lang.target": "我想学的语言",
+  "settings.lang.targetHint": "留空 = 我只想搞懂内容，不是来学语言的",
+  "settings.lang.targetUnset": "还没定（看到非母语内容时会问你一次）",
+  "settings.lang.targetNone": "不学语言，只想搞懂内容",
+  "settings.lang.ui": "界面语言",
+  "settings.lang.uiFollowNative": "跟着我的母语",
+  "settings.lang.uiHint": "界面暂时只有简体中文和英文两套人工写的文案。母语是别的语言时，界面会用英文。",
+} as const;

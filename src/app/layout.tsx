@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import { CopyProvider } from "@/components/copy-provider";
+import { getUiLang } from "@/lib/ui-lang";
 import "./globals.css";
 
 // 字体三件套（next/font 会在构建时把字体文件自包含进来，运行时零外部请求）：
@@ -42,17 +44,29 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
+// M3.9 片 b：根布局变 `async`，因为界面语言要在**第一个字节之前**就定下来。
+//
+// `<html lang>` 原来写死 `zh-CN`，那是 D42 明令禁止的那种硬编码 —— 读屏软件会
+// 用中文去念一整屏英文。语言从 cookie 镜像来（`getUiLang`），读不到就看
+// `Accept-Language`，再读不到才英文。
+//
+// ⚠️ **代价说清楚**：读 cookie 会让所有页面进动态渲染。实测确认过这不是新增开销 ——
+// 八个页面本来就页页 `auth.getUser()`、`proxy.ts` 还在跑鉴权刷新，本来就全是动态的。
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const uiLang = await getUiLang();
+
   return (
     <html
-      lang="zh-CN"
+      lang={uiLang}
       className={`h-full antialiased ${inter.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable}`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <CopyProvider lang={uiLang}>{children}</CopyProvider>
+      </body>
     </html>
   );
 }
