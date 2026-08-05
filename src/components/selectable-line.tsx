@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { segmentLine, spanAt, spanOf, type TermSpan } from "@/lib/segment";
 import type { PhraseItem } from "@/lib/phrases/types";
 
@@ -65,6 +65,13 @@ export interface SelectableLineProps {
   glosses?: Map<string, GlossState>;
   /** 没取到时人点的重试。**代码永远不自动重试**（D44：花钱只由人点） */
   onRetryGloss?: (term: string) => void;
+  /**
+   * M3.11：**悬浮 / 长按一个阴影词**要查词（气泡状态在最外层一处，不是每行一个）。
+   * `rect` 是那个词在视口里的位置 —— 气泡靠它把尖角对准这个词。
+   */
+  onLookup?: (term: string, rect: DOMRect, contextQuote: string) => void;
+  /** 鼠标离开那个词。关不关由外层决定（要留一口气让鼠标移进气泡里） */
+  onLookupLeave?: () => void;
   /** 关掉划词。字幕列表里"点一行跳到那一秒"要用（两个手势不能同时在一行上） */
   canSelect?: boolean;
   className?: string;
@@ -81,6 +88,8 @@ export function SelectableLine({
   onToggleTerm,
   glosses,
   onRetryGloss,
+  onLookup,
+  onLookupLeave,
   canSelect = true,
   className,
   style,
@@ -117,6 +126,29 @@ export function SelectableLine({
   const knownAt = (start: number, end: number): TermSpan | null =>
     spanAt(savedSpans, start, end) ??
     (aiSpan && start < aiSpan.end && end > aiSpan.start ? aiSpan : null);
+
+  // ── M3.11 长按查词的三个 ref ────────────────────────────────────
+  /** 长按计时器 */
+  const pressTimer = useRef<number | null>(null);
+  /** 手指按下的位置 —— 挪超过 10px 就说明他在滚字幕，不是在查词 */
+  const pressFrom = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * 长按已经触发过了 → **把紧跟着的那一下 click 吞掉**。
+   * 不吞的话，长按查完词、手一松，这个词又被"选中"了（M3.10 的点选手势）。
+   */
+  const pressFired = useRef(false);
+
+  const cancelPress = () => {
+    if (pressTimer.current != null) {
+      window.clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+    pressFrom.current = null;
+  };
+
+  /** 长按判定多久。太短会和"点一下选词"打架，太长手指会先松开 */
+  const LONG_PRESS_MS = 450;
+  const MOVE_TOLERANCE = 10;
 
   const tapBlock = (k: number) => {
     setSel((prev) => {
@@ -187,6 +219,12 @@ export function SelectableLine({
               </span>
             );
           }
+          // M3.11：**只有阴影词能查**（创始人 2026-08-04 拍板）。
+          // 它们的「当前语境意思」本来就存在库里 —— 所以查词才可能"秒出现"
+          const shaded = Boolean(saved ?? ai);
+          const lookHere = (el: HTMLElement) =>
+            onLookup?.(shaded ? (saved ?? ai)!.term : b.text, el.getBoundingClientRect(), text);
+
           return (
             <span
               key={k}
@@ -194,10 +232,68 @@ export function SelectableLine({
               tabIndex={0}
               aria-pressed={inSel}
               aria-label={COPY.word(b.text)}
+              // ── 鼠标：**移上去立刻出**（他要"秒出现"，不加 hover 延迟）──
+              onPointerEnter={
+                shaded && onLookup
+                  ? (e) => {
+                      // 只认真鼠标。触摸屏上 pointerenter 也会在按下时触发，
+                      // 那会变成"轻轻一碰就弹气泡"，把长按这条路彻底盖掉
+                      if (e.pointerType === "mouse") lookHere(e.currentTarget);
+                    }
+                  : undefined
+              }
+              onPointerLeave={
+                shaded && onLookup
+                  ? (e) => {
+                      if (e.pointerType === "mouse") onLookupLeave?.();
+                      cancelPress();
+                    }
+                  : undefined
+              }
+              // ── 触摸/触控笔：长按 450ms ──
+              onPointerDown={
+                shaded && onLookup
+                  ? (e) => {
+                      if (e.pointerType === "mouse") return;
+                      pressFired.current = false;
+                      pressFrom.current = { x: e.clientX, y: e.clientY };
+                      const el = e.currentTarget;
+                      pressTimer.current = window.setTimeout(() => {
+                        pressFired.current = true;
+                        lookHere(el);
+                      }, LONG_PRESS_MS);
+                    }
+                  : undefined
+              }
+              onPointerMove={
+                shaded && onLookup
+                  ? (e) => {
+                      const from = pressFrom.current;
+                      if (!from) return;
+                      // 手指在动 = 他在滚字幕，不是在查词
+                      if (
+                        Math.abs(e.clientX - from.x) > MOVE_TOLERANCE ||
+                        Math.abs(e.clientY - from.y) > MOVE_TOLERANCE
+                      ) {
+                        cancelPress();
+                      }
+                    }
+                  : undefined
+              }
+              onPointerUp={shaded && onLookup ? cancelPress : undefined}
+              onPointerCancel={shaded && onLookup ? cancelPress : undefined}
+              // 桌面右键 / 安卓长按会弹系统菜单，盖住我们自己的气泡
+              onContextMenu={shaded && onLookup ? (e) => e.preventDefault() : undefined}
               onClick={(e) => {
                 // 字幕行整行是"点了跳到这一句"，那层在底下 ——
                 // 词必须自己接住这一下，别把"我想收这个词"变成"跳走了"
                 e.stopPropagation();
+                cancelPress();
+                // 长按刚查完词，手一松别顺手把这个词选中了
+                if (pressFired.current) {
+                  pressFired.current = false;
+                  return;
+                }
                 tapBlock(k);
               }}
               onKeyDown={(e) => {
@@ -211,9 +307,14 @@ export function SelectableLine({
               // pointer-events-auto：字幕列表里整行是一层"点了跳到这一句"的覆盖按钮，
               // 正文那一层是 pointer-events-none。词必须自己把点击接回来，
               // 否则点词就变成了跳走（M3.7 给高亮词组也是这么处理的）
+              // 阴影词要 `select-none` + `-webkit-touch-callout:none`：
+              // 不加的话，**iOS Safari 长按会弹出系统的放大镜和「拷贝」菜单**，
+              // 把我们的词卡整个盖住。只加在阴影词上 —— 普通字幕文字照旧可以选中复制
               className={`pointer-events-auto relative z-10 cursor-pointer transition-colors ${tone} ${edge} ${
                 mode === "char" ? "inline-block min-w-[22px] text-center" : ""
-              } ${inSel ? "" : "hover:bg-teal-400/20"}`}
+              } ${inSel ? "" : "hover:bg-teal-400/20"} ${
+                shaded && onLookup ? "select-none [-webkit-touch-callout:none]" : ""
+              }`}
             >
               {b.text}
             </span>

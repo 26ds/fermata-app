@@ -32,7 +32,7 @@ export class PhraseError extends Error {
   }
 }
 
-function clientFor(): GoogleGenAI {
+export function clientFor(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new PhraseError("服务器还没配置 GEMINI_API_KEY，词库扫描暂时不可用。");
   return new GoogleGenAI({ apiKey });
@@ -82,7 +82,7 @@ export async function detectContentLang(segments: TranscriptSegment[]): Promise<
 }
 
 /** 每种模式挑什么 —— **这段文字是 D42 落地的关键**，不许出现具体语言名 */
-function modeBrief(mode: StudyMode): string {
+export function modeBrief(mode: StudyMode): string {
   if (mode === "language") {
     return [
       "Pick IDIOMATIC, COLLOQUIAL expressions — the phrasings a native speaker actually uses but a textbook would not teach:",

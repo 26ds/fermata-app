@@ -106,6 +106,9 @@ interface CaptionLayerProps {
   /** M3.10：刚收下的词，解释取到哪一步了。**答案就长在他点的那一行下面** */
   glosses?: Map<string, GlossState>;
   onRetryGloss?: (term: string) => void;
+  /** M3.11：悬浮/长按一个阴影词就查词。气泡在最外层一处，这里只往上报 */
+  onLookup?: (term: string, rect: DOMRect, contextQuote: string) => void;
+  onLookupLeave?: () => void;
   /** M3.10 / D42：这条内容是什么语言。划词切块的 locale 用它，**不许假设英文** */
   contentLang?: string | null;
   /**
@@ -132,6 +135,8 @@ export function CaptionLayer({
   onToggleTerm,
   glosses,
   onRetryGloss,
+  onLookup,
+  onLookupLeave,
   contentLang,
   autoScan = false,
   onToggleAutoScan,
@@ -690,6 +695,8 @@ export function CaptionLayer({
                     onToggleTerm={onToggleTerm}
                     glosses={glosses}
                     onRetryGloss={onRetryGloss}
+                    onLookup={onLookup}
+                    onLookupLeave={onLookupLeave}
                     className={flip && lineShowsTr ? "opacity-65" : undefined}
                     style={
                       flip && lineShowsTr

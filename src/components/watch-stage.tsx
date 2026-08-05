@@ -10,6 +10,7 @@ import { InterruptPanel, type PanelLine } from "@/components/interrupt-panel";
 import type { PausePoint } from "@/components/pause-list";
 import { PlayerControls } from "@/components/player-controls";
 import type { GlossState } from "@/components/selectable-line";
+import { useWordLookup } from "@/components/word-lookup";
 import { DEFAULT_LANG_PREFS, type LangPrefs } from "@/lib/lang";
 import {
   isPhraseScan,
@@ -182,6 +183,17 @@ export function WatchStage({
   useEffect(() => {
     savedRef.current = savedMap;
   }, [savedMap]);
+  /**
+   * M3.11 悬浮词卡：**全页只有这一份状态**（性能红线）。
+   * 字幕列表每 250ms 跟着当前行重渲染，要是每行各揣一个气泡 state，手机会烫。
+   */
+  const atomIdOf = useCallback((term: string) => {
+    const id = savedRef.current.get(term);
+    // temp- 开头的是乐观更新占位，还没真落库 —— 拿它去查会 404
+    return id && !id.startsWith("temp-") ? id : undefined;
+  }, []);
+  const lookup = useWordLookup({ sourceId: source.id, atomIdOf });
+
   // 量「视频底缘」给沉浸磨砂层用（磨砂从这条线往下铺，不碰视频本体）
   const videoWrapRef = useRef<HTMLDivElement>(null);
 
@@ -1095,6 +1107,8 @@ export function WatchStage({
         onToggleTerm={toggleTerm}
         glosses={glosses}
         onRetryGloss={retryGloss}
+        onLookup={lookup.open}
+        onLookupLeave={lookup.leave}
         contentLang={source.content_lang}
         autoScan={autoScan}
         onToggleAutoScan={toggleAutoScan}
@@ -1138,10 +1152,15 @@ export function WatchStage({
         onToggleTerm={toggleTerm}
         glosses={glosses}
         onRetryGloss={retryGloss}
+        onLookup={lookup.open}
+        onLookupLeave={lookup.leave}
         contentLang={source.content_lang}
         needTargetLang={needTargetLang}
         onAnswerTarget={answerTarget}
       />
+
+      {/* M3.11：悬浮词卡。**整页只有这一个** —— 暂停面板和字幕列表共用它 */}
+      {lookup.bubble}
 
       {immersive && (
         <ImmersiveChat
