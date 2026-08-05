@@ -10,6 +10,7 @@ import { InterruptPanel, type PanelLine } from "@/components/interrupt-panel";
 import type { PausePoint } from "@/components/pause-list";
 import { PlayerControls } from "@/components/player-controls";
 import type { GlossState } from "@/components/selectable-line";
+import { ViewportLayer } from "@/components/viewport-layer";
 import { useWordLookup } from "@/components/word-lookup";
 import { DEFAULT_LANG_PREFS, type LangPrefs } from "@/lib/lang";
 import {
@@ -1123,53 +1124,64 @@ export function WatchStage({
         }}
       />
 
-      {/* 悬浮捕获球（position:fixed，挂在树里即可，位置与页面布局无关）。
-          轻点 = 记下这一刻并开面板；长按聆听的下游（真实语音）是 M3。
+      {/* 悬浮捕获球。轻点 = 记下这一刻并开面板；长按 = 进/出沉浸聊天。
           M2a：球色接上真状态 —— 灰=这一刻还没字幕，青=这一刻有字幕（D5 的双态色）。
-          判据是"盖没盖住当前播放位置"，不是"整片转完没有"。 */}
-      <CaptureOrb
-        state={orbReady ? "ready" : "pending"}
-        immersive={immersive}
-        onTap={captureNow}
-        onLongPress={immersive ? exitImmersive : enterImmersive}
-      />
+          判据是"盖没盖住当前播放位置"，不是"整片转完没有"。
 
-      <InterruptPanel
-        open={panel.open}
-        tS={panel.tS}
-        captured={panel.captured}
-        asking={ask.asking}
-        answer={ask.answer}
-        askError={ask.error}
-        onAsk={handleAsk}
-        onJustCapture={handleJustCapture}
-        onEnterImmersive={enterImmersive}
-        onClose={closePanel}
-        lines={panelLines}
-        scan={scanState}
-        drift={drift}
-        onRescan={rescan}
-        onToggleTerm={toggleTerm}
-        glosses={glosses}
-        onRetryGloss={retryGloss}
-        onLookup={lookup.open}
-        onLookupLeave={lookup.leave}
-        contentLang={source.content_lang}
-        needTargetLang={needTargetLang}
-        onAnswerTarget={answerTarget}
-      />
+          ⚠️ 原注释写的「挂在树里即可，位置与页面布局无关」是**错的** —— M3.12 片 a0
+          实测：挂在 `<main class="page-enter">` 里，`fixed` 就不再相对视口，
+          球按 `window.innerWidth` 算出来的横坐标会再叠一个 main 的左边距，
+          1280 宽上直接飞出屏幕。三层都得靠 <ViewportLayer> 搬到 body 底下。 */}
+      <ViewportLayer>
+        <CaptureOrb
+          state={orbReady ? "ready" : "pending"}
+          immersive={immersive}
+          onTap={captureNow}
+          onLongPress={immersive ? exitImmersive : enterImmersive}
+        />
+      </ViewportLayer>
 
-      {/* M3.11：悬浮词卡。**整页只有这一个** —— 暂停面板和字幕列表共用它 */}
+      <ViewportLayer>
+        <InterruptPanel
+          open={panel.open}
+          tS={panel.tS}
+          captured={panel.captured}
+          asking={ask.asking}
+          answer={ask.answer}
+          askError={ask.error}
+          onAsk={handleAsk}
+          onJustCapture={handleJustCapture}
+          onEnterImmersive={enterImmersive}
+          onClose={closePanel}
+          lines={panelLines}
+          scan={scanState}
+          drift={drift}
+          onRescan={rescan}
+          onToggleTerm={toggleTerm}
+          glosses={glosses}
+          onRetryGloss={retryGloss}
+          onLookup={lookup.open}
+          onLookupLeave={lookup.leave}
+          contentLang={source.content_lang}
+          needTargetLang={needTargetLang}
+          onAnswerTarget={answerTarget}
+        />
+      </ViewportLayer>
+
+      {/* M3.11：悬浮词卡。**整页只有这一个** —— 暂停面板和字幕列表共用它。
+          它自己就 portal 到 body（word-bubble.tsx），所以这里不用再裹一层 */}
       {lookup.bubble}
 
       {immersive && (
-        <ImmersiveChat
-          sourceId={source.id}
-          videoRef={videoWrapRef}
-          getCurrentTime={getCurrentTime}
-          pauseVideo={() => handleRef.current?.pause()}
-          onExit={exitImmersive}
-        />
+        <ViewportLayer>
+          <ImmersiveChat
+            sourceId={source.id}
+            videoRef={videoWrapRef}
+            getCurrentTime={getCurrentTime}
+            pauseVideo={() => handleRef.current?.pause()}
+            onExit={exitImmersive}
+          />
+        </ViewportLayer>
       )}
     </div>
   );

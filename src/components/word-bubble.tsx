@@ -111,11 +111,13 @@ export function WordBubble({
   const senses = data?.senses ?? [];
 
   // **必须 portal 到 body**（2026-08-04 真机反馈「这个错位了」）：
-  // `position: fixed` 只在**没有**祖先带 transform / filter / backdrop-filter 时才相对视口。
-  // 观看页的 `<main class="page-enter">` 上挂着一段 transform 动画（`animation: … both`，
-  // 填充态一直留着），于是 fixed 改从 main 的左上角算起 —— 而 main 是 `mx-auto max-w-2xl`
-  // 居中的，宽屏上左边空出几百像素，气泡就整个飘到右边去了。
-  // 只要挂在 body 底下，谁在中间加了什么滤镜都影响不到它。
+  // `position: fixed` 只在**没有**祖先带 transform / filter / backdrop-filter 时才相对视口，
+  // 而每一页的 `<main class="page-enter">` 上都挂着一段升起动画 —— 详细的实测数据和
+  // 为什么整页所有浮层都得这么干，写在 components/viewport-layer.tsx。
+  //
+  // 这里**不用** <ViewportLayer>：那一层要等挂载后才吐 portal，而气泡第一帧就要靠
+  // `boxRef` 量自己的高度来定位，晚一帧 ref 是空的。它只在交互后才出现、不参与服务端
+  // 渲染，所以就地 portal 是安全的。
   const node = (
     <div
       ref={boxRef}

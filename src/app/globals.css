@@ -155,8 +155,15 @@ select:focus-visible {
   }
 }
 
+/* ⚠️ 填充态是 `backwards`，**不许改回 `both`**（M3.12 片 a0 实测）。
+   `both` 会把收尾那帧的 `transform: none` 定格成 identity 矩阵 —— 计算值是
+   `matrix(1, 0, 0, 1, 0, 0)` 而不是 `none`，identity 矩阵照样算 transform，
+   于是 main 变成一个**永不释放**的 containing block，里面所有 `position: fixed`
+   都改从 main 的左上角算起（1280 宽上偏 304px，任何宽度上都偏一个页头的高度）。
+   这里没有 animation-delay，`backwards` 与 `both` 的观感完全一致，
+   但动画一结束计算值就回到 `none`。详见 components/viewport-layer.tsx。 */
 .page-enter {
-  animation: fermata-rise 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: fermata-rise 280ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 
 @keyframes fermata-breathe {

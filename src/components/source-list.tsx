@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ViewportLayer } from "@/components/viewport-layer";
 import { sourceOriginUrl } from "@/lib/source-origin";
 import { withFrom, type BackFrom } from "@/lib/nav";
 
@@ -303,7 +304,11 @@ export function SourceList({
         </section>
       ))}
 
+      {/* M3.12 片 a0：这张全屏动作单也栽在同一处 —— 挂在 `<main class="page-enter">` 里，
+          `fixed inset-0` 只盖得住那根 672px 的中柱，遮罩上面还露着页头，
+          底部导航（z-30）还会从遮罩上面压过去。搬到 body 底下两个毛病一起好。 */}
       {active && (
+        <ViewportLayer>
         <div
           className="fixed inset-0 z-50 flex flex-col justify-end"
           role="dialog"
@@ -366,6 +371,7 @@ export function SourceList({
             取消
           </button>
         </div>
+        </ViewportLayer>
       )}
     </>
   );
