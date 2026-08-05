@@ -36,4 +36,9 @@ export const zh = {
   "settings.lang.uiFallback": (native: string, actual: string) =>
     `界面还没有「${native}」的文案，所以现在显示的是${actual}。`,
   "settings.lang.uiFixed": (label: string) => `固定用${label}，不跟母语变。`,
+  // ⏳ **临时的，M3.9 片 f 做完要连同 en.ts 那条一起删掉。**
+  // 开关现在只改得动两块（这张卡 + 母语提示），其余界面还硬编码着中文。
+  // 片 a 拒绝提前摆这个开关的理由是「选了没反应就是骗人」——
+  // 「选了只有一部分有反应」是同一条线上浅一格，**写出来才不算骗**。
+  "settings.lang.uiPartial": "界面正在逐页搬家 —— 现在只有这一块和母语提示会跟着变。",
 } as const;

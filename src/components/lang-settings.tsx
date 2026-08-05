@@ -149,6 +149,9 @@ export function LangSettings({ prefs }: { prefs: LangPrefs }) {
               「其余语言会用英文」，2026-08-05 创始人真机反馈他换了母语、界面一直是英文，
               **看不出这是设计还是坏了** —— 看不出来就等于坏了。 */}
           <span>{uiNote}</span>
+          {/* ⏳ 临时的，M3.9 片 f 做完删掉。开关现在只改得动这张卡和母语提示，
+              其余界面还硬编码着中文 —— **写出来才不算骗**（D44）。 */}
+          <span className="text-ink-500/70">{t("settings.lang.uiPartial")}</span>
         </label>
       </div>
     </section>

@@ -33,4 +33,7 @@ export const en = {
   "settings.lang.uiFallback": (native: string, actual: string) =>
     `There's no interface copy in ${native} yet, so you're seeing ${actual}.`,
   "settings.lang.uiFixed": (label: string) => `Fixed to ${label}, regardless of your native language.`,
+  // ⏳ 临时的，M3.9 片 f 做完要连同 zh.ts 那条一起删掉
+  "settings.lang.uiPartial":
+    "The interface is still being moved over page by page — for now only this card and the native-language notice follow this setting.",
 } as const satisfies CopyDict;
