@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { PhraseCheck } from "@/components/phrase-line";
-import { SelectableLine } from "@/components/selectable-line";
+import { SelectableLine, type GlossState } from "@/components/selectable-line";
 import { langLabel } from "@/lib/lang";
 import type { PhraseItem, ScanDrift } from "@/lib/phrases/types";
 import type { TermSpan } from "@/lib/segment";
@@ -118,6 +118,9 @@ interface InterruptPanelProps {
   onRescan?: () => void;
   /** 勾 / 取消勾一个词组 */
   onToggleTerm?: (phrase: PhraseItem) => void;
+  /** M3.10：刚收下的词，解释取到哪一步了。**答案就长在他点的那一行下面** */
+  glosses?: Map<string, GlossState>;
+  onRetryGloss?: (term: string) => void;
   /** M3.10：这条内容是什么语言 —— 划词切块的 locale 用它（D42：不许假设英文） */
   contentLang?: string | null;
   /**
@@ -144,6 +147,8 @@ export function InterruptPanel({
   drift = "",
   onRescan,
   onToggleTerm,
+  glosses,
+  onRetryGloss,
   contentLang,
   needTargetLang = "",
   onAnswerTarget,
@@ -381,6 +386,8 @@ export function InterruptPanel({
                         phrase={l.phrase}
                         savedSpans={l.savedSpans}
                         onToggleTerm={onToggleTerm}
+                        glosses={glosses}
+                        onRetryGloss={onRetryGloss}
                         className="min-w-0 flex-1 text-sm leading-9 text-ink-100"
                       />
                       <PhraseCheck phrase={l.phrase} saved={l.saved} onToggle={onToggleTerm} />

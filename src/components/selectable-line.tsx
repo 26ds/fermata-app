@@ -22,6 +22,15 @@ import type { PhraseItem } from "@/lib/phrases/types";
 /** D42：文案集中在顶部，M3.9 抽语言表时只动这一处 */
 const COPY = {
   take: "收下",
+  // 真机反馈 2026-08-04：「我并没有看到中文解释，测试了很多个视频」。
+  // 探针证明解释**生成得出来**（同一句话、同一个词，Gemini 三种模式都给了中文）——
+  // 错在我只把它写进了词库那一页，**他点词的地方从头到尾什么都不说**。
+  // 他点一个词就是在问"这什么意思"，答案必须落在他手指下面
+  glossBusy: "查这个词的意思…",
+  glossFailed: "没查到意思",
+  glossRetry: "再试一次",
+  glossDismiss: "收起",
+  saved: "已收进词库",
   // **动词必须排在最前面**：第一版是「〔词〕已在词库 · 去掉」，划了一长段之后按钮被
   // 截断成「〔about machine learning is t…」—— 这句话到底让人干什么，全被吃掉了。
   // 选中的原文就在正上方高亮着，不必在按钮里再抄一遍
@@ -30,6 +39,12 @@ const COPY = {
   hint: "再点一个词 = 选中中间整段",
   word: (t: string) => `选中「${t}」`,
 };
+
+/** 一个刚收下的词，它的解释取到哪一步了 */
+export interface GlossState {
+  status: "busy" | "ready" | "failed";
+  text: string;
+}
 
 export interface SelectableLineProps {
   /** 这一行的原文 */
@@ -44,8 +59,12 @@ export interface SelectableLineProps {
   phrase?: PhraseItem;
   /** 这一行里已经在词库里的那些词的位置（父组件用 `findTerms` 算好传进来） */
   savedSpans?: TermSpan[];
-  /** 收下 / 去掉一段。手动划的会现造一个 `PhraseItem`（`gloss` 先留空，片 d 后台补） */
+  /** 收下 / 去掉一段。手动划的会现造一个 `PhraseItem`（`gloss` 先留空，后台补） */
   onToggleTerm?: (phrase: PhraseItem) => void;
+  /** 刚收下的那些词，解释取到哪一步了（`词 → 状态`）。父组件管，两个入口共用一份 */
+  glosses?: Map<string, GlossState>;
+  /** 没取到时人点的重试。**代码永远不自动重试**（D44：花钱只由人点） */
+  onRetryGloss?: (term: string) => void;
   /** 关掉划词。字幕列表里"点一行跳到那一秒"要用（两个手势不能同时在一行上） */
   canSelect?: boolean;
   className?: string;
@@ -60,12 +79,16 @@ export function SelectableLine({
   phrase,
   savedSpans = [],
   onToggleTerm,
+  glosses,
+  onRetryGloss,
   canSelect = true,
   className,
   style,
 }: SelectableLineProps) {
   /** `[锚点, 另一头]`。第一次点只有锚点，此时两头相同 = 只选中那一个词 */
   const [sel, setSel] = useState<{ anchor: number; other: number } | null>(null);
+  /** 刚收下的那个词 —— 它的解释就长在这一行下面。收起 = 置空 */
+  const [answer, setAnswer] = useState<string>("");
 
   // 切块只在行文本（或语言）变了时重算。**字幕层是 250ms 的热路径，绝不能每帧重切**
   const { blocks, mode } = useMemo(() => segmentLine(text, contentLang), [text, contentLang]);
@@ -76,6 +99,7 @@ export function SelectableLine({
   if (seen.text !== text || seen.canSelect !== canSelect) {
     setSeen({ text, canSelect });
     if (sel) setSel(null);
+    if (answer) setAnswer("");
   }
 
   const lo = sel ? Math.min(sel.anchor, sel.other) : -1;
@@ -121,6 +145,9 @@ export function SelectableLine({
     // 于是唯一的"收进去了"的反馈被自己挡住了。退出来他才看得见那一段变了色。
     // 反悔也不难：再点那个词，整段会被重新选中，按钮那时写的是「去掉」
     setSel(null);
+    // 收下（不是去掉）之后，**解释就长在这一行下面** —— 他点这个词就是在问它什么意思，
+    // 让他跑去另一页才看得到答案，等于没回答
+    setAnswer(pickedSaved ? "" : picked.text);
   };
 
   const pickedSaved = picked ? savedSpans.some((s) => s.term === picked.text) : false;
@@ -228,6 +255,54 @@ export function SelectableLine({
       )}
       {picked && onToggleTerm && lo === hi && (
         <p className="mt-1 text-[0.68rem] leading-4 text-ink-500">{COPY.hint}</p>
+      )}
+
+      {/* 刚收下的那个词的解释，**就长在这一行下面**（D18：不做浮层）。
+          三种状态各说各的（D44）：在查 / 查到了 / 没查到 + 一个人点的重试。
+          空着不说话是这次真机反馈的原病根 —— 他连"我在查"都看不到 */}
+      {answer && glosses?.get(answer) && (
+        <div className="pointer-events-auto relative z-10 mt-1.5 rounded-xl border border-teal-400/40 bg-ink-900/70 px-2.5 py-1.5">
+          <p className="flex items-start gap-1.5 text-[0.72rem] leading-5">
+            <span className="shrink-0 text-teal-300">✓</span>
+            <span className="min-w-0 flex-1 text-ink-100">
+              <span className="font-semibold">{answer}</span>
+              <span className="text-ink-500"> · </span>
+              {glosses.get(answer)!.status === "ready" ? (
+                glosses.get(answer)!.text
+              ) : (
+                <span className="text-ink-500">
+                  {glosses.get(answer)!.status === "busy" ? COPY.glossBusy : COPY.glossFailed}
+                </span>
+              )}
+            </span>
+          </p>
+          <div className="mt-1 flex items-center gap-2">
+            <span className="text-[0.66rem] text-ink-500">{COPY.saved}</span>
+            <span className="flex-1" />
+            {glosses.get(answer)!.status === "failed" && onRetryGloss && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRetryGloss(answer);
+                }}
+                className="min-h-7 shrink-0 rounded-lg border border-teal-400/50 px-2 text-[0.66rem] text-teal-300"
+              >
+                {COPY.glossRetry}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setAnswer("");
+              }}
+              className="min-h-7 shrink-0 rounded-lg px-2 text-[0.66rem] text-ink-500 hover:text-teal-300"
+            >
+              {COPY.glossDismiss}
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

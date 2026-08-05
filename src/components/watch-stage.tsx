@@ -9,6 +9,7 @@ import { ImmersiveChat } from "@/components/immersive-chat";
 import { InterruptPanel, type PanelLine } from "@/components/interrupt-panel";
 import type { PausePoint } from "@/components/pause-list";
 import { PlayerControls } from "@/components/player-controls";
+import type { GlossState } from "@/components/selectable-line";
 import { DEFAULT_LANG_PREFS, type LangPrefs } from "@/lib/lang";
 import {
   isPhraseScan,
@@ -175,6 +176,8 @@ export function WatchStage({
   );
   const scanTriedRef = useRef(false);
   const scanRunningRef = useRef(false);
+  /** 刚收下的词，解释取到哪一步了（`词 → 状态`）。只活在这一次观看里，不落库 */
+  const [glosses, setGlosses] = useState<Map<string, GlossState>>(() => new Map());
   const savedRef = useRef(savedMap);
   useEffect(() => {
     savedRef.current = savedMap;
@@ -382,11 +385,48 @@ export function WatchStage({
    * 勾 / 取消勾一个词组。乐观更新 —— 打勾要立刻有反应，落库慢一拍不该让人等。
    * 失败就回滚，别让一个假的实心勾骗人说"已经收进去了"。
    */
+  /**
+   * 去要一句解释，并把「在查 / 查到了 / 没查到」如实挂在界面上。
+   *
+   * 2026-08-04 真机反馈的病根就在这儿：上一版是 `void fetch(...).catch(() => {})` ——
+   * **成功也不说、失败也不说**，他点完词只看见一片安静，自然会以为"这功能没做"。
+   * 探针证明解释本来就生成得出来，错的是没人把它端到他眼前。
+   */
+  const fetchGloss = useCallback(async (term: string, atomId: string) => {
+    setGlosses((prev) => new Map(prev).set(term, { status: "busy", text: "" }));
+    try {
+      const res = await fetch(`/api/atoms/${atomId}/gloss`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      const gloss = typeof body?.atom?.gloss === "string" ? body.atom.gloss : "";
+      if (!res.ok || !gloss) throw new Error("no gloss");
+      setGlosses((prev) => new Map(prev).set(term, { status: "ready", text: gloss }));
+    } catch {
+      setGlosses((prev) => new Map(prev).set(term, { status: "failed", text: "" }));
+    }
+  }, []);
+
+  /** 没查到时人点的重试。**代码永远不自动重来**（D44：花钱只由人点） */
+  const retryGloss = useCallback(
+    (term: string) => {
+      const atomId = savedRef.current.get(term);
+      if (!atomId || atomId.startsWith("temp-")) return;
+      void fetchGloss(term, atomId);
+    },
+    [fetchGloss],
+  );
+
   const toggleTerm = useCallback(
     async (phrase: PhraseItem) => {
       const existingId = savedRef.current.get(phrase.text);
       if (existingId) {
         setSavedMap((prev) => {
+          const next = new Map(prev);
+          next.delete(phrase.text);
+          return next;
+        });
+        // 词都去掉了，那条解释也别再挂在字幕下面
+        setGlosses((prev) => {
+          if (!prev.has(phrase.text)) return prev;
           const next = new Map(prev);
           next.delete(phrase.text);
           return next;
@@ -402,6 +442,12 @@ export function WatchStage({
 
       const temp = `temp-${Date.now()}`;
       setSavedMap((prev) => new Map(prev).set(phrase.text, temp));
+      // **立刻挂上「在查」**，别等落库那一趟回来才开口。手动划的词从点下去到
+      // atom 存成有小半秒，那半秒里界面一声不吭 —— 而"一声不吭"正是 2026-08-04
+      // 真机反馈的病根（他的原话：「我并没有看到中文解释」）
+      if (!phrase.gloss) {
+        setGlosses((prev) => new Map(prev).set(phrase.text, { status: "busy", text: "" }));
+      }
       try {
         const res = await fetch("/api/atoms", {
           method: "POST",
@@ -421,13 +467,18 @@ export function WatchStage({
 
         // M3.10 / D45：手动划下来的没有解释（AI 标的是扫描时顺手生成的）。
         // **先存后补**：词已经在库里了，这一步只是给它补一句话。
-        // 失败了这里**故意不弹任何东西** —— 他正在看视频，为一句注释盖一层报错
-        // 是喧宾夺主。留白落在词库那一页：那条会写「解释还没取到」并给一个「再试一次」，
-        // 由人来点（D44：花钱的重试只能人点，代码永不自动重来）
+        // 三种结局都会如实挂在他刚点的那一行下面（D44），花钱的重试只由人点。
         // `existed` = 这条词库里本来就有（`POST /api/atoms` 的去重）。
         // 那就别再要一次解释了 —— 这一步花钱，只该为**新收进来的**那条花
         if (!phrase.gloss && body.existed !== true) {
-          void fetch(`/api/atoms/${body.atom.id}/gloss`, { method: "POST" }).catch(() => {});
+          void fetchGloss(phrase.text, String(body.atom.id));
+        } else {
+          setGlosses((prev) => {
+            if (!prev.has(phrase.text)) return prev;
+            const next = new Map(prev);
+            next.delete(phrase.text);
+            return next;
+          });
         }
       } catch {
         setSavedMap((prev) => {
@@ -435,9 +486,16 @@ export function WatchStage({
           if (next.get(phrase.text) === temp) next.delete(phrase.text);
           return next;
         });
+        // 词根本没存进去，那条「在查…」不能一直转下去
+        setGlosses((prev) => {
+          if (!prev.has(phrase.text)) return prev;
+          const next = new Map(prev);
+          next.delete(phrase.text);
+          return next;
+        });
       }
     },
-    [source.id],
+    [source.id, fetchGloss],
   );
 
   const postInterrupt = useCallback(
@@ -1035,6 +1093,8 @@ export function WatchStage({
         highlights={highlights}
         savedTerms={savedTerms}
         onToggleTerm={toggleTerm}
+        glosses={glosses}
+        onRetryGloss={retryGloss}
         contentLang={source.content_lang}
         autoScan={autoScan}
         onToggleAutoScan={toggleAutoScan}
@@ -1076,6 +1136,8 @@ export function WatchStage({
         drift={drift}
         onRescan={rescan}
         onToggleTerm={toggleTerm}
+        glosses={glosses}
+        onRetryGloss={retryGloss}
         contentLang={source.content_lang}
         needTargetLang={needTargetLang}
         onAnswerTarget={answerTarget}

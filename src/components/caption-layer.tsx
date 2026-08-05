@@ -12,7 +12,7 @@ import {
 import { useRouter } from "next/navigation";
 import { activeSegmentIndex, parseTranscript } from "@/lib/captions";
 import { PhraseCheck } from "@/components/phrase-line";
-import { SelectableLine } from "@/components/selectable-line";
+import { SelectableLine, type GlossState } from "@/components/selectable-line";
 import { Toggle } from "@/components/toggle";
 import type { PhraseItem } from "@/lib/phrases/types";
 import { findTerms, type TermSpan } from "@/lib/segment";
@@ -103,6 +103,9 @@ interface CaptionLayerProps {
   /** 已经收进词库的词组原文 —— 决定高亮是实心还是虚线 */
   savedTerms?: Set<string>;
   onToggleTerm?: (phrase: PhraseItem) => void;
+  /** M3.10：刚收下的词，解释取到哪一步了。**答案就长在他点的那一行下面** */
+  glosses?: Map<string, GlossState>;
+  onRetryGloss?: (term: string) => void;
   /** M3.10 / D42：这条内容是什么语言。划词切块的 locale 用它，**不许假设英文** */
   contentLang?: string | null;
   /**
@@ -127,6 +130,8 @@ export function CaptionLayer({
   highlights,
   savedTerms,
   onToggleTerm,
+  glosses,
+  onRetryGloss,
   contentLang,
   autoScan = false,
   onToggleAutoScan,
@@ -683,6 +688,8 @@ export function CaptionLayer({
                     phrase={phrase}
                     savedSpans={savedSpansByLine.get(i)}
                     onToggleTerm={onToggleTerm}
+                    glosses={glosses}
+                    onRetryGloss={onRetryGloss}
                     className={flip && lineShowsTr ? "opacity-65" : undefined}
                     style={
                       flip && lineShowsTr
