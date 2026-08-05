@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useCopy } from "@/components/copy-provider";
-import { UI_LOCALES } from "@/lib/copy";
-import { langLabel, type LangPrefs } from "@/lib/lang";
+import { UI_LOCALES, resolveUiLocale } from "@/lib/copy";
+import { langLabel, normalizeLang, type LangPrefs } from "@/lib/lang";
 import { putSettings } from "@/lib/settings-client";
 import { TARGET_LANGS } from "@/lib/translate/langs";
 
@@ -39,6 +39,20 @@ export function LangSettings({ prefs }: { prefs: LangPrefs }) {
   const [targetLang, setTargetLang] = useState<string>(prefs.targetLang ?? UNSET);
   const [uiLang, setUiLang] = useState(prefs.uiLang);
   const [saved, setSaved] = useState(false);
+
+  // 界面语言现在到底落在哪一档 —— 三种，各说各的（D44：不许合并成一句笼统的）。
+  // 用**当前选中的值**算，不等服务端回来：选完立刻就该看见这句话变，
+  // 而"整个界面跟着变"要等一趟往返，两者差的那半秒正是最容易让人以为坏了的时候。
+  const uiNote = (() => {
+    if (uiLang) return t("settings.lang.uiFixed", langLabel(resolveUiLocale(uiLang)));
+    if (!nativeLang) return t("settings.lang.uiHint"); // 母语还没探到，没什么可说的
+    const actual = resolveUiLocale(nativeLang);
+    // **必须比精确码，不能比"能不能匹配上"**：母语「繁體中文」是能匹配到简体的，
+    // 但那时界面是简体不是繁体 —— 说成"跟着母语走"就是撒谎。这正是创始人撞到的那一格。
+    return normalizeLang(nativeLang) === actual
+      ? t("settings.lang.uiFollow", langLabel(actual))
+      : t("settings.lang.uiFallback", langLabel(nativeLang), langLabel(actual));
+  })();
 
   const save = (patch: Record<string, unknown>) => {
     setSaved(false);
@@ -131,7 +145,10 @@ export function LangSettings({ prefs }: { prefs: LangPrefs }) {
               </option>
             ))}
           </select>
-          <span>{t("settings.lang.uiHint")}</span>
+          {/* D44：**当场说清楚现在落到了哪一种**。原来这里是一句笼统的
+              「其余语言会用英文」，2026-08-05 创始人真机反馈他换了母语、界面一直是英文，
+              **看不出这是设计还是坏了** —— 看不出来就等于坏了。 */}
+          <span>{uiNote}</span>
         </label>
       </div>
     </section>

@@ -43,29 +43,56 @@ function primaryOf(code: string): string {
 }
 
 /**
- * 这门语言能不能落到一套我们真有的文案上。**落不上就返回 null，不硬猜**
+ * 在给定的一池语言里找最接近的。**落不上就返回 null，不硬猜**
  * —— 调用方（如 Accept-Language 那串）要靠 null 决定继不继续往下试。
  *
- * 两级：先精确码（`zh-Hant` → 繁体覆盖层），再主子标签（`en-GB` → `en`）。
+ * 两级：先精确码，再主子标签（`en-GB` → `en`；`zh-Hant` 在只有简体的池子里 → `zh-Hans`）。
  * `normalizeLang` 已经把 `zh` / `zh-CN` 收成 `zh-Hans`、把 `en-US` 削成 `en`（D42）。
  */
-export function matchUiLocale(raw: string | null | undefined): string | null {
+function matchIn(pool: readonly string[], raw: string | null | undefined): string | null {
   const n = normalizeLang(raw);
   if (!n) return null;
-  if (DICTS[n]) return n;
+  if (pool.includes(n)) return n;
   const p = primaryOf(n);
-  const byPrimary = Object.keys(DICTS).find((k) => primaryOf(k) === p);
-  return byPrimary ?? null;
+  return pool.find((k) => primaryOf(k) === p) ?? null;
 }
 
-/** 同上，但一定给一个答案（落不上就英文）。渲染时用这个 */
+const COPY_LOCALES = Object.keys(DICTS);
+
+/**
+ * **界面**用哪门语言。池子只有 `UI_LOCALES`（有整套人工文案的那两种）。
+ *
+ * ⚠️ **和下面那个 `matchCopyLocale` 差在哪，为什么必须分开** —— 这是 2026-08-05
+ * 创始人真机上撞出来的洞：繁体只是**覆盖层**（三句话），不是一套界面文案。
+ * 早先两者共用一个池子，于是「母语选繁體中文 + 界面跟着母语」会解析成 `zh-Hant`，
+ * 界面变成**三句繁体 + 其余全是简体的混合体** —— 那正是我在 zh-hant.ts 的注释里
+ * 白纸黑字说"比不给这个选项更糟"的东西，我却只在选择器那一头堵了，
+ * **忘了母语选择器是另一条能通到同一处的路**。
+ * 现在界面这条路只认完整的两套，繁体母语 → 界面用简体（整套简体，不混）。
+ */
+export function matchUiLocale(raw: string | null | undefined): string | null {
+  return matchIn(UI_LOCALES, raw);
+}
+
+/** 同上，但一定给一个答案（落不上就英文）。**决定整个界面用什么语言时用这个** */
 export function resolveUiLocale(raw: string | null | undefined): string {
   return matchUiLocale(raw) ?? FALLBACK_UI_LOCALE;
 }
 
+/**
+ * **某一句话**该用哪门语言 —— 池子包含覆盖层（繁体在内）。
+ *
+ * 只给"这句话必须用某门指定语言说"的场合用，全站目前只有一处：
+ * 母语猜测横幅（它要用**猜出来的那门母语**说，见 lang-guess-banner.tsx）。
+ * **别拿它决定整个界面用什么语言** —— 那就是上面说的那个洞。
+ */
+export function resolveCopyLocale(raw: string | null | undefined): string {
+  return matchIn(COPY_LOCALES, raw) ?? FALLBACK_UI_LOCALE;
+}
+
 /** 取一整份文案表。认不出的语言落英文 —— **永远不会露出 key** */
 export function getCopy(lang: string | null | undefined): CopyDict {
-  return DICTS[resolveUiLocale(lang)]!;
+  return DICTS[resolveCopyLocale(lang)]!;
 }
 
 /** `t` 的类型。组件里想把它往下传时标这个 */

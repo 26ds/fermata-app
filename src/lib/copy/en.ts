@@ -28,6 +28,9 @@ export const en = {
   "settings.lang.targetNone": "Not learning a language — just here for the content",
   "settings.lang.ui": "Interface language",
   "settings.lang.uiFollowNative": "Follow my native language",
-  "settings.lang.uiHint":
-    "The interface is hand-written in Simplified Chinese and English only. Any other native language falls back to English.",
+  "settings.lang.uiHint": "The interface is hand-written in Simplified Chinese and English only.",
+  "settings.lang.uiFollow": (label: string) => `Following your native language — currently ${label}.`,
+  "settings.lang.uiFallback": (native: string, actual: string) =>
+    `There's no interface copy in ${native} yet, so you're seeing ${actual}.`,
+  "settings.lang.uiFixed": (label: string) => `Fixed to ${label}, regardless of your native language.`,
 } as const satisfies CopyDict;

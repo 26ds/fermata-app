@@ -28,5 +28,12 @@ export const zh = {
   "settings.lang.targetNone": "不学语言，只想搞懂内容",
   "settings.lang.ui": "界面语言",
   "settings.lang.uiFollowNative": "跟着我的母语",
-  "settings.lang.uiHint": "界面暂时只有简体中文和英文两套人工写的文案。母语是别的语言时，界面会用英文。",
+  "settings.lang.uiHint": "界面暂时只有简体中文和英文两套人工写的文案。",
+  // 下面三条是 D44 的落地：**当场说清楚现在落到了哪一种**，而不是笼统写一句
+  // 「其余语言会用英文」。2026-08-05 创始人真机反馈：他把母语换成别的语言，
+  // 界面一直是英文，**看不出这是设计还是坏了** —— 那就等于坏了。
+  "settings.lang.uiFollow": (label: string) => `跟着母语走，现在是${label}。`,
+  "settings.lang.uiFallback": (native: string, actual: string) =>
+    `界面还没有「${native}」的文案，所以现在显示的是${actual}。`,
+  "settings.lang.uiFixed": (label: string) => `固定用${label}，不跟母语变。`,
 } as const;
