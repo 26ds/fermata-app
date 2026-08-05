@@ -32,7 +32,9 @@ import { TARGET_LANGS } from "@/lib/translate/langs";
  * （这个文件里还有大量早于 D42 的散装中文，那是 M3.9 片 c「只搬家」要处理的，不在本片。）
  */
 const COPY = {
-  pickHint: "点字幕里的词就能收进词库 · 点行首的时间戳跳到那一句",
+  // 创始人 2026-08-04 指名要加「收进词库才能查看意思」——
+  // 悬浮在没收过的词上是没反应的，不说出口就像功能坏了
+  pickHint: "点词收进词库（收进后悬浮或长按可查意思）· 点行首时间戳跳到那一句",
 };
 
 const SIZE_KEY = "fermata.captions.size";

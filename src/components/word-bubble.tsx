@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Lookup } from "@/lib/senses/types";
 
 // M3.11 悬浮词卡 —— 从那个词上"长出来"的玻璃对话框（创始人 2026-08-04 指定的形状）。
@@ -109,7 +110,13 @@ export function WordBubble({
 
   const senses = data?.senses ?? [];
 
-  return (
+  // **必须 portal 到 body**（2026-08-04 真机反馈「这个错位了」）：
+  // `position: fixed` 只在**没有**祖先带 transform / filter / backdrop-filter 时才相对视口。
+  // 观看页的 `<main class="page-enter">` 上挂着一段 transform 动画（`animation: … both`，
+  // 填充态一直留着），于是 fixed 改从 main 的左上角算起 —— 而 main 是 `mx-auto max-w-2xl`
+  // 居中的，宽屏上左边空出几百像素，气泡就整个飘到右边去了。
+  // 只要挂在 body 底下，谁在中间加了什么滤镜都影响不到它。
+  const node = (
     <div
       ref={boxRef}
       role="tooltip"
@@ -117,7 +124,7 @@ export function WordBubble({
       onPointerLeave={onPointerLeave}
       // z-[70]：盖得过暂停面板（z-60）和悬浮球（z-50）。
       // invisible 而不是 hidden：第一帧要能量到高度，但不许让人看见它在错的地方
-      className={`glass fixed z-[70] rounded-2xl px-3 py-2.5 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.7)] ${
+      className={`glass-card fixed z-[70] rounded-2xl px-3 py-2.5 ${
         pos ? "" : "invisible"
       }`}
       style={{
@@ -135,7 +142,7 @@ export function WordBubble({
           // **只留朝外的那两条边**：转 45° 的方块四条边都描出来，看着就是一颗贴上去的菱形；
           // 只留外侧两条，它才接得上气泡本身那圈描边，像是同一个形状伸出来的一角。
           // 气泡在词上面 → 尖角朝下（外侧 = 右、下）；翻到词下面 → 尖角朝上（外侧 = 左、上）
-          className="glass absolute h-3 w-3 rotate-45 rounded-[3px]"
+          className="glass-tail absolute h-3 w-3 rotate-45 rounded-[3px]"
           style={{
             left: pos.tail - 6,
             // -5 而不是 -6：往回缩 1px 压住气泡自己那条边，接缝才看不出来
@@ -236,4 +243,8 @@ export function WordBubble({
       </div>
     </div>
   );
+
+  // SSR 那一帧没有 document —— 这个组件只在用户悬浮/长按之后才挂载，
+  // 走不到服务端，但仍然守一道，免得将来被搬到别处时炸掉
+  return typeof document === "undefined" ? node : createPortal(node, document.body);
 }

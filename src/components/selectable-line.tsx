@@ -36,7 +36,7 @@ const COPY = {
   // 选中的原文就在正上方高亮着，不必在按钮里再抄一遍
   drop: "已在词库 · 去掉",
   cancel: "取消",
-  hint: "再点一个词 = 选中中间整段",
+  hint: "再点一个词，就一直选到那儿",
   word: (t: string) => `选中「${t}」`,
 };
 
@@ -94,8 +94,15 @@ export function SelectableLine({
   className,
   style,
 }: SelectableLineProps) {
-  /** `[锚点, 另一头]`。第一次点只有锚点，此时两头相同 = 只选中那一个词 */
-  const [sel, setSel] = useState<{ anchor: number; other: number } | null>(null);
+  /**
+   * 选中的区间 `[lo, hi]`（含两端）。第一次点两头相同 = 只选中那一个词。
+   *
+   * **2026-08-04 真机反馈后改过一次**：原来记的是「锚点 + 另一头」，
+   * 于是选好 "time back" 之后再点前面的 "So"，区间会以锚点为轴翻过去，
+   * **把已经选中的 "back" 甩出去**（创始人：「点击了一个词只包括了前面的
+   * 就不能包括后面的？这感觉不太人性化」）。现在改成**只会长不会缩**。
+   */
+  const [sel, setSel] = useState<{ lo: number; hi: number } | null>(null);
   /** 刚收下的那个词 —— 它的解释就长在这一行下面。收起 = 置空 */
   const [answer, setAnswer] = useState<string>("");
 
@@ -111,9 +118,9 @@ export function SelectableLine({
     if (answer) setAnswer("");
   }
 
-  const lo = sel ? Math.min(sel.anchor, sel.other) : -1;
-  const hi = sel ? Math.max(sel.anchor, sel.other) : -1;
-  const picked = sel ? spanOf(text, blocks, sel.anchor, sel.other) : null;
+  const lo = sel ? sel.lo : -1;
+  const hi = sel ? sel.hi : -1;
+  const picked = sel ? spanOf(text, blocks, sel.lo, sel.hi) : null;
 
   // AI 标的那一段也当成"一段已知的区间"来画 —— 和手动收的走同一套上色逻辑，
   // 于是用户看到的只有两种状态：**这个我收了 / 这个被建议了**，没有"来源"这种概念
@@ -152,12 +159,17 @@ export function SelectableLine({
 
   const tapBlock = (k: number) => {
     setSel((prev) => {
-      if (prev) return { anchor: prev.anchor, other: k };
+      // **已经在选了 → 只往外长，绝不甩掉已经选中的东西。**
+      // 点左边就往左伸，点右边就往右伸，点区间里面则什么都不变（本来就选着）。
+      // 想缩回去只有一条路：「取消」重来 —— 一个只会长的规则是可预期的，
+      // 而"以锚点为轴翻过去"看起来就像随机丢词（创始人真机撞到的正是这个）。
+      if (prev) return { lo: Math.min(prev.lo, k), hi: Math.max(prev.hi, k) };
+
       // 点在一个**已经成段**的词上（已收的 / AI 标的）→ 直接整段选中，
       // 而不是只选中被点的那一个词。否则"点一下已收的词想去掉它"会变成
       // "把里面的一个词又单独收一遍"，词库里立刻多出一条重复的
       const known = knownAt(blocks[k].start, blocks[k].end);
-      if (!known) return { anchor: k, other: k };
+      if (!known) return { lo: k, hi: k };
       let a = k;
       let b = k;
       for (let j = 0; j < blocks.length; j++) {
@@ -166,7 +178,7 @@ export function SelectableLine({
           if (j > b) b = j;
         }
       }
-      return { anchor: a, other: b };
+      return { lo: a, hi: b };
     });
   };
 

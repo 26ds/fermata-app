@@ -202,6 +202,58 @@ select:focus-visible {
   }
 }
 
+/* ── M3.11 词卡的玻璃 ──
+   创始人 2026-08-04 看了第一版：「**你并没有做出玻璃材质，要那种透明玻璃的像苹果的**」。
+   和 `.glass` 差在三处，缺一不可：
+     ① **底色更透**（34% 而不是 62%）—— 62% 在深色页面上基本等于一块实心灰板；
+     ② **饱和 + 提亮**：苹果那层玻璃会把背后的颜色吸上来一点，纯 blur 做不出这个；
+     ③ **顶部一道高光边**（inset 那条 + 斜向渐变）—— 玻璃的"厚度"全靠这道高光，
+        没有它，再透也只是一层雾。 */
+.glass-card {
+  backdrop-filter: blur(30px) saturate(190%) brightness(1.1);
+  -webkit-backdrop-filter: blur(30px) saturate(190%) brightness(1.1);
+  background:
+    linear-gradient(
+      152deg,
+      color-mix(in srgb, var(--color-ink-100) 13%, transparent),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--color-ink-900) 34%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-ink-100) 24%, transparent);
+  box-shadow:
+    0 14px 40px -14px rgba(0, 0, 0, 0.78),
+    inset 0 1px 0 0 color-mix(in srgb, var(--color-ink-100) 28%, transparent);
+}
+
+/* 尖角要和卡片同一块玻璃，但**不能带那道斜向渐变** —— 一个 12px 的小方块上
+   再来一层渐变，看着就是另一种材质贴上去的。只留底色 + 描边。 */
+.glass-tail {
+  backdrop-filter: blur(30px) saturate(190%) brightness(1.1);
+  -webkit-backdrop-filter: blur(30px) saturate(190%) brightness(1.1);
+  background: color-mix(in srgb, var(--color-ink-900) 34%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-ink-100) 24%, transparent);
+}
+
+/* 用户在系统里开了「减弱透明度」时**照办**（无障碍设置，该守）。
+   但仍然留住那道高光边和描边 —— 不透是一回事，长得像一块灰板子是另一回事。 */
+@media (prefers-reduced-transparency: reduce) {
+  .glass-card,
+  .glass-tail {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--color-ink-700);
+  }
+  .glass-card {
+    background:
+      linear-gradient(
+        152deg,
+        color-mix(in srgb, var(--color-ink-100) 9%, transparent),
+        transparent 46%
+      ),
+      var(--color-ink-700);
+  }
+}
+
 /* ══════════════════════════════════════════════════════════════
    M3 Phase-2 长问答沉浸聊天（design/long-qa-immersive-chat.md）
    —— 整屏磨砂 + 整页流光边 + Apple Music 歌词式文字流 + Siri 位圆球。
