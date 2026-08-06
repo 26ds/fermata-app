@@ -195,8 +195,54 @@ export function WatchStage({
   }, []);
   const lookup = useWordLookup({ sourceId: source.id, atomIdOf });
 
-  // 量「视频底缘」给沉浸磨砂层用（磨砂从这条线往下铺，不碰视频本体）
   const videoWrapRef = useRef<HTMLDivElement>(null);
+
+  // ── 台面底缘：沉浸磨砂层和暂停面板的上边缘，两个浮层共用同一个值（所以只量一次） ──
+  //
+  // **只允许落在两条「缝」上，中间一律不许**：
+  //   ① 状态卡下边缘（默认）—— 时间进度 / 倍速 / ±N 秒全露在外面，照常能点
+  //   ② 视频下边缘（窗口太矮时的退路）—— 整张状态卡被盖住，但**不切开任何一个控件**
+  // 落在两条缝之间就是 2026-08-05 创始人截图里那个样子：±10 秒那排按钮被切成两半。
+  //
+  // 为什么默认留整张卡而不是只留时间（他本人拍的板）：**沉浸聊天里 ±N 秒是真有用的** ——
+  // `atS` 在按发送那一刻才取播放头（immersive-chat.tsx 的 send），跳完再问，
+  // AI 换的就是那一段的字幕。按钮够不着，这条路等于不存在。
+  //
+  // ⚠️ 原来磨砂层锚的是**视频底缘**，状态卡整个被盖住；而磨砂顶上那 34px 是透明过渡带
+  // （design §4），状态卡正好从带子里透出来、和歌词流第一行叠在一起 —— 那就是他看到的"乱"。
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [layerTop, setLayerTop] = useState(0);
+  useEffect(() => {
+    // 退到缝②的门槛：留给浮层的高度低于这个数就不值当了（1280×620 上按缝① 只剩 93px）。
+    // 300 是量出来的：他那台 1512×859 按缝① 还有 332px，够，不会被这条退路误伤。
+    const MIN_LAYER_H = 300;
+    const measure = () => {
+      const card = stageRef.current?.getBoundingClientRect();
+      const video = videoWrapRef.current?.getBoundingClientRect();
+      if (!card) return;
+      const vh = window.innerHeight;
+      const seamCard = Math.max(0, Math.round(card.bottom));
+      const seamVideo = video ? Math.max(0, Math.round(video.bottom)) : seamCard;
+      const seam = vh - seamCard >= MIN_LAYER_H ? seamCard : seamVideo;
+      // 兜底：**手机横屏（844×390）连视频本身都比窗口高**，两条缝全在屏幕外面，
+      // 不夹一下浮层高度会算成负数 —— 面板当场变 0 高、完全看不见。
+      // 到这一步只能认了盖住一部分视频（D18 让位），但**看不见的面板比盖住的面板更糟**。
+      setLayerTop(Math.min(seam, Math.max(0, vh - 160)));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (stageRef.current) ro.observe(stageRef.current);
+    window.addEventListener("resize", measure);
+    // 播放器加载 / 手机地址栏收放都会引起回流，兜底轮询一小会儿
+    const t = window.setInterval(measure, 400);
+    const stop = window.setTimeout(() => window.clearInterval(t), 4000);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.clearInterval(t);
+      window.clearTimeout(stop);
+    };
+  }, []);
 
   // 服务端数据变了（router.refresh 之后）就跟着换。渲染期校正，不用 effect
   const [seen, setSeen] = useState(interrupts);
@@ -1039,7 +1085,8 @@ export function WatchStage({
         />
       </div>
 
-      <div className="rounded-2xl border border-ink-700 px-4 py-2.5">
+      {/* 状态卡。它的下边缘就是「台面底缘」—— 沉浸磨砂层和暂停面板都锚在这儿 */}
+      <div ref={stageRef} className="rounded-2xl border border-ink-700 px-4 py-2.5">
         <div className="flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <span
@@ -1144,6 +1191,7 @@ export function WatchStage({
       <ViewportLayer>
         <InterruptPanel
           open={panel.open}
+          stageBottom={layerTop}
           tS={panel.tS}
           captured={panel.captured}
           asking={ask.asking}
@@ -1176,7 +1224,7 @@ export function WatchStage({
         <ViewportLayer>
           <ImmersiveChat
             sourceId={source.id}
-            videoRef={videoWrapRef}
+            stageBottom={layerTop}
             getCurrentTime={getCurrentTime}
             pauseVideo={() => handleRef.current?.pause()}
             onExit={exitImmersive}

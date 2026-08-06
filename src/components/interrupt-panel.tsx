@@ -84,6 +84,15 @@ export interface PanelLine {
 
 interface InterruptPanelProps {
   open: boolean;
+  /**
+   * 台面底缘（视口坐标 px）—— 面板再高也不许长过这条线。由 WatchStage 量好传进来。
+   *
+   * 2026-08-05 创始人真机反馈加的：原来只写死 `max-h-[50dvh]`，在**高窗口**上
+   * （桌面 Safari 约 1000px 高）50dvh 那条线正好落在 ±N 秒那排按钮中间，
+   * **把按钮切成两半**。手机上碰巧躲开了（390×844 上 50dvh 已经在状态卡下面），
+   * 所以一直没发现 —— 它一直是"在小屏上恰好没露馅"，不是"对的"。
+   */
+  stageBottom: number;
   /** 这一刻是第几秒 */
   tS: number;
   /** 这一刻是否已经落库：点球触发 = 已记下；暂停触发 = 还没 */
@@ -138,6 +147,7 @@ interface InterruptPanelProps {
 
 export function InterruptPanel({
   open,
+  stageBottom,
   tS,
   captured,
   asking,
@@ -210,6 +220,10 @@ export function InterruptPanel({
   }, [answer]);
 
   if (!open) return null;
+
+  // D18 那条「最多占屏幕下半」还在（50dvh），但再加一条**硬的**：上边缘不许越过台面底缘。
+  // 谁小听谁的。stageBottom 还没量到时退回 100dvh，min() 自然落回原来的 50dvh。
+  const panelMaxH = `min(50dvh, calc(100dvh - ${Math.max(0, stageBottom)}px))`;
 
   const submit = (q: string) => {
     const question = q.trim();
@@ -293,11 +307,12 @@ export function InterruptPanel({
   return (
     // D18：**最多占屏幕下半，绝不遮住视频**（没有全屏遮罩）。抓手 / 取消 / Esc 三个入口关闭。
     // z-60：盖住 z-50 的悬浮球
-    <div className="fixed inset-x-0 bottom-0 z-[60] max-h-[50dvh]">
+    <div className="fixed inset-x-0 bottom-0 z-[60]" style={{ maxHeight: panelMaxH }}>
       <div
         role="dialog"
         aria-labelledby="interrupt-title"
-        className="glass flex max-h-[50dvh] flex-col overflow-y-auto rounded-t-3xl px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.6)]"
+        style={{ maxHeight: panelMaxH }}
+        className="glass flex flex-col overflow-y-auto rounded-t-3xl px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] pt-3 shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.6)]"
       >
         {/* D39：横杠改成「收起成细条」（原来是关闭）。点一下收，往下拖也收 ——
             要彻底关掉走底下的「取消」或 Esc。**一层层退，不是一脚关到底**（同 D43 的脾气） */}

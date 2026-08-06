@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { putSettings } from "@/lib/settings-client";
 
 // M3 Phase-2 长问答沉浸聊天层（design/long-qa-immersive-chat.md）。
@@ -70,8 +70,16 @@ function toSegments(text: string): string[] {
 
 interface ImmersiveChatProps {
   sourceId: string;
-  /** 视频外壳 div 的 ref —— 用来量「视频底缘」，磨砂面板从这条线往下铺 */
-  videoRef: React.RefObject<HTMLDivElement | null>;
+  /**
+   * 台面底缘（视口坐标 px）—— 磨砂面板从这条线往下铺。由 WatchStage 量好传进来。
+   *
+   * 2026-08-05 创始人真机反馈改的：**原来锚的是视频底缘，那会把状态卡整个盖住**。
+   * 而磨砂顶上那 34px 是透明过渡带（design §4），状态卡就从带子里透出来、
+   * 和歌词流第一行叠在一起。现在锚在状态卡下边缘：时间进度 + 倍速 + ±N 秒全露着。
+   * **±N 秒在沉浸态里是真有用的** —— `atS` 在按发送那一刻才取播放头（见下面的 send），
+   * 跳完再问，AI 换的就是那一段字幕。
+   */
+  stageBottom: number;
   /** 当前播放头（秒），发问时作为 atS */
   getCurrentTime: () => number;
   /** 暂停视频 —— 发问前调用（创始人：问答一定要视频处于暂停态） */
@@ -82,7 +90,7 @@ interface ImmersiveChatProps {
 
 export function ImmersiveChat({
   sourceId,
-  videoRef,
+  stageBottom,
   getCurrentTime,
   pauseVideo,
   onExit,
@@ -93,7 +101,6 @@ export function ImmersiveChat({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [glow, setGlow] = useState<[string, string, string, string]>(DEFAULT_GLOW);
-  const [top, setTop] = useState(0); // 磨砂面板顶 = 视频底缘 px
   const [atBottom, setAtBottom] = useState(true);
   const [showPalette, setShowPalette] = useState(false);
   const [fontPx, setFontPx] = useState(DEFAULT_CHAT_FONT);
@@ -118,26 +125,7 @@ export function ImmersiveChat({
     [],
   );
 
-  // ── 量「视频底缘」：磨砂面板从这条线往下铺（design §4 过渡带） ──
-  useLayoutEffect(() => {
-    const measure = () => {
-      const el = videoRef.current;
-      if (el) setTop(Math.max(0, Math.round(el.getBoundingClientRect().bottom)));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (videoRef.current) ro.observe(videoRef.current);
-    window.addEventListener("resize", measure);
-    // 播放器加载 / 地址栏收放会引起回流，兜底轮询一小会儿
-    const t = window.setInterval(measure, 400);
-    const stop = window.setTimeout(() => window.clearInterval(t), 4000);
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", measure);
-      window.clearInterval(t);
-      window.clearTimeout(stop);
-    };
-  }, [videoRef]);
+  // 台面底缘由 WatchStage 量好传进来（暂停面板也吃同一个值，所以只量一次）
 
   // 扩散光放完就卸载（省一层永久合成）
   useEffect(() => {
@@ -432,10 +420,11 @@ export function ImmersiveChat({
         )}
       </div>
 
-      {/* 磨砂聊天层：从视频底缘往下铺到屏幕底（不覆盖视频，视频照常可播） */}
+      {/* 磨砂聊天层：从**状态卡下边缘**往下铺到屏幕底。
+          视频和它下面那排控件（时间 / 倍速 / ±N 秒）都露在外面、照常能点 */}
       <div
         className="chat-frost fixed inset-x-0 bottom-0 z-40 flex flex-col"
-        style={{ ...glowVars, top }}
+        style={{ ...glowVars, top: stageBottom }}
         role="dialog"
         aria-label="长问答沉浸聊天"
       >
