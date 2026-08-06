@@ -76,7 +76,11 @@ export default async function WatchDetailPage({
   const savedAtoms = (atomRows ?? []) as { id: string; term: string }[];
 
   return (
-    <div className="relative flex min-h-dvh flex-col overflow-hidden">
+    // M3.12 片 a：宽屏下**整页不滚**（`lg:h-dvh`），滚的只有右栏 ——
+    // 「视频不动、右边滚」就是桌面版的全部意义。
+    // ⚠️ 不许改用 `position: sticky` 来实现：这个根节点是 `overflow-hidden`，
+    // 它会成为 sticky 的滚动容器，于是 sticky 安安静静地什么都不做（D47⑩⒜）。
+    <div className="relative flex min-h-dvh flex-col overflow-hidden lg:h-dvh">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-48 opacity-50" />
       {/* D18：页头压到最薄，标题并进这一行 —— 原本"返回 / 字幕状态"一行 + 标题一行
           白占掉约 44px 的纵向空间，而那正是视频画面想要的。字幕状态挪进了播放器
@@ -106,7 +110,10 @@ export default async function WatchDetailPage({
         <SettingsLink from="player" sid={source.id} />
       </header>
 
-      <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
+      {/* 宽屏下松开那根 `max-w-2xl` 的居中柱子 —— **这一片真正要改的只有这里**。
+          页头不用动：`<header>` 在 `<main>` 外面，本来就是通栏的（D47⑩⒝）。
+          `lg:min-h-0` 是给下面的右栏留的：flex 子项不写它就不肯缩，`overflow-y-auto` 会失效。 */}
+      <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8 lg:max-w-none lg:min-h-0 lg:pb-4">
         <LangBootstrap prefs={prefs} />
         <WatchStage
           source={source}

@@ -1073,103 +1073,133 @@ export function WatchStage({
   const { Player } = shell;
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* D18：画面越大越好 —— 手机上让播放器顶掉页面左右内边距，整整宽出 40px。
-          sm 以上回到圆角卡片（桌面宽度富余，全出血反而失衡） */}
-      <div ref={videoWrapRef} className="-mx-5 sm:mx-0">
-        <Player
-          source={source}
-          onReady={handleReady}
-          onPlayingChange={handlePlayingChange}
-          onPause={handlePause}
-        />
-      </div>
+    // ── M3.12 片 a：宽屏两栏工作台（D47） ──
+    //
+    // `lg:` 起（≥1024px）从一根居中的柱子变成 视频左 / 学习右。**判据只认窗口宽度**，
+    // 不做设备嗅探 —— UA 不可靠（iPad 在 Safari 里谎报自己是 Mac），而且按宽度走意味着
+    // 把窗口拉窄就自动退回手机布局，不用维护两份（D47①）。
+    //
+    // 窄屏这边**一个像素都没动**：外层仍是 `flex flex-col gap-3`，左右两栏只是两个
+    // 中间容器，左栏内部也是 gap-3，所以竖着排下来的间距和以前逐像素一致。
+    //
+    // 62% 走 CSS 变量：片 b 的可拖中缝只要改这一个变量，不用重排 DOM、更不用重渲播放器。
+    <div
+      className="flex flex-col gap-3 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[var(--split-video)_1fr] lg:gap-x-6"
+      style={{ "--split-video": "62%" } as React.CSSProperties}
+    >
+      {/* ── 左栏：视频 + 状态卡 + 点点条。**不滚。** ──
+          点点条跟视频走，不去右栏（2026-08-05 创始人确认，也是计划 §A 的骨架图）：
+          它本质上是**时间轴**，和播放器进度条是同一根 26 分钟 —— 宽度不一致就没有"位置感"，
+          同样几个点挤进 38% 的右栏也更难点中。
 
-      {/* 状态卡。它的下边缘就是「台面底缘」—— 沉浸磨砂层和暂停面板都锚在这儿 */}
-      <div ref={stageRef} className="rounded-2xl border border-ink-700 px-4 py-2.5">
-        <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <span
-            className={`h-2 w-2 rounded-full ${playing ? "bg-teal-400" : "bg-ink-500"}`}
-            aria-hidden
+          ⚠️ `lg:max-w-[…]` 是**高度上限**（账二）：视频是 16:9，宽度一涨高度跟着涨，
+          桌面上真正的天花板是**窗口有多高**而不是多宽。不夹这一下，1280×620 这种矮窗口上
+          左栏会比窗口高 49px，点点条直接被 `overflow-hidden` 剪掉。
+          17rem ≈ 页头 + 状态卡 + 点点条 + 各处间距。片 b 会换成量出来的真值，
+          并把多出来的宽度让给右栏（现在只是留白）。 */}
+      <div className="flex min-w-0 flex-col gap-3 lg:min-h-0 lg:max-w-[calc((100dvh-20rem)*16/9)]">
+        {/* D18：画面越大越好 —— 手机上让播放器顶掉页面左右内边距，整整宽出 40px。
+            sm 以上回到圆角卡片（桌面宽度富余，全出血反而失衡） */}
+        <div ref={videoWrapRef} className="-mx-5 sm:mx-0">
+          <Player
+            source={source}
+            onReady={handleReady}
+            onPlayingChange={handlePlayingChange}
+            onPause={handlePause}
           />
-          <span className="text-sm text-ink-300">{playing ? "播放中" : "已暂停"}</span>
-          <span className="text-xs text-ink-500">
-            ·{" "}
-            {status === "ready"
-              ? "字幕就绪"
-              : gen.running
-                ? "字幕生成中"
-                : status === "failed"
-                  ? "字幕没生成出来"
-                  : status === "partial"
-                    ? "字幕生成了一半"
-                    : "字幕待生成"}
-          </span>
-        </div>
-        <p className="ui-mono text-sm text-ink-100" aria-label="播放位置">
-          <span ref={clockRef}>{source.last_position_s ? mmss(source.last_position_s) : "00:00"}</span>
-          <span className="text-ink-500"> / </span>
-          <span ref={totalRef} className="text-ink-500">
-            {source.duration_s ? mmss(source.duration_s) : "--:--"}
-          </span>
-        </p>
         </div>
 
-        {/* 倍速 + ±N 秒。挤在同一条胶囊的第二行 —— 不另开一块地（D18） */}
-        <PlayerControls
-          // 只有 YouTube 嵌入有这个毛病（没播过就 seek → 封面被掀掉、剩一块黑）。
-          // 播客是 <audio>，没有封面这一层，没播就跳完全正常 —— 别连坐
-          canSeek={started || source.kind !== "youtube"}
-          step={skipStep}
-          rate={rate}
-          onStep={changeStep}
-          onRate={changeRate}
-          onSeekBy={seekBy}
+        {/* 状态卡。它的下边缘就是「台面底缘」—— 沉浸磨砂层和暂停面板都锚在这儿 */}
+        <div ref={stageRef} className="rounded-2xl border border-ink-700 px-4 py-2.5">
+          <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <span
+              className={`h-2 w-2 rounded-full ${playing ? "bg-teal-400" : "bg-ink-500"}`}
+              aria-hidden
+            />
+            <span className="text-sm text-ink-300">{playing ? "播放中" : "已暂停"}</span>
+            <span className="text-xs text-ink-500">
+              ·{" "}
+              {status === "ready"
+                ? "字幕就绪"
+                : gen.running
+                  ? "字幕生成中"
+                  : status === "failed"
+                    ? "字幕没生成出来"
+                    : status === "partial"
+                      ? "字幕生成了一半"
+                      : "字幕待生成"}
+            </span>
+          </div>
+          <p className="ui-mono text-sm text-ink-100" aria-label="播放位置">
+            <span ref={clockRef}>{source.last_position_s ? mmss(source.last_position_s) : "00:00"}</span>
+            <span className="text-ink-500"> / </span>
+            <span ref={totalRef} className="text-ink-500">
+              {source.duration_s ? mmss(source.duration_s) : "--:--"}
+            </span>
+          </p>
+          </div>
+
+          {/* 倍速 + ±N 秒。挤在同一条胶囊的第二行 —— 不另开一块地（D18） */}
+          <PlayerControls
+            // 只有 YouTube 嵌入有这个毛病（没播过就 seek → 封面被掀掉、剩一块黑）。
+            // 播客是 <audio>，没有封面这一层，没播就跳完全正常 —— 别连坐
+            canSeek={started || source.kind !== "youtube"}
+            step={skipStep}
+            rate={rate}
+            onStep={changeStep}
+            onRate={changeRate}
+            onSeekBy={seekBy}
+          />
+        </div>
+
+        {/* 点点条：时间轴，所以跟视频同宽、留在左栏（创始人 2026-08-05 确认）。
+
+            M3.6：暂停点回看**列表**已经从这里搬走（D37/D38）—— 创始人真机看过后的
+            原话是"就不应该出现在看视频的界面"，它现在的家是 `/library/[id]` 的 tab1。
+            这一页只留横着的点点条：看的时候要的是位置感，不是一张清单。 */}
+        <DotBar
+          points={points}
+          durationS={durationS}
+          getCurrentTime={getCurrentTime}
+          onSeek={handleSeek}
+          onDelete={handleDelete}
         />
       </div>
 
-      <DotBar
-        points={points}
-        durationS={durationS}
-        getCurrentTime={getCurrentTime}
-        onSeek={handleSeek}
-        onDelete={handleDelete}
-      />
-
-      {/* M3.6：暂停点回看列表**已经从这里搬走**（D37/D38）——
-          创始人真机看过后的原话是"就不应该出现在看视频的界面"。
-          它现在的家是 `/library/[id]` 的 tab1，并且在那里按天分了堆。
-          这一页留下的只有横着的点点条：看的时候要的是位置感，不是一张清单。 */}
-
-      {/* D4：字幕可开关、字号可调、行宽自适应 —— 视频与播客共用同一层 */}
-      <CaptionLayer
-        sourceId={source.id}
-        transcript={transcript}
-        kind={source.kind}
-        getCurrentTime={getCurrentTime}
-        onSeek={handleSeek}
-        captionLang={prefs.captionLang}
-        highlights={highlights}
-        savedTerms={savedTerms}
-        onToggleTerm={toggleTerm}
-        glosses={glosses}
-        onRetryGloss={retryGloss}
-        onLookup={lookup.open}
-        onLookupLeave={lookup.leave}
-        contentLang={source.content_lang}
-        autoScan={autoScan}
-        onToggleAutoScan={toggleAutoScan}
-        scanning={scanState.status === "scanning"}
-        generation={{
-          running: gen.running,
-          coveredS: gen.coveredS,
-          totalS: durationS || source.duration_s,
-          error: gen.error,
-          resumable: status === "partial",
-          onRun: () => void runTranscription(),
-        }}
-      />
+      {/* ── 右栏：字幕（选词 / 查词的主战场）。**整页只有这一栏会滚。** ──
+          `lg:min-h-0` + `lg:overflow-y-auto` 两个一起才成立：grid 子项不写 min-h-0
+          就不肯缩到内容以下，overflow 永远触发不了、页面改成整体撑高。 */}
+      <div className="flex min-w-0 flex-col lg:min-h-0 lg:overflow-y-auto lg:pr-1">
+        {/* D4：字幕可开关、字号可调、行宽自适应 —— 视频与播客共用同一层 */}
+        <CaptionLayer
+          sourceId={source.id}
+          transcript={transcript}
+          kind={source.kind}
+          getCurrentTime={getCurrentTime}
+          onSeek={handleSeek}
+          captionLang={prefs.captionLang}
+          highlights={highlights}
+          savedTerms={savedTerms}
+          onToggleTerm={toggleTerm}
+          glosses={glosses}
+          onRetryGloss={retryGloss}
+          onLookup={lookup.open}
+          onLookupLeave={lookup.leave}
+          contentLang={source.content_lang}
+          autoScan={autoScan}
+          onToggleAutoScan={toggleAutoScan}
+          scanning={scanState.status === "scanning"}
+          generation={{
+            running: gen.running,
+            coveredS: gen.coveredS,
+            totalS: durationS || source.duration_s,
+            error: gen.error,
+            resumable: status === "partial",
+            onRun: () => void runTranscription(),
+          }}
+        />
+      </div>
 
       {/* 悬浮捕获球。轻点 = 记下这一刻并开面板；长按 = 进/出沉浸聊天。
           M2a：球色接上真状态 —— 灰=这一刻还没字幕，青=这一刻有字幕（D5 的双态色）。
