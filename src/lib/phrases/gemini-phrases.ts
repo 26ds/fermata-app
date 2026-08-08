@@ -1,3 +1,4 @@
+import "server-only";
 import { GoogleGenAI } from "@google/genai";
 import { langNameEn, normalizeLang, type StudyMode } from "@/lib/lang";
 import { explainGeminiError } from "@/lib/transcript/gemini-youtube";

@@ -1,3 +1,4 @@
+import "server-only";
 import { Type } from "@google/genai";
 import { langNameEn, type StudyMode } from "@/lib/lang";
 import { PhraseError, clientFor, modeBrief } from "@/lib/phrases/gemini-phrases";

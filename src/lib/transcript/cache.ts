@@ -1,3 +1,4 @@
+import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TranscriptSegment } from "@/lib/types";
 import { MAX_SEGMENTS } from "@/lib/captions";

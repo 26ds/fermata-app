@@ -1,3 +1,4 @@
+import "server-only";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
 import {
   TranscribeError,

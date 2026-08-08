@@ -1,3 +1,4 @@
+import "server-only";
 import * as OpenCC from "opencc-js";
 import type { TranscriptSegment } from "@/lib/types";
 import type { HanScript } from "@/lib/zh-script";
