@@ -12,6 +12,10 @@ import { langName } from "./langs";
 // 短句，全部零缺号（见 plans/M2.9-log.md 的探针结论）。
 //
 // **服务端专用**（D24）：`grep -rl "gemini\|translate\|@google/genai" .next/static/chunks/` 必须为空。
+//
+// **中文↔中文永远走不到这里**（D50 三轮）：简繁之间是换字形不是翻译，`/api/translate`
+// 用 OpenCC 词库当场转完就返回了。上一版曾在这儿加过一套"换字形"提示词，
+// OpenCC 进来之后那条路成了死代码，已删 —— 别再加回来。
 
 const MODEL = "gemini-2.5-flash";
 
@@ -71,46 +75,13 @@ function clientFor(): GoogleGenAI {
   return new GoogleGenAI({ apiKey });
 }
 
-/**
- * D50：简体 → 繁体**不是翻译，是换字形**，得换一套说法。
- *
- * 说成 "translate into Traditional Chinese" 的下场是实测过的：模型认为中文翻中文
- * 无事可做，**原样抄回来**（2026-08-07 真机，只把半角逗号改成全角）。
- * 说成 "convert the character forms" 它就懂了。
- *
- * 例子必须给**一对多**的那几个（这才是这件事唯一的难点，也是字表做不好的原因）：
- * 头发/干活/里面/一只 —— 光靠单字表会写成「頭发」「乾活」「里面」「一只」。
- *
- * **另一个方向（繁→简）永远走不到这里** —— 那个方向是确定性的逐字映射，
- * 路由里查表就办了，不花钱也不用等（见 `zh-script.ts`）。
- */
-function scriptPrompt(numbered: string): string {
-  return `Convert each numbered line from Simplified Chinese to Traditional Chinese characters.
-
-This is a SCRIPT conversion, NOT a translation. Keep every word, every name, every particle
-and the exact wording as-is — change only the character forms. Do not rephrase, do not
-modernize, do not switch to Taiwanese or Hong Kong vocabulary.
-Pay attention to the one-to-many characters, where the right form depends on meaning:
-头发→頭髮 but 发现→發現; 干活→幹活 but 干了→乾了; 里面→裡面 but 公里→公里;
-一只→一隻 but 只有→只有; 松了→鬆了 but 松树→松樹; 皇后→皇后 but 以后→以後.
-
-Output EXACTLY one line per input line, in this format: <number><TAB><converted line>
-Keep the SAME numbers. Do NOT merge, split, reorder, or omit any line. No commentary, no markdown.
-
-Source lines:
-${numbered}`;
-}
-
 async function callModel(
   ai: GoogleGenAI,
   items: TranslatedSegment[],
   name: string,
-  scriptOnly: boolean,
 ): Promise<Map<number, string>> {
   const numbered = items.map((it) => `${it.i}\t${it.text}`).join("\n");
-  const prompt = scriptOnly
-    ? scriptPrompt(numbered)
-    : `You are a subtitle translator. Translate each numbered source line into ${name}.
+  const prompt = `You are a subtitle translator. Translate each numbered source line into ${name}.
 Output EXACTLY one line per input line, in this format: <number><TAB><translation>
 Keep the SAME numbers. Do NOT merge, split, reorder, or omit any line. No commentary, no markdown.
 Preserve proper nouns. If a line is only punctuation or an interjection, still translate it naturally.
@@ -140,12 +111,11 @@ async function translateBatch(
   ai: GoogleGenAI,
   batch: TranslatedSegment[],
   name: string,
-  scriptOnly: boolean,
 ): Promise<TranslatedSegment[]> {
-  const got = await callModel(ai, batch, name, scriptOnly);
+  const got = await callModel(ai, batch, name);
   const missing = batch.filter((it) => !got.has(it.i));
   if (missing.length > 0) {
-    const retry = await callModel(ai, missing, name, scriptOnly);
+    const retry = await callModel(ai, missing, name);
     for (const [i, t] of retry) got.set(i, t);
   }
   const out: TranslatedSegment[] = [];
@@ -163,11 +133,6 @@ export interface TranslateContext {
   existing?: TranslatedSegment[];
   onPartial(progress: TranslateProgress): Promise<void>;
   remainingMs(): number;
-  /**
-   * D50：这一趟是**换字形**（简→繁）而不是翻译。换一套提示词，别的完全一样
-   * —— 分批、编号回填、断点续传、缓存，一条都不用重写。
-   */
-  scriptOnly?: boolean;
 }
 
 /**
@@ -180,7 +145,6 @@ export async function translateSegments({
   existing = [],
   onPartial,
   remainingMs,
-  scriptOnly = false,
 }: TranslateContext): Promise<TranslateResult> {
   const name = langName(targetLang);
   const all: TranslatedSegment[] = segments.map((s, i) => ({ i, start: s.start, text: s.text }));
@@ -221,7 +185,7 @@ export async function translateSegments({
       const batch = queue.shift();
       if (!batch) return;
       try {
-        const got = await translateBatch(ai, batch, name, scriptOnly);
+        const got = await translateBatch(ai, batch, name);
         results.push(...got);
         await emit();
       } catch (e) {

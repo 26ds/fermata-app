@@ -27,7 +27,6 @@ import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
 import { mmss } from "@/lib/time";
 import type { QuestionMode, SourceRow, TranscriptSegment, TranscriptStatus } from "@/lib/types";
-import { captionScriptFor, conformSegments } from "@/lib/zh-script";
 
 /** 进度回写节流：播放中最快 10 秒存一次，别把网络当秒表用 */
 const SAVE_EVERY_MS = 10_000;
@@ -99,19 +98,10 @@ export function WatchStage({
    */
   const [started, setStarted] = useState(false);
   const [durationS, setDurationS] = useState(source.duration_s ?? 0);
-
-  // D50：字幕字形跟着用户的语言走（在学的语言优先，否则母语）。**转换在读侧** ——
-  // 库里那份原样不动，所以他改一下母语，下次打开就跟着变，不用重新花钱转写。
-  // 非中文内容、以及本来就是简体的内容，`conformSegments` 返回**同一个数组引用**，
-  // 下游那些吃 `transcript` 的 `useMemo`（highlights / panelLines）不会被白白打断。
-  const hanScript = captionScriptFor(prefs);
-  const seeded = useMemo(
-    () => (source.transcript ? conformSegments(source.transcript, hanScript) : null),
-    [source.transcript, hanScript],
-  );
-
-  // M2a：字幕不再是一份死数据，它会边转边长 —— 收进 state 才能实时往下传
-  const [transcript, setTranscript] = useState<TranscriptSegment[] | null>(seeded);
+  // M2a：字幕不再是一份死数据，它会边转边长 —— 收进 state 才能实时往下传。
+  // **D50：这里不做简繁转换** —— 送到浏览器的字幕已经是最终字形了（观看页在服务端转、
+  // 边转边长那路由 `/api/transcript` 转）。词库 1MB，不该让每个用户下载一遍。
+  const [transcript, setTranscript] = useState<TranscriptSegment[] | null>(source.transcript);
   const [status, setStatus] = useState<TranscriptStatus>(source.transcript_status);
   const [gen, setGen] = useState<{
     running: boolean;
@@ -120,7 +110,7 @@ export function WatchStage({
   }>({ running: false, coveredS: null, error: "" });
   const runningRef = useRef(false);
   // 字幕本体。热路径（250ms 那一轮）要查"这一刻有没有字幕"，所以走 ref
-  const segmentsRef = useRef<TranscriptSegment[]>(seeded ?? []);
+  const segmentsRef = useRef<TranscriptSegment[]>(source.transcript ?? []);
   const orbReadyRef = useRef(false);
   const [orbReady, setOrbReady] = useState(false);
   const [points, setPoints] = useState<PausePoint[]>(interrupts);
@@ -876,17 +866,14 @@ export function WatchStage({
           }
 
           if (event.type === "partial" && event.segments) {
-            // D50：边转边长的这一路也要调字形 —— 首屏那两分钟走的正是这里
-            const segs = conformSegments(event.segments, hanScript);
-            setTranscript(segs);
-            segmentsRef.current = segs;
+            setTranscript(event.segments);
+            segmentsRef.current = event.segments;
             setGen((g) => ({ ...g, coveredS: event.coveredS ?? g.coveredS }));
             setStatus("partial");
           } else if (event.type === "done") {
             if (event.segments) {
-              const segs = conformSegments(event.segments, hanScript);
-              setTranscript(segs);
-              segmentsRef.current = segs;
+              setTranscript(event.segments);
+              segmentsRef.current = event.segments;
             }
             complete = Boolean(event.complete);
             setStatus(complete ? "ready" : "partial");
@@ -914,7 +901,7 @@ export function WatchStage({
       runningRef.current = false;
     }
     return complete;
-  }, [source.id, hanScript]);
+  }, [source.id]);
 
   useEffect(() => {
     // 没转过的（pending）和转了一半的（partial）都自动接着干 ——
@@ -1202,7 +1189,6 @@ export function WatchStage({
           onLookup={lookup.open}
           onLookupLeave={lookup.leave}
           contentLang={source.content_lang}
-          hanScript={hanScript}
           autoScan={autoScan}
           onToggleAutoScan={toggleAutoScan}
           scanning={scanState.status === "scanning"}

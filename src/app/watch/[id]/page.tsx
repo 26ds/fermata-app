@@ -11,6 +11,8 @@ import type { SourceRow } from "@/lib/types";
 import { getWatchPrefs } from "@/lib/settings";
 import { sourceOriginUrl } from "@/lib/source-origin";
 import { watchBackTarget } from "@/lib/nav";
+import { conformSegments } from "@/lib/zh-convert";
+import { captionScriptFor } from "@/lib/zh-script";
 
 // M1a — 观看页。RLS 保证只能查到自己的 source，查不到就是 404。
 //
@@ -48,8 +50,8 @@ export default async function WatchDetailPage({
     .eq("id", id)
     .maybeSingle();
   if (!data) notFound();
-  const source = data as SourceRow;
-  const origin = sourceOriginUrl(source);
+  const row = data as SourceRow;
+  const origin = sourceOriginUrl(row);
 
   // 点点条首屏就该有历史点，所以顺手一起取（RLS 保证只查得到自己的）。
   // question / ai_answer 这一页其实用不上（回看列表已搬去 /library/[id]），
@@ -65,6 +67,13 @@ export default async function WatchDetailPage({
   // 词库要标什么、AI 用哪门语言答、字幕译成什么，全从这里推 —— 不许硬编码。
   // 同一行 jsonb 里还存着倍速与「一跳几秒」，一次查齐（getWatchPrefs）。
   const { lang: prefs, play, autoScan } = await getWatchPrefs(supabase, user.id);
+
+  // D50：字幕字形跟他的语言走，**在送到浏览器之前就转好**。
+  // 转换在服务端做（词库 1MB，不该让每个用户下载一遍），所以客户端拿到的
+  // 已经是最终字形 —— `watch-stage` 那边一行转换代码都没有。
+  const source: SourceRow = row.transcript
+    ? { ...row, transcript: conformSegments(row.transcript, captionScriptFor(prefs)) }
+    : row;
 
   // M3.7：这条内容里已经收进词库的（首屏 ✓ 就该是实心的，不能等请求回来才补上）。
   // 表还没建 / 查失败一律当"一个都没收"，别让词库把观看页拖下水。

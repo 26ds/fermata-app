@@ -8,14 +8,8 @@ import { translateSegments, TranslateError, type TranslateProgress } from "@/lib
 import { isSupportedLang } from "@/lib/translate/langs";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
 import { getLangPrefs } from "@/lib/settings";
-import {
-  conformHan,
-  displayedHanScript,
-  hanScriptOf,
-  looksChinese,
-  planZhScript,
-  scriptOfText,
-} from "@/lib/zh-script";
+import { conformSegments, scriptOfText } from "@/lib/zh-convert";
+import { displayedHanScript, hanScriptOf, looksChinese } from "@/lib/zh-script";
 
 // M2.9 双语字幕 —— 把一条已有字幕翻成目标语言的唯一入口。
 //
@@ -116,16 +110,13 @@ export async function POST(request: Request) {
   const sourceIsChinese = sourceLang ? sourceLang.startsWith("zh") : looksChinese(sample);
 
   if (targetScript && sourceIsChinese) {
-    // 比的是**屏幕上那份**（读侧转换已按他的语言调过），不是库里存的那份。
-    // 库里存的是哪套，只决定这一趟花不花钱。
-    const storedScript = scriptOfText(sample);
-    const plan = planZhScript({
-      targetScript,
-      storedScript,
-      displayScript: displayedHanScript(await getLangPrefs(supabase, user.id), storedScript),
-    });
-
-    if (plan.kind === "already") {
+    // 比的是**屏幕上那份**（读侧转换已按他的语言调过），不是库里存的那份 ——
+    // 他那支视频库里是繁体、屏幕上是简体，两者不分开就会判错。
+    const displayScript = displayedHanScript(
+      await getLangPrefs(supabase, user.id),
+      scriptOfText(sample),
+    );
+    if (displayScript === targetScript) {
       return ndjsonOnce([
         {
           type: "same-language",
@@ -135,23 +126,14 @@ export async function POST(request: Request) {
       ]);
     }
 
-    // **这一条是整件事变便宜的关键**：转写存下来的原文常常已经就是他要的那一套
-    // （他那支视频存的就是繁体、屏幕上显示的是简体），那就原样奉还 ——
-    // 零成本、零延迟、**逐字精确**，一次转换都不用做。繁→简则查表，同样免费且精确。
-    if (plan.kind === "free") {
-      const translations = segments.map((s, i) => ({
-        i,
-        start: s.start,
-        text: conformHan(s.text, targetScript),
-      }));
-      return ndjsonOnce([
-        { type: "start", total: translations.length, existing: translations.length, cached: true },
-        { type: "done", complete: true, translations, cached: true },
-      ]);
-    }
-    // plan.kind === "model"：只剩「库里是简体、他要繁体」这一种。这个方向有真歧义
-    // （发→髮/發、干→乾/幹、里→裡/里…），查表必然写出错字，只能花一次钱问模型。
-    // 走下面那条常规管线，提示词换成"换字形"（`scriptOnly`），照常进缓存 —— 一支片子只付一次。
+    // **两个方向都免费**（D50 三轮，OpenCC 词库）—— 查表、瞬时、不问模型。
+    // 库里存的那份本来就是他要的那套时，`conformSegments` 连字符串都不重建。
+    const conformed = conformSegments(segments, targetScript);
+    const translations = conformed.map((s, i) => ({ i, start: s.start, text: s.text }));
+    return ndjsonOnce([
+      { type: "start", total: translations.length, existing: translations.length, cached: true },
+      { type: "done", complete: true, translations, cached: true },
+    ]);
   }
 
   // === 缓存优先：(内容, 语言) 别人翻过就直接白拿 ===
@@ -185,8 +167,6 @@ export async function POST(request: Request) {
           segments,
           targetLang,
           remainingMs,
-          // D50：中文→中文走到这里只剩「简体→繁体」一种，那是换字形不是翻译
-          scriptOnly: sourceIsChinese && hanScriptOf(targetLang) !== null,
           onPartial: async (progress: TranslateProgress) => {
             push({ type: "partial", ...progress });
           },

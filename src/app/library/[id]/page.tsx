@@ -11,7 +11,8 @@ import { withFrom } from "@/lib/nav";
 import { getLangPrefs } from "@/lib/settings";
 import { hms } from "@/lib/time";
 import type { SourceRow } from "@/lib/types";
-import { captionScriptFor, conformSegments } from "@/lib/zh-script";
+import { conformSegments } from "@/lib/zh-convert";
+import { captionScriptFor } from "@/lib/zh-script";
 
 // M3.6 —— 一条内容的「回头看」页（D38）。**这里没有播放器**：
 // 这一页是复盘用的，看视频请回 /watch/[id]。两个 tab：暂停点与聊天 / 词库。
