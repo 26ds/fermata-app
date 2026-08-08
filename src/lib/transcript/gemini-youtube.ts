@@ -54,6 +54,15 @@ const NO_SPEECH = "NO_SPEECH";
 
 const MODEL = "gemini-2.5-flash";
 
+/**
+ * **字形（简体/繁体）故意不在这儿定**，别再往下面那句里加「写简体」（D50）。
+ *
+ * 理由：`transcript_cache` 是**跨用户共享**的，按 content_key 存一份、没有字形维度。
+ * 在这里定死简体，等于替所有繁体母语的用户做了主，而对简体用户毫无收益 ——
+ * 他们那边由**读侧转换**（`src/lib/zh-script.ts`）百分之百保证，不靠模型听话。
+ * 下面那句 "Keep the original language" 管的是**语言**（别把上海话翻成英文），
+ * 它对字形无能为力也不该管：人说话没有字形，这道题在转写这一层根本无解。
+ */
 const PROMPT = `Transcribe the speech in this video verbatim.
 Output one line per sentence, in exactly this format:
 [MM:SS] text

@@ -17,6 +17,10 @@ import { langName } from "./langs";
 // .next/static/chunks/` 已于 2026-08-07 作废：`translate` 会匹配 Tailwind 的
 // `translate-x-[23px]` 和客户端合法的 `fetch("/api/translate")`，`@google/genai`
 // 会匹配 /lab/live 那个合法的 Live SDK —— 它从来就没绿过。详见 D24。
+//
+// **中文↔中文永远走不到这里**（D50 三轮）：简繁之间是换字形不是翻译，`/api/translate`
+// 用 OpenCC 词库当场转完就返回了。上一版曾在这儿加过一套"换字形"提示词，
+// OpenCC 进来之后那条路成了死代码，已删 —— 别再加回来。
 
 const MODEL = "gemini-2.5-flash";
 

@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { normalizeLang, sameLang, studyMode } from "@/lib/lang";
+import { sameLang, studyMode } from "@/lib/lang";
 import { detectContentLang, PhraseError, scanPhrases } from "@/lib/phrases/gemini-phrases";
 import { headOf, isPhraseScan, type PhraseScan } from "@/lib/phrases/types";
 import { getLangPrefs } from "@/lib/settings";
+import { resolveContentLang } from "@/lib/text-script";
+import { conformSegments } from "@/lib/zh-convert";
+import { captionScriptFor } from "@/lib/zh-script";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
@@ -69,7 +72,7 @@ export async function POST(request: Request) {
   if (!data) return NextResponse.json({ error: "找不到这条内容" }, { status: 404 });
   const source = data as SourceRow;
 
-  const segments: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
+  const raw: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
   const captionsReady = source.transcript_status === "ready";
 
   // D40 原话是"字幕转好了才扫"，理由是扫一半将来要重扫 = 付两次钱。
@@ -79,15 +82,25 @@ export async function POST(request: Request) {
   // 就够了 —— 字幕后来长长了，只扫新长出来的那截。
   //
   // 只挡两种：一段字幕都没有；以及刚开头那几句（转写刚起步，扫了也没意义还占一次锁）。
-  if (segments.length === 0 || (!captionsReady && segments.length < MIN_SEGMENTS_FOR_PARTIAL)) {
+  if (raw.length === 0 || (!captionsReady && raw.length < MIN_SEGMENTS_FOR_PARTIAL)) {
     return NextResponse.json({ status: "not-ready" });
   }
 
   const prefs = await getLangPrefs(supabase, user.id);
+  // D50：**必须**在扫之前调好字形。扫出来的词组要拿去和屏幕上那份字幕逐字对齐
+  // （`resolvePhrases` / `findTerms` 都是纯字符串匹配）—— 一边繁一边简，一条也对不上，
+  // 高亮会整片消失，而且不会报错。
+  const segments = conformSegments(raw, captionScriptFor(prefs));
 
   // 内容语言：播客走转写时模型顺手就报了；**YouTube 粘贴字幕那条路一个字没经过模型**，
   // 这里补一次（一支内容一辈子一次，约 500 token）。写回失败不影响这次扫描。
-  let contentLang = normalizeLang(source.content_lang);
+  // D51：库里那个标签先跟正文对一眼 —— 2026-07-31 之前导入的内容一律躺着一个假 `'en'`，
+  // 不核对的话这里会把中文视频判成英文内容，词库标错、注释也用错语言。
+  const resolved = resolveContentLang(source.content_lang, segments.slice(0, 40).map((s) => s.text).join(""));
+  let contentLang = resolved.lang ?? "";
+  if (resolved.corrected) {
+    await supabase.from("sources").update({ content_lang: contentLang || null }).eq("id", sourceId).eq("user_id", user.id);
+  }
   if (!contentLang) {
     contentLang = await detectContentLang(segments);
     if (contentLang) {
