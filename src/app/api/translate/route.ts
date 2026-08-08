@@ -8,8 +8,9 @@ import { translateSegments, TranslateError, type TranslateProgress } from "@/lib
 import { isSupportedLang } from "@/lib/translate/langs";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
 import { getLangPrefs } from "@/lib/settings";
+import { dominantScript, resolveContentLang } from "@/lib/text-script";
 import { conformSegments, scriptOfText } from "@/lib/zh-convert";
-import { displayedHanScript, hanScriptOf, looksChinese } from "@/lib/zh-script";
+import { displayedHanScript, hanScriptOf } from "@/lib/zh-script";
 
 // M2.9 双语字幕 —— 把一条已有字幕翻成目标语言的唯一入口。
 //
@@ -85,17 +86,40 @@ export async function POST(request: Request) {
   }
 
   const contentKey = source.external_id;
-  // 空 = 原文语言未知（还没转写，或模型没报），归 null。
-  // **M3.7 加了归一化**（D42）：转写模型报的是 `"english"` 这样的全称，而目标语言是 `"en"` ——
-  // 不归一的话下面那个"同语言"判断永远不成立，等于花钱把英文翻成英文。
-  const sourceLang = normalizeLang(source.content_lang) || null;
   const targetScript = hanScriptOf(targetLang);
+  const sample = segments.slice(0, 40).map((s) => s.text).join("");
+
+  // **D51：这个标签可能是假的，用之前先跟正文对一眼。**
+  // `sources.content_lang` 的数据库默认值是 `'en'`，而导入时显式写 `null` 是
+  // 2026-07-31 才加的 —— **在那之前导入的每一条内容都躺着一个 `'en'`，包括满屏中文的**。
+  // 后果正是 2026-08-07 真机报的那个：中文视频要英文译文，被判成"原文就是英语"，
+  // 静默不翻。语言标签会撒谎，**正文用的是哪套文字不会**。
+  const resolved = resolveContentLang(source.content_lang, sample);
+  const sourceLang = resolved.lang;
+  if (resolved.corrected) {
+    // 顺手把库里那一行治好 —— 不然词库标什么、AI 用哪门语言解释，全都还按那个假标签来。
+    // 治不好也不该挡住这一次翻译，所以不 await、错了也不管。
+    void supabase
+      .from("sources")
+      .update({ content_lang: sourceLang })
+      .eq("id", sourceId)
+      .eq("user_id", user.id);
+  }
 
   // 目标语言就是原文语言 —— 不用翻，让客户端只显示原文。
   // **中文不在此列**（`!targetScript`）：中文里"同一门语言"还分两套字形，
   // 这一句会把「屏幕上是简体、他要繁体」误判成不用翻。中文交给下面那段。
+  //
+  // **D44：把判断说出口。** 原来这里只回一句"原文就是这个语言"，
+  // 判错了用户根本看不出来 —— 上面那个假 `'en'` 就是这么藏了一个多星期的。
   if (!targetScript && sourceLang && sourceLang === normalizeLang(targetLang)) {
-    return ndjsonOnce([{ type: "same-language", lang: targetLang }]);
+    return ndjsonOnce([
+      {
+        type: "same-language",
+        lang: targetLang,
+        note: `这条内容的原文我判断就是${langLabel(sourceLang)}，所以没翻。`,
+      },
+    ]);
   }
 
   // === 中文 → 中文：换字形，不是翻译（D50） ===
@@ -106,8 +130,9 @@ export async function POST(request: Request) {
   //
   // 认"是不是中文"要多一层：`content_lang` 对 YouTube **基本都是 null**
   // （`gemini-youtube` 从不报语言），所以原文语言不知道时看字幕本身像不像中文。
-  const sample = segments.slice(0, 40).map((s) => s.text).join("");
-  const sourceIsChinese = sourceLang ? sourceLang.startsWith("zh") : looksChinese(sample);
+  const sourceIsChinese = sourceLang
+    ? sourceLang.startsWith("zh")
+    : dominantScript(sample) === "han";
 
   if (targetScript && sourceIsChinese) {
     // 比的是**屏幕上那份**（读侧转换已按他的语言调过），不是库里存的那份 ——

@@ -59,27 +59,3 @@ export function captionScriptFor(prefs: LangPrefs): HanScript | null {
 export function displayedHanScript(prefs: LangPrefs, storedScript: HanScript): HanScript {
   return captionScriptFor(prefs) ?? storedScript;
 }
-
-const HAN = /\p{Script=Han}/u;
-/** 假名 + 谚文。日文韩文也写汉字，光数汉字会把它们认成中文 */
-const NOT_CHINESE = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-
-/**
- * 这段文字**看着像不像中文**。
- *
- * 用在 `content_lang` 空着的时候 —— YouTube 那条转写路（`gemini-youtube`）从来不报语言，
- * 所以库里那一列多半是 null，"要不要翻译"的判断没法只靠它。
- * 这是个便宜的兜底，不是语言识别：**先排除日文韩文**（它们也写汉字），
- * 再看汉字占没占到一半。判不准就返回 false —— 宁可多花一次翻译，也不要把该翻的当成不用翻。
- */
-export function looksChinese(text: string): boolean {
-  if (NOT_CHINESE.test(text)) return false;
-  let han = 0;
-  let letters = 0;
-  for (const ch of text) {
-    if (/\s|\p{P}|\p{S}|\p{N}/u.test(ch)) continue;
-    letters++;
-    if (HAN.test(ch)) han++;
-  }
-  return letters > 0 && han / letters > 0.5;
-}

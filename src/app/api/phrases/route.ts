@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { normalizeLang, sameLang, studyMode } from "@/lib/lang";
+import { sameLang, studyMode } from "@/lib/lang";
 import { detectContentLang, PhraseError, scanPhrases } from "@/lib/phrases/gemini-phrases";
 import { headOf, isPhraseScan, type PhraseScan } from "@/lib/phrases/types";
 import { getLangPrefs } from "@/lib/settings";
+import { resolveContentLang } from "@/lib/text-script";
 import { conformSegments } from "@/lib/zh-convert";
 import { captionScriptFor } from "@/lib/zh-script";
 import { supabaseConfigured } from "@/lib/supabase/config";
@@ -93,7 +94,13 @@ export async function POST(request: Request) {
 
   // 内容语言：播客走转写时模型顺手就报了；**YouTube 粘贴字幕那条路一个字没经过模型**，
   // 这里补一次（一支内容一辈子一次，约 500 token）。写回失败不影响这次扫描。
-  let contentLang = normalizeLang(source.content_lang);
+  // D51：库里那个标签先跟正文对一眼 —— 2026-07-31 之前导入的内容一律躺着一个假 `'en'`，
+  // 不核对的话这里会把中文视频判成英文内容，词库标错、注释也用错语言。
+  const resolved = resolveContentLang(source.content_lang, segments.slice(0, 40).map((s) => s.text).join(""));
+  let contentLang = resolved.lang ?? "";
+  if (resolved.corrected) {
+    await supabase.from("sources").update({ content_lang: contentLang || null }).eq("id", sourceId).eq("user_id", user.id);
+  }
   if (!contentLang) {
     contentLang = await detectContentLang(segments);
     if (contentLang) {
