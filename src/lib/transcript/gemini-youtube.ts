@@ -1,3 +1,4 @@
+import "server-only";
 import { GoogleGenAI, MediaResolution } from "@google/genai";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
 import { TranscribeError, type TranscribeContext, type TranscribeResult, type TranscriptProvider } from "./types";

@@ -1,3 +1,4 @@
+import "server-only";
 import { explainGeminiError } from "@/lib/transcript/gemini-youtube";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";

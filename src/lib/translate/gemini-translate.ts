@@ -1,3 +1,4 @@
+import "server-only";
 import { GoogleGenAI } from "@google/genai";
 import type { TranscriptSegment } from "@/lib/types";
 import { explainGeminiError } from "@/lib/transcript/gemini-youtube";
@@ -11,7 +12,11 @@ import { langName } from "./langs";
 // 这套办法在生产探针上验过：中/日/韩三语、单批与两批、满屏「对。」「嗯。」这种最易被合并的
 // 短句，全部零缺号（见 plans/M2.9-log.md 的探针结论）。
 //
-// **服务端专用**（D24）：`grep -rl "gemini\|translate\|@google/genai" .next/static/chunks/` 必须为空。
+// **服务端专用**（D24）：靠首行 `import "server-only";` 把关 —— 客户端一旦 import
+// 到这里，**构建当场失败**。原先写的 `grep -rl "gemini\|translate\|@google/genai"
+// .next/static/chunks/` 已于 2026-08-07 作废：`translate` 会匹配 Tailwind 的
+// `translate-x-[23px]` 和客户端合法的 `fetch("/api/translate")`，`@google/genai`
+// 会匹配 /lab/live 那个合法的 Live SDK —— 它从来就没绿过。详见 D24。
 
 const MODEL = "gemini-2.5-flash";
 

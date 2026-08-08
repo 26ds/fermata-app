@@ -1,3 +1,4 @@
+import "server-only";
 import Parser from "rss-parser";
 import { parseEpisodePointer } from "@/lib/sources/podcast";
 import { parseCaptions } from "@/lib/captions";

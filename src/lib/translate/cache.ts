@@ -1,3 +1,4 @@
+import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TranslatedSegment } from "./gemini-translate";
 import { MAX_SEGMENTS } from "@/lib/captions";

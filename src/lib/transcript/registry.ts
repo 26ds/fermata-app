@@ -1,3 +1,4 @@
+import "server-only";
 import type { SourceKind } from "@/lib/types";
 import { geminiYoutubeProvider } from "./gemini-youtube";
 import { podcastTranscriptProvider } from "./podcast-transcript";
@@ -9,7 +10,11 @@ import type { TranscriptProvider } from "./types";
 // ⚠️ **服务端专用**（D24 同款纪律）：这里的 Provider 会 import Gemini SDK、
 // 将来还会 import 播客那套音频分块逻辑。客户端组件一旦 import 到这个文件，
 // 整条服务端依赖链就会被拽进浏览器包。
-// 验证方式固定：`grep -rl "@google/genai" .next/static/chunks/` 必须为空。
+// 验证方式：首行那句 `import "server-only";` —— 客户端一旦 import 到这里，
+// **构建当场失败**。原先写的 `grep -rl "@google/genai" .next/static/chunks/`
+// 已于 2026-08-07 作废：那条 grep 永远命中（/lab/live 的 Live 控制台按 D13
+// 合法地在浏览器里用 SDK），换成 grep 具名符号则永远为空（压缩后函数被改名），
+// 两头都不成立。详见 D24。
 
 const CHAINS: Partial<Record<SourceKind, TranscriptProvider[]>> = {
   // YouTube 只有这一条路（D27：官方字幕轨在机房 IP 上取不到，已实测作废）
