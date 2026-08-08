@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { normalizeLang } from "@/lib/lang";
+import { getLangPrefs } from "@/lib/settings";
+import { conformSegments } from "@/lib/zh-convert";
+import { captionScriptFor } from "@/lib/zh-script";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { providersFor } from "@/lib/transcript/registry";
@@ -112,6 +115,11 @@ export async function POST(request: Request) {
     );
   }
 
+  // D50：**落库存原样，推给浏览器的转成他的字形。** 两件事分开是有意的 ——
+  // 库里那份是这条内容的底本（还要回填跨用户缓存），而屏幕上那份该按看的人来。
+  const hanScript = captionScriptFor(await getLangPrefs(supabase, user.id));
+  const forScreen = (segs: TranscriptSegment[]) => conformSegments(segs, hanScript);
+
   const startedAt = Date.now();
   const remainingMs = () => BUDGET_MS - (Date.now() - startedAt);
 
@@ -136,7 +144,8 @@ export async function POST(request: Request) {
       await save(cached.segments, "ready", cached.lang);
       return ndjsonOnce([
         { type: "start", existing: cached.segments.length, totalS: durationS, cached: true },
-        { type: "done", provider: "cache", complete: true, segments: cached.segments, cached: true },
+        // 缓存里那份是**底本**（跨用户共享，没有字形维度）—— 落库存原样，上屏转字形
+        { type: "done", provider: "cache", complete: true, segments: forScreen(cached.segments), cached: true },
       ]);
     }
   }
@@ -176,7 +185,7 @@ export async function POST(request: Request) {
             remainingMs,
             onPartial: async (progress: TranscriptProgress) => {
               await save(progress.segments, "partial");
-              push({ type: "partial", ...progress });
+              push({ type: "partial", ...progress, segments: forScreen(progress.segments) });
             },
           });
 
@@ -190,7 +199,7 @@ export async function POST(request: Request) {
             type: "done",
             provider: provider.name,
             complete: result.complete,
-            segments: result.segments,
+            segments: forScreen(result.segments),
             note: result.note ?? null,
           });
           controller.close();

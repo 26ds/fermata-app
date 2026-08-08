@@ -3,6 +3,9 @@ import { z } from "zod";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { putCachedTranscript } from "@/lib/transcript/cache";
+import { getLangPrefs } from "@/lib/settings";
+import { conformSegments } from "@/lib/zh-convert";
+import { captionScriptFor } from "@/lib/zh-script";
 
 // M1a — 单条内容源的更新与删除。
 // PATCH：回写真实时长（oEmbed 给不了，只有播放器就绪后才知道）与"看到第几秒"。
@@ -152,7 +155,14 @@ export async function PATCH(
     }
   }
 
-  return NextResponse.json({ ok: true, watchHistory });
+  // D50：他贴进来的可能是繁体、而他母语是简体（反之亦然）。库里存**原样**（那是底本，
+  // 还要回填跨用户缓存），**回给浏览器的这一份转成他的字形** —— 转换在服务端，
+  // 客户端不背那 1MB 词库。
+  const screenTranscript = patch.transcript
+    ? conformSegments(patch.transcript, captionScriptFor(await getLangPrefs(supabase, user.id)))
+    : undefined;
+
+  return NextResponse.json({ ok: true, watchHistory, transcript: screenTranscript });
 }
 
 export async function DELETE(

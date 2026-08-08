@@ -3,6 +3,8 @@ import { z } from "zod";
 import { AskError } from "@/lib/ask/gemini-ask";
 import { askChat, type ChatTurn } from "@/lib/ask/gemini-chat";
 import { getLangPrefs } from "@/lib/settings";
+import { conformSegments } from "@/lib/zh-convert";
+import { captionScriptFor } from "@/lib/zh-script";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
@@ -93,8 +95,8 @@ export async function POST(request: Request) {
     .maybeSingle();
   if (!srcRow) return NextResponse.json({ error: "找不到这条内容" }, { status: 404 });
   const source = srcRow as SourceRow;
-  const segments: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
-  if (segments.length === 0) {
+  const raw: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
+  if (raw.length === 0) {
     return NextResponse.json({ error: "这条内容还没有字幕，先生成字幕再聊。" }, { status: 400 });
   }
 
@@ -138,6 +140,8 @@ export async function POST(request: Request) {
 
   // D42：显式告诉引擎用哪门语言答，别让它从问句猜
   const prefs = await getLangPrefs(supabase, user.id);
+  // D50：字幕上下文调成他屏幕上那套字形，免得 AI 引用原句时蹦出另一套字
+  const segments = conformSegments(raw, captionScriptFor(prefs));
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

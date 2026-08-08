@@ -8,8 +8,11 @@ import { LibraryDetail, type DatedPausePoint } from "@/components/library-detail
 import type { VocabItem } from "@/components/vocab-list";
 import { thumbUrlFor } from "@/lib/thumb";
 import { withFrom } from "@/lib/nav";
+import { getLangPrefs } from "@/lib/settings";
 import { hms } from "@/lib/time";
 import type { SourceRow } from "@/lib/types";
+import { conformSegments } from "@/lib/zh-convert";
+import { captionScriptFor } from "@/lib/zh-script";
 
 // M3.6 —— 一条内容的「回头看」页（D38）。**这里没有播放器**：
 // 这一页是复盘用的，看视频请回 /watch/[id]。两个 tab：暂停点与聊天 / 词库。
@@ -77,6 +80,12 @@ export default async function LibraryDetailPage({
     .order("created_at", { ascending: false });
   const vocab = (atomRows ?? []) as VocabItem[];
 
+  // D50：回看页的字幕也得跟观看页写成同一套字形 —— 两边不一致比两边都错还难受
+  const prefs = await getLangPrefs(supabase, user.id);
+  const transcript = source.transcript
+    ? conformSegments(source.transcript, captionScriptFor(prefs))
+    : source.transcript;
+
   const thumb = thumbUrlFor(source);
 
   return (
@@ -131,7 +140,7 @@ export default async function LibraryDetailPage({
         <LibraryDetail
           sourceId={source.id}
           points={points}
-          transcript={source.transcript}
+          transcript={transcript}
           chatRounds={chatRounds}
           vocab={vocab}
         />

@@ -98,7 +98,9 @@ export function WatchStage({
    */
   const [started, setStarted] = useState(false);
   const [durationS, setDurationS] = useState(source.duration_s ?? 0);
-  // M2a：字幕不再是一份死数据，它会边转边长 —— 收进 state 才能实时往下传
+  // M2a：字幕不再是一份死数据，它会边转边长 —— 收进 state 才能实时往下传。
+  // **D50：这里不做简繁转换** —— 送到浏览器的字幕已经是最终字形了（观看页在服务端转、
+  // 边转边长那路由 `/api/transcript` 转）。词库 1MB，不该让每个用户下载一遍。
   const [transcript, setTranscript] = useState<TranscriptSegment[] | null>(source.transcript);
   const [status, setStatus] = useState<TranscriptStatus>(source.transcript_status);
   const [gen, setGen] = useState<{

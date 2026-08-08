@@ -304,7 +304,8 @@ export function CaptionLayer({
               if (ev.type === "done" && ev.note) setTrNote(ev.note);
             } else if (ev.type === "same-language") {
               setTr(new Map()); // 原文就是这个语言，不显示译文
-              setTrNote("这条内容的原文就是这个语言。");
+              // 服务端能说得更具体就用它的（中文→中文那条走 D50，理由不一样）
+              setTrNote(ev.note || "这条内容的原文就是这个语言。");
             } else if (ev.type === "error") {
               setTrNote(ev.message ?? "翻译没成，稍后再试。");
             }
@@ -374,11 +375,11 @@ export function CaptionLayer({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ transcript: parsed }),
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "没存上，请重试");
-      }
-      setSegments(parsed);
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? "没存上，请重试");
+      // D50：存进库的是他贴进来的原样（那是这条内容的底本），**显示的那份由服务端按他的
+      // 字形转好一起回来** —— 词库在服务端，客户端不自己转
+      setSegments(Array.isArray(body.transcript) ? body.transcript : parsed);
       setPasting(false);
       setDraft("");
       router.refresh();

@@ -12,6 +12,10 @@ import { langName } from "./langs";
 // 短句，全部零缺号（见 plans/M2.9-log.md 的探针结论）。
 //
 // **服务端专用**（D24）：`grep -rl "gemini\|translate\|@google/genai" .next/static/chunks/` 必须为空。
+//
+// **中文↔中文永远走不到这里**（D50 三轮）：简繁之间是换字形不是翻译，`/api/translate`
+// 用 OpenCC 词库当场转完就返回了。上一版曾在这儿加过一套"换字形"提示词，
+// OpenCC 进来之后那条路成了死代码，已删 —— 别再加回来。
 
 const MODEL = "gemini-2.5-flash";
 

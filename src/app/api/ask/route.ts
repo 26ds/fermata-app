@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { askQuestion, AskError } from "@/lib/ask/gemini-ask";
 import { getLangPrefs } from "@/lib/settings";
+import { conformSegments } from "@/lib/zh-convert";
+import { captionScriptFor } from "@/lib/zh-script";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
@@ -73,8 +75,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "找不到这条内容" }, { status: 404 });
   }
   const source = srcRow as SourceRow;
-  const segments: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
-  if (segments.length === 0) {
+  const raw: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
+  if (raw.length === 0) {
     return NextResponse.json(
       { error: "这条内容还没有字幕，先生成字幕再问。" },
       { status: 400 },
@@ -83,6 +85,9 @@ export async function POST(request: Request) {
 
   // D42：答案用哪门语言是**已知事实**（他自己设的母语），不该让模型从问句猜
   const prefs = await getLangPrefs(supabase, user.id);
+  // D50：喂给模型的字幕也调成他看到的那套字形 —— 他屏幕上是简体，AI 回头引用原句
+  // 却蹦出繁体，那是同一个 bug 的另一张脸
+  const segments = conformSegments(raw, captionScriptFor(prefs));
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
