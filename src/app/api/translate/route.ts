@@ -7,6 +7,7 @@ import { getCachedTranslation, putCachedTranslation } from "@/lib/translate/cach
 import { translateSegments, TranslateError, type TranslateProgress } from "@/lib/translate/gemini-translate";
 import { isSupportedLang } from "@/lib/translate/langs";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
+import { looksChinese } from "@/lib/zh-script";
 
 // M2.9 双语字幕 —— 把一条已有字幕翻成目标语言的唯一入口。
 //
@@ -85,12 +86,31 @@ export async function POST(request: Request) {
   // 空 = 原文语言未知（还没转写，或模型没报），归 null。
   // **M3.7 加了归一化**（D42）：转写模型报的是 `"english"` 这样的全称，而目标语言是 `"en"` ——
   // 不归一的话下面那个"同语言"判断永远不成立，等于花钱把英文翻成英文。
-  // 归一后仍是**精确比较**，不用 sameLang：简体→繁体是真的要转换的，不能当同一门语言给略过。
   const sourceLang = normalizeLang(source.content_lang) || null;
 
   // 目标语言就是原文语言 —— 不用翻，让客户端只显示原文
   if (sourceLang && sourceLang === normalizeLang(targetLang)) {
     return ndjsonOnce([{ type: "same-language", lang: targetLang }]);
+  }
+
+  // === 中文 → 中文：一律不翻（D50） ===
+  //
+  // **这里原来写着"精确比较，不用 sameLang，因为简体→繁体是真的要转换的"。那条已作废。**
+  // 简繁之间是**换字形**不是翻译，2026-08-07 真机上量到的后果是：把一份繁体字幕
+  // 连同「翻成简体中文」的指令丢给 Gemini，它认为中文翻中文无事可做，**原样抄回来**
+  // （只把半角逗号改成全角），于是花了钱、等了时间，拿回一份一模一样的繁体。
+  // 换字形现在由 D50 的读侧转换负责（`zh-script.ts`，查表、瞬时、不花钱）。
+  //
+  // 还要多认一层：`content_lang` 对 YouTube **基本都是 null**（`gemini-youtube` 从不报语言），
+  // 光靠上面那个判断这条路永远不成立。所以原文语言不知道时，**看字幕本身像不像中文**。
+  const targetIsChinese = normalizeLang(targetLang).startsWith("zh");
+  const sourceIsChinese = sourceLang
+    ? sourceLang.startsWith("zh")
+    : looksChinese(segments.slice(0, 40).map((s) => s.text).join(""));
+  if (targetIsChinese && sourceIsChinese) {
+    return ndjsonOnce([
+      { type: "same-language", lang: targetLang, note: "这条内容的原文就是中文，不用再翻一遍。" },
+    ]);
   }
 
   // === 缓存优先：(内容, 语言) 别人翻过就直接白拿 ===

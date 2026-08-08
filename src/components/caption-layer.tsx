@@ -20,6 +20,7 @@ import { putSettings } from "@/lib/settings-client";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
 import { TARGET_LANGS } from "@/lib/translate/langs";
+import { conformSegments, type HanScript } from "@/lib/zh-script";
 
 // M1d — 字幕层（D4）：开关 + 字号 14–28px（存 localStorage）+ 行宽自适应（.caption-copy）
 // + 跟着播放走的高亮。点某一句 = 跳到那一句，跟点点条同一个手感。
@@ -114,6 +115,11 @@ interface CaptionLayerProps {
   /** M3.10 / D42：这条内容是什么语言。划词切块的 locale 用它，**不许假设英文** */
   contentLang?: string | null;
   /**
+   * D50：中文字幕写成哪套字形（跟用户的语言走）。上层传下来的 `transcript` 已经调过了，
+   * 这里要它只为**手动粘贴**那一路 —— 那份字幕是用户当场贴进来的，没经过上层。
+   */
+  hanScript?: HanScript | null;
+  /**
    * D45：AI 自动标词开着吗（**默认关**）。创始人 2026-08-02 指名把这颗开关
    * 放在「字幕」这一块里 —— 它管的就是字幕上那些高亮，摆在这儿才对得上。
    */
@@ -140,6 +146,7 @@ export function CaptionLayer({
   onLookup,
   onLookupLeave,
   contentLang,
+  hanScript = null,
   autoScan = false,
   onToggleAutoScan,
   scanning = false,
@@ -304,7 +311,8 @@ export function CaptionLayer({
               if (ev.type === "done" && ev.note) setTrNote(ev.note);
             } else if (ev.type === "same-language") {
               setTr(new Map()); // 原文就是这个语言，不显示译文
-              setTrNote("这条内容的原文就是这个语言。");
+              // 服务端能说得更具体就用它的（中文→中文那条走 D50，理由不一样）
+              setTrNote(ev.note || "这条内容的原文就是这个语言。");
             } else if (ev.type === "error") {
               setTrNote(ev.message ?? "翻译没成，稍后再试。");
             }
@@ -378,7 +386,8 @@ export function CaptionLayer({
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? "没存上，请重试");
       }
-      setSegments(parsed);
+      // 存进库的是他贴进来的原样（那是这条内容的底本），显示的按他的字形来（D50）
+      setSegments(conformSegments(parsed, hanScript));
       setPasting(false);
       setDraft("");
       router.refresh();
