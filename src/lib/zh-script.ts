@@ -10,8 +10,9 @@ import { EXTRA, SIMP, TRAD } from "./zh-hans-table";
 // 一支普通话视频的字幕整篇是繁体，点了译文=简体中文，模型认为"中文翻中文"无事可做，
 // 原样抄回来（只把半角逗号改成全角），于是译文也是繁体。
 //
-// 提示词那边也一并定死了（`gemini-youtube.ts` 要求中文写简体），但**那只是概率不是契约**
-// （整个 M2a 的教训就是这句）。真正的保证在这一层：**读侧转换**。
+// 转写那一层**故意没管字形**（理由写在 `gemini-youtube.ts` 的 PROMPT 上方）——
+// 那份字幕是跨用户共享的，替所有人定死一套字形不是转写该做的决定。
+// 真正的保证在这一层：**读侧转换**。
 //
 // **为什么放读侧而不是写侧**（照抄 D42 `normalizeLang` 的成例）：
 //   ⑴ `transcript_cache` 是**跨用户共享**的，按 content_key 存一份，没有字形维度 ——
@@ -64,6 +65,59 @@ export function hasTraditional(text: string): boolean {
   return false;
 }
 
+/**
+ * 这段中文**写的是哪套字形**。见到一个繁体独有字就算繁体。
+ *
+ * 判据故意不对称，因为事实就不对称：繁体独有字（學/話/實）是**确凿证据**，
+ * 而"没见到繁体字"只能推出"看着像简体"。字幕这种长文本上这个判据非常稳
+ * —— 整篇繁体不可能一个繁体独有字都不出现。
+ */
+export function scriptOfText(text: string): HanScript {
+  return hasTraditional(text) ? "Hant" : "Hans";
+}
+
+/**
+ * 屏幕上**实际**是哪套字形 —— 注意跟 `captionScriptFor` 的区别，那个返回的是
+ * "他想要哪套"，这个返回的是"他真的看到了哪套"。
+ *
+ * 两者会分家，因为 `conformHan` 只做得了繁→简：想要简体 → 一定转得到；
+ * 想要繁体 → **我们什么都没做**，他看到的仍是库里存的那套。
+ * 2026-08-07 的临时验证页当场逮到过这个：拿 `captionScriptFor` 当"屏幕上那份"用，
+ * 「母语繁体 + 库里简体 + 译文选简体」会被判成"要给他译文"，而其实他看的就是简体。
+ */
+export function displayedHanScript(prefs: LangPrefs, storedScript: HanScript): HanScript {
+  return captionScriptFor(prefs) === "Hans" ? "Hans" : storedScript;
+}
+
+/**
+ * 中文内容被要了一份「另一套字形的译文」时，这一趟该怎么办（D50）。
+ *
+ * 抽成纯函数是因为它有四个分支且每个分支的代价差一个数量级（免费 / 花钱），
+ * 埋在路由里就只能靠读代码验 —— 而路由要 Supabase 才跑得起来。
+ */
+export type ZhScriptPlan =
+  /** 屏幕上那份已经是这套字形了，什么都不用做 */
+  | { kind: "already" }
+  /** 免费：库里存的那份原样就是（`same`），或者查表转（`table`，只有繁→简走这儿） */
+  | { kind: "free"; via: "stored" | "table" }
+  /** 简→繁，一对多有真歧义，查表必然写错字 —— 只能花一次钱问模型 */
+  | { kind: "model" };
+
+export function planZhScript(args: {
+  /** 他要的那套 */
+  targetScript: HanScript;
+  /** 屏幕上**实际**那份是哪套（用 `displayedHanScript` 量，别拿 `captionScriptFor` 顶替） */
+  displayScript: HanScript;
+  /** 库里存的那份是哪套 */
+  storedScript: HanScript;
+}): ZhScriptPlan {
+  const { targetScript, displayScript, storedScript } = args;
+  if (displayScript === targetScript) return { kind: "already" };
+  if (storedScript === targetScript) return { kind: "free", via: "stored" };
+  if (targetScript === "Hans") return { kind: "free", via: "table" };
+  return { kind: "model" };
+}
+
 const HAN = /\p{Script=Han}/u;
 /** 假名 + 谚文。日文韩文也写汉字，光数汉字会把它们认成中文 */
 const NOT_CHINESE = /[\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
@@ -102,12 +156,17 @@ export function toSimplified(text: string): string {
 /**
  * 把一段文字调成 `script` 那套字形。
  *
- * **⚠️ `Hant` 是有意的空操作，不是漏写的分支。** 简→繁是**一对多**：128 个简体字
- * 对应多个繁体字（发→髮/發、干→乾/幹、里→裡/里、台→臺/檯/颱…），实测 ICU 为此带了
- * **42336 条**双字词级规则。只拿字表硬转，必然写出「頭发」「幹了」这种错字 ——
- * 对一个繁体母语的人来说，**那比看到简体更糟**。所以这个方向宁可什么都不做：
- * 内容本来是繁体的（这类内容本来就多）他看到的就是繁体，本来是简体的他看到简体。
- * 真要做，把那 42336 条一起导出来即可，办法都在 `scripts/gen-zh-hans-table.swift` 里写着了。
+ * **⚠️ `Hant` 是有意的空操作，不是漏写的分支。** 两个方向的难度差着量级：
+ *   繁→简：**逐字映射，0 条词级规则**（穷举双字组合实测过），一张字表与 ICU 完全等价；
+ *   简→繁：**一对多**（发→髮/發、干→乾/幹、里→裡/里、台→臺/檯/颱…），296 个字有歧义，
+ *          必须靠词级规则才知道该挑哪个。
+ * 只拿字表硬转必然写出「頭发」「幹了」，对繁体母语的人**比看到简体更糟**，所以宁可不做。
+ *
+ * 需要简→繁的地方只有一处 —— 译文栏选了繁體 —— 那条走 `/api/translate` 问模型
+ * （提示词是"换字形"不是"翻译"，见 `gemini-translate.ts`），花一次钱、进缓存、一支片子只付一次。
+ * **2026-08-07 试过从 ICU 里把简→繁的词级规则导出来，失败并放弃了**：批量拼串会串味、
+ * 逐对穷举又会把 ICU 在生僻字上的 quirk 一起收进来（滚到 44 万条 / 5.2MB）。
+ * 真要在本地做这个方向，正路是引一份成熟的词库（如 OpenCC），而不是继续反向工程 ICU。
  */
 export function conformHan(text: string, script: HanScript | null): string {
   return script === "Hans" ? toSimplified(text) : text;
