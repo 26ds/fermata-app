@@ -8,7 +8,8 @@ import { translateSegments, TranslateError, type TranslateProgress } from "@/lib
 import { isSupportedLang } from "@/lib/translate/langs";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
 import { getLangPrefs } from "@/lib/settings";
-import { dominantScript, resolveContentLang } from "@/lib/text-script";
+import { detectContentLang } from "@/lib/lang-detect";
+import { dominantScript, mightBeSameLang, resolveContentLang } from "@/lib/text-script";
 import { conformSegments, scriptOfText } from "@/lib/zh-convert";
 import { displayedHanScript, hanScriptOf } from "@/lib/zh-script";
 
@@ -95,10 +96,42 @@ export async function POST(request: Request) {
   // 后果正是 2026-08-07 真机报的那个：中文视频要英文译文，被判成"原文就是英语"，
   // 静默不翻。语言标签会撒谎，**正文用的是哪套文字不会**。
   const resolved = resolveContentLang(source.content_lang, sample);
-  const sourceLang = resolved.lang;
-  if (resolved.corrected) {
-    // 顺手把库里那一行治好 —— 不然词库标什么、AI 用哪门语言解释，全都还按那个假标签来。
-    // 治不好也不该挡住这一次翻译，所以不 await、错了也不管。
+  let sourceLang = resolved.lang;
+  let heal = resolved.corrected;
+
+  // === 省钱闸：掏钱之前先确认「这不是同一门语言」（2026-08-08 真机报的）===
+  //
+  // 上面那一步只在**正文那套文字能定死一门语言**时给得出答案（假名=日语、谚文=韩语…），
+  // 而 YouTube 那条路 `content_lang` 本来就一直空着。两件事撞在一起的后果是：
+  // 一支英语视频点「译文=English」，这里判不出原文是英语，于是老老实实付钱
+  // 把英语"翻"成英语 —— 几百段字幕，一分钱不该花。
+  //
+  // 所以判不出来时先问一句：**约 500 token，一支内容一辈子一次**（问完写回库里，
+  // 下次连这一句都省了），挡掉的是整篇的翻译费。
+  //
+  // **只在"有可能是同一门语言"时才问**：正文和目标语言连文字都不是一套
+  // （中文字幕要英文译文），不用问也知道不同，别为这个多花 500 token、多等一秒。
+  if (!sourceLang && mightBeSameLang(sample, targetLang)) {
+    const detected = await detectContentLang(segments);
+    if (detected) {
+      sourceLang = detected;
+      heal = true;
+    }
+    // 问不出来（超时 / 没配 key / 模型胡说）就照旧翻 ——
+    // **宁可多花一次钱，也不能把该翻的判成不翻**：那是用户点了没反应，更糟。
+  }
+
+  if (heal) {
+    // 顺手把库里那一行治好 —— 不然词库标什么、AI 用哪门语言解释，全都还按那个假标签来；
+    // 而且下次再点译文又要重问一遍。治不好也不该挡住这一次翻译，所以不 await、错了也不管。
+    //
+    // **中文一律写 `zh-Hans`，不在这儿判简繁**（`normalizeLang` 的既定归一，D42）。
+    // 试过在这里用 `scriptOfText` 判准再写，**放弃了**，两条理由：
+    //   ⑴ 另外两个写这一列的地方（`/api/transcript` 从 Whisper 报的语言写、`/api/phrases`）
+    //      都写 `zh-Hans`，只有这儿写 `zh-Hant` 会让同一支内容的这一列来回翻烙饼；
+    //   ⑵ **更根本的是 D50 已经定了：字形是读侧的事，不是内容的属性** ——
+    //      库里存哪套由转写模型随手挑，屏幕上是哪套由看的人的语言定。
+    //      `content_lang` 回答的是"这是哪门语言"，让它兼职回答"哪套字形"本身就是错位。
     void supabase
       .from("sources")
       .update({ content_lang: sourceLang })
@@ -117,7 +150,8 @@ export async function POST(request: Request) {
       {
         type: "same-language",
         lang: targetLang,
-        note: `这条内容的原文我判断就是${langLabel(sourceLang)}，所以没翻。`,
+        sourceLang,
+        note: `这条内容的原文我判断就是${langLabel(sourceLang)}，跟你选的译文是同一门语言 —— 没翻，也没花那笔翻译的钱。`,
       },
     ]);
   }
@@ -146,6 +180,8 @@ export async function POST(request: Request) {
         {
           type: "same-language",
           lang: targetLang,
+          // 屏幕上那份就是这套字形 —— 对选择器来说，这一项就是「原文」
+          sourceLang: targetLang,
           note: `你现在看的字幕已经是${langLabel(targetLang)}了。`,
         },
       ]);

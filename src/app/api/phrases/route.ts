@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { sameLang, studyMode } from "@/lib/lang";
-import { detectContentLang, PhraseError, scanPhrases } from "@/lib/phrases/gemini-phrases";
+import { detectContentLang } from "@/lib/lang-detect";
+import { PhraseError, scanPhrases } from "@/lib/phrases/gemini-phrases";
 import { headOf, isPhraseScan, type PhraseScan } from "@/lib/phrases/types";
 import { getLangPrefs } from "@/lib/settings";
 import { resolveContentLang } from "@/lib/text-script";

@@ -15,6 +15,7 @@ import { PhraseCheck } from "@/components/phrase-line";
 import { SelectableLine, type GlossState } from "@/components/selectable-line";
 import { Toggle } from "@/components/toggle";
 import type { PhraseItem } from "@/lib/phrases/types";
+import { normalizeLang, sameLang } from "@/lib/lang";
 import { findTerms, type TermSpan } from "@/lib/segment";
 import { putSettings } from "@/lib/settings-client";
 import { mmss } from "@/lib/time";
@@ -169,6 +170,18 @@ export function CaptionLayer({
   const [trDone, setTrDone] = useState(0);
   const [trTotal, setTrTotal] = useState(0);
   const [trNote, setTrNote] = useState(""); // 翻译失败/未翻完的人话
+  /**
+   * 服务端亲口确认过的「原文语言」（`same-language` 那一条带回来的）。
+   *
+   * 为什么不只用 `contentLang` 这个 prop：那一列对 YouTube 常年是空的
+   * （转写那条路从来不报语言），而服务端刚判完的结论**这一秒就能用上** ——
+   * 不用等他刷新页面才看见选择器上多出「（原文）」。
+   *
+   * 跟 `sourceId` 绑在一起存：万一哪天组件没重挂就换了内容，旧结论当场作废，
+   * 不会把上一支视频的语言标到这一支头上。
+   */
+  const [confirmed, setConfirmed] = useState({ sourceId, lang: "" });
+  const confirmedSourceLang = confirmed.sourceId === sourceId ? confirmed.lang : "";
 
   const activeRef = useRef<HTMLLIElement>(null);
   const rootRef = useRef<HTMLElement>(null);
@@ -291,6 +304,7 @@ export function CaptionLayer({
               translations?: { i: number; text: string }[];
               note?: string | null;
               message?: string;
+              sourceLang?: string;
             };
             if (ev.type === "start") {
               if (ev.total) setTrTotal(ev.total);
@@ -306,6 +320,8 @@ export function CaptionLayer({
               setTr(new Map()); // 原文就是这个语言，不显示译文
               // 服务端能说得更具体就用它的（中文→中文那条走 D50，理由不一样）
               setTrNote(ev.note || "这条内容的原文就是这个语言。");
+              // 选择器上给这一项标「（原文）」——**下次他还没点就知道点了不会翻**
+              if (ev.sourceLang) setConfirmed({ sourceId, lang: ev.sourceLang });
             } else if (ev.type === "error") {
               setTrNote(ev.message ?? "翻译没成，稍后再试。");
             }
@@ -349,6 +365,33 @@ export function CaptionLayer({
    * 每次都全表扫一遍，手机会烫。这里只在「字幕变了」或「词库变了」时算一次。
    * 一个词都没收过就直接空表返回，绝大多数情况连循环都不进。
    */
+  /**
+   * 译文选择器里，哪一项就是这条内容的原文 —— 标上「（原文）」，**点了不会翻**。
+   *
+   * 2026-08-08 创始人的原话：日语视频选日语译文，它还是花钱翻了一遍。服务端那半已经
+   * 不翻了，这半是把结论摆到他点之前 —— 省钱这件事得看得见，不能只写在事后那句提示里。
+   *
+   * 中文要**精确比**（简体/繁体是两项，标错一项等于骗人），而且**只认服务端刚确认的那条**：
+   * 库里存的字形不一定就是屏幕上那套（读侧会按他的语言转，D50）——
+   * 库里是简体、屏幕上是繁体时，把「简体中文」标成原文就是在骗他，那一项点下去真的会变。
+   *
+   * 其余语言只比主子标签（`en-US` 和 `en` 是一回事）。判不出来时一项都不标 ——
+   * 不知道就别装知道。
+   */
+  const isOriginalLang = useCallback(
+    (code: string) => {
+      const isZh = (s: string) => s.startsWith("zh");
+      if (confirmedSourceLang) {
+        const src = normalizeLang(confirmedSourceLang);
+        return isZh(src) || isZh(code) ? src === code : sameLang(src, code);
+      }
+      const stored = normalizeLang(contentLang || "");
+      if (!stored || isZh(stored) || isZh(code)) return false;
+      return sameLang(stored, code);
+    },
+    [confirmedSourceLang, contentLang],
+  );
+
   const savedSpansByLine = useMemo(() => {
     const m = new Map<number, TermSpan[]>();
     if (!savedTerms || savedTerms.size === 0) return m;
@@ -628,6 +671,7 @@ export function CaptionLayer({
               {TARGET_LANGS.map((l) => (
                 <option key={l.code} value={l.code}>
                   {l.label}
+                  {isOriginalLang(l.code) ? "（原文，不用翻）" : ""}
                 </option>
               ))}
             </select>

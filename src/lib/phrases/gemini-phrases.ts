@@ -1,6 +1,6 @@
 import "server-only";
 import { GoogleGenAI } from "@google/genai";
-import { langNameEn, normalizeLang, type StudyMode } from "@/lib/lang";
+import { langNameEn, type StudyMode } from "@/lib/lang";
 import { explainGeminiError } from "@/lib/transcript/gemini-youtube";
 import type { TranscriptSegment } from "@/lib/types";
 import type { PhraseItem } from "./types";
@@ -22,10 +22,6 @@ const BATCH_SEGMENTS = 100;
 const BATCH_TIMEOUT_MS = 45_000;
 const MAX_OUTPUT_TOKENS = 4_096;
 
-/** 检测内容语言时喂多少字符就够了 */
-const DETECT_CHARS = 1_500;
-const DETECT_TIMEOUT_MS = 20_000;
-
 export class PhraseError extends Error {
   constructor(message: string) {
     super(message);
@@ -39,48 +35,9 @@ export function clientFor(): GoogleGenAI {
   return new GoogleGenAI({ apiKey });
 }
 
-/**
- * 这条内容是什么语言 —— 只在库里还空着时才跑（一支内容一辈子一次，约 500 token）。
- *
- * 为什么需要它：播客走转写，模型顺手就报了语言；但 **YouTube 粘贴字幕那条路
- * 一个字都没经过模型**，`content_lang` 会一直空着 —— 而空着就没法判断"这是不是他母语"，
- * 整个 D42 的模式判定就落不了地。
- */
-export async function detectContentLang(segments: TranscriptSegment[]): Promise<string> {
-  const sample = segments
-    .map((s) => s.text)
-    .join(" ")
-    .slice(0, DETECT_CHARS)
-    .trim();
-  if (!sample) return "";
-
-  const ai = clientFor();
-  try {
-    const res = await ai.models.generateContent({
-      model: MODEL,
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              text: `What language is this text in? Answer with ONLY a BCP-47 language code (like en, ja, zh-Hans, es). No explanation.\n\n${sample}`,
-            },
-          ],
-        },
-      ],
-      config: {
-        temperature: 0,
-        maxOutputTokens: 16,
-        thinkingConfig: { thinkingBudget: 0 },
-        abortSignal: AbortSignal.timeout(DETECT_TIMEOUT_MS),
-      },
-    });
-    return normalizeLang((res.text ?? "").trim().split(/\s+/)[0] ?? "");
-  } catch {
-    // 检测不出来不是致命的：模式退回"混合"，两种都标一点。别为这个把扫描整条毙掉
-    return "";
-  }
-}
+// 「这条内容是什么语言」原来长在这儿，2026-08-08 搬去了 `@/lib/lang-detect` ——
+// 它跟词库没关系，翻译那条路（省钱闸）也要用，而且搬完之后它**先免费看正文**，
+// 判得出来就一分钱不花。这里保留一句指路，免得下次又在这个文件里找它。
 
 /** 每种模式挑什么 —— **这段文字是 D42 落地的关键**，不许出现具体语言名 */
 export function modeBrief(mode: StudyMode): string {

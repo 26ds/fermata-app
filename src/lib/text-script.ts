@@ -107,8 +107,12 @@ export function scriptOfLang(lang: string | null | undefined): TextScript | null
   }
 }
 
-/** 正文这套文字，最可能是哪门语言。只写**几乎不会错**的那几条，其余承认不知道 */
-function langOfScript(script: TextScript): string | null {
+/**
+ * 正文这套文字，最可能是哪门语言。只写**几乎不会错**的那几条，其余承认不知道。
+ *
+ * 导出是给"要不要花钱问模型"当免费的第一道闸：这里给得出答案的，一分钱都不用花。
+ */
+export function langOfScript(script: TextScript): string | null {
   switch (script) {
     case "han":
       return "zh"; // 已排除假名，所以不会是日文
@@ -126,18 +130,40 @@ function langOfScript(script: TextScript): string | null {
   }
 }
 
+/**
+ * 正文**有没有可能**就是 `targetLang` 那门语言 —— 「要不要为这件事再查一次」的闸门。
+ *
+ * 连用的文字都不是一套（满屏汉字 vs 英语），那就是两门语言，板上钉钉，
+ * 不必再花钱去问模型。**只有可能相同时才值得查**。
+ *
+ * 判不出来（正文太短、目标语言不在表里）一律返回 `true` —— 这个方向上
+ * 宁可多查一次，也不要漏掉"其实是同一门语言"而白翻一整篇。
+ */
+export function mightBeSameLang(sample: string, targetLang: string): boolean {
+  const fromText = dominantScript(sample);
+  const fromTarget = scriptOfLang(targetLang);
+  return !fromText || !fromTarget || fromText === fromTarget;
+}
+
 export interface ResolvedContentLang {
   /** 可以放心用的语言码。`null` = 老实说不知道（**比编一个更好**） */
   lang: string | null;
-  /** 库里存的那个标签跟正文对不上，被推翻了 —— 调用方该顺手把库里那行治好 */
+  /**
+   * 库里那一行和这个结论对不上 —— 调用方该顺手写回去。
+   *
+   * 两种情况都算：标签**撒了谎**被推翻（D51 原案），或者标签**根本空着**而正文能定死。
+   * 后者是 2026-08-08 补的：空着不写回去，下次还得重判一遍，
+   * 而下游（该不该花钱翻、词库标什么、AI 用哪门语言解释）全都还蒙在鼓里。
+   */
   corrected: boolean;
 }
 
 /**
  * 把库里存的 `content_lang` 和正文核对一遍，返回**可以放心用的**那一个。
  *
- * 三种结果：
- *   标签空着 → `null`（本来就不知道，谈不上纠正）
+ * 四种结果：
+ *   标签空着，但正文那套文字**能唯一指向一门语言**（假名=日语、谚文=韩语…）→ 就用它，并让调用方写回库里
+ *   标签空着，正文判不出来（拉丁字母那十几门语言共用一套字）→ `null`，老实说不知道
  *   标签与正文这套文字**对得上**、或者正文判不出来 → 原样信它
  *   **对不上** → 推翻它。正文那套文字能唯一指向一门语言就用那门，否则返回 `null`
  *              —— **宁可说不知道，也不要用一个已知是错的**。
@@ -147,16 +173,21 @@ export function resolveContentLang(
   sample: string,
 ): ResolvedContentLang {
   const label = normalizeLang(stored) || null;
-  if (!label) return { lang: null, corrected: false };
-
   const fromText = dominantScript(sample);
+  // 落库前归一成码（D42）：`langOfScript` 给的是 `zh` 这种主子标签
+  const guess = fromText ? langOfScript(fromText) : null;
+
+  // 库里压根没记 —— YouTube 那条路**从来不报语言**（`gemini-youtube` 就没这个输出），
+  // 所以这是最常见的一种，不是边角料。正文定得死就填上，定不死才认不知道。
+  if (!label) {
+    return guess ? { lang: normalizeLang(guess), corrected: true } : { lang: null, corrected: false };
+  }
+
   const fromLabel = scriptOfLang(label);
   // 有一边判不出来就没得比 —— 信标签，别自作聪明
   if (!fromText || !fromLabel || fromText === fromLabel) {
     return { lang: label, corrected: false };
   }
 
-  // 落库前归一成码（D42）：`langOfScript` 给的是 `zh` 这种主子标签
-  const guess = langOfScript(fromText);
   return { lang: guess ? normalizeLang(guess) : null, corrected: true };
 }
