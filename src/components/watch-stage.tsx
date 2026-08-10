@@ -26,10 +26,82 @@ import { putSettings } from "@/lib/settings-client";
 import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
 import { mmss } from "@/lib/time";
-import type { QuestionMode, SourceRow, TranscriptSegment, TranscriptStatus } from "@/lib/types";
+import type {
+  QuestionMode,
+  SourceKind,
+  SourceRow,
+  TranscriptSegment,
+  TranscriptStatus,
+} from "@/lib/types";
 
 /** 进度回写节流：播放中最快 10 秒存一次，别把网络当秒表用 */
 const SAVE_EVERY_MS = 10_000;
+
+// ── M3.12 片 b：可拖中缝（D47 §B / §B2） ──────────────────────────────
+//
+// 分栏比例只在 `lg:`（≥1024px）起作用，窄屏一律竖着排，这几个数用不上。
+
+/** Tailwind `lg` 断点。宽屏专有的量尺不在窄屏上白跑 */
+const LG_PX = 1024;
+/** 中缝能拖到的范围。50 以下右栏比视频还宽、78 以上右栏塞不下一行字幕 */
+const SPLIT_MIN = 50;
+const SPLIT_MAX = 78;
+/**
+ * 默认比例。**播客不是 16:9** —— 左边是方形封面 + `<audio>`，撑不起 62%，
+ * 硬给就是一大片空；而播客的主战场本来就是字幕（D47 §B2）。
+ */
+const SPLIT_DEFAULT: Record<"video" | "podcast", number> = { video: 62, podcast: 45 };
+/** 键盘拖：一下 2%（方向键），Home 复位 */
+const SPLIT_STEP = 2;
+const SPLIT_KEY = "fermata.watch.splitPct";
+/**
+ * 手指/鼠标横着挪不到这么多像素，就**不算拖**（连遮罩都不盖）。
+ *
+ * 这不是"手感调优"，是**双击复位能不能用**的前提：遮罩一盖上，第一次的 `mouseup`
+ * 就落在遮罩上而不是缝上 —— 两次 click 的落点不是同一个元素，浏览器**根本不会**
+ * 派发 `dblclick`。实测过：不设这道门槛，双击复位一次都触发不了，
+ * 反而把当前比例又存了一遍。
+ */
+const DRAG_THRESHOLD_PX = 3;
+
+/**
+ * 高度上限（D47 账二）：视频是 16:9，**宽度一涨高度跟着涨** ——
+ * 桌面真正的天花板是"窗口有多高"，不是多宽。这两个数是这条上限的两个兜底：
+ * 视频上下那些东西之外再留一点（`main` 的 `lg:pb-4`），以及左栏无论如何不低于多少。
+ */
+const CAP_SPARE_PX = 16;
+const CAP_FLOOR_PX = 280;
+/** 量出来的上限和上一次差不到这么多就不写回去 —— 挡住「写 → 回流 → 再量」的抖动 */
+const CAP_EPSILON_PX = 4;
+
+/**
+ * 视频和播客**分开记**（D47 §B2）：看视频调好的宽度，不该在听播客时被套用。
+ * `manual` 归到视频那一档 —— 它没有播放器，走哪个默认都无所谓，别为它多开一个键。
+ */
+function splitKindOf(kind: SourceKind): "video" | "podcast" {
+  return kind === "podcast" ? "podcast" : "video";
+}
+
+/** 比例按设备记，不进数据库：桌面比例本来就是每台机器各不相同的事（D47 §B，零迁移） */
+function readSplit(kind: "video" | "podcast"): number | null {
+  try {
+    const raw = window.localStorage.getItem(`${SPLIT_KEY}.${kind}`);
+    const pct = Number(raw);
+    // 存坏了（手改过、旧版本、别的站点撞名）就当没存过，回默认值，别把布局搞成负数
+    return Number.isFinite(pct) && pct >= SPLIT_MIN && pct <= SPLIT_MAX ? pct : null;
+  } catch {
+    // Safari 无痕模式下 localStorage 会抛。记不住比崩了强
+    return null;
+  }
+}
+
+function writeSplit(kind: "video" | "podcast", pct: number) {
+  try {
+    window.localStorage.setItem(`${SPLIT_KEY}.${kind}`, String(Math.round(pct)));
+  } catch {
+    // 同上：存不下就只在这一次观看里有效
+  }
+}
 
 /**
  * M1 的中枢：拿到 PlayerHandle，持续知道"现在播到第几秒"。
@@ -199,6 +271,147 @@ export function WatchStage({
 
   const videoWrapRef = useRef<HTMLDivElement>(null);
 
+  // ── M3.12 片 b：可拖中缝（D47 §B / §B2） ──────────────────────────────
+  //
+  // **比例不进 React state。** 拖动时每帧 setState 会把整棵树连播放器一起重渲染
+  // （M0.5 栽过的那个坑），所以只有一个 CSS 变量在动：`--split-video`。
+  // React 这边只有「正在拖吗」一个布尔值，一次拖动总共 setState 两次。
+  const gridRef = useRef<HTMLDivElement>(null);
+  const leftColRef = useRef<HTMLDivElement>(null);
+  const handleElRef = useRef<HTMLDivElement>(null);
+  const splitKind = splitKindOf(source.kind);
+  const defaultSplit = SPLIT_DEFAULT[splitKind];
+  /**
+   * 这一栏的**高度会不会跟着宽度长**（决定要不要那条高度上限）。
+   *
+   * ⚠️ **偏离冻结计划 §B2 的一条**：计划写的是"高度上限那条对播客按 1:1（封面）算"，
+   * 前提是播客左边有一张方形封面。**实际的 `PodcastPlayer` 里根本没有封面** ——
+   * 它是一张固定高度约 137px 的控制卡（播放键 + 时间 + 进度条），高度和宽度无关。
+   * 照 1:1 算的后果实测过：1512×859 上把播客左栏从该有的 652px 硬压到 585px，
+   * 底下空着 465px —— **凭空缩小，一点道理都没有**。所以播客不设上限。
+   */
+  const capsHeight = source.kind === "youtube";
+  const splitRef = useRef(defaultSplit);
+  /** 量出来的高度上限（px）。0 = 还没量到（窄屏 / 首帧），那时用 CSS 里那个估算兜底 */
+  const capRef = useRef(0);
+  const [dragging, setDragging] = useState(false);
+
+  const applySplit = useCallback((pct: number) => {
+    splitRef.current = pct;
+    gridRef.current?.style.setProperty("--split-video", `${pct}%`);
+    handleElRef.current?.setAttribute("aria-valuenow", String(Math.round(pct)));
+  }, []);
+
+  /**
+   * 这一刻中缝最右能到哪儿：78% 与**高度上限换算成的百分比**取小的那个。
+   *
+   * 为什么要拿上限来夹：窗口一矮，上限就先于 78% 生效，缝停在上限那儿不动了。
+   * 若不夹这一下，指针在右、缝在左，看起来像"拖不动"，而**存下去的还是那个
+   * 在这个窗口里根本实现不了的数** —— 下次进来照样卡在上限上。夹住之后
+   * **缝永远跟在指针底下**，存的也永远是眼睛看到的那个数。
+   */
+  const maxSplitNow = useCallback((gridW: number) => {
+    if (capRef.current <= 0 || gridW <= 0) return SPLIT_MAX;
+    const capPct = (capRef.current / gridW) * 100;
+    return Math.max(SPLIT_MIN, Math.min(SPLIT_MAX, capPct));
+  }, []);
+
+  const clampSplit = useCallback(
+    (pct: number, gridW: number) => Math.max(SPLIT_MIN, Math.min(maxSplitNow(gridW), pct)),
+    [maxSplitNow],
+  );
+
+  /** 拖到某个横坐标。只读 DOM、只写 CSS 变量，全程不碰 state */
+  const dragTo = useCallback(
+    (clientX: number) => {
+      const r = gridRef.current?.getBoundingClientRect();
+      if (!r || r.width <= 0) return;
+      applySplit(clampSplit(((clientX - r.left) / r.width) * 100, r.width));
+    },
+    [applySplit, clampSplit],
+  );
+
+  const commitSplit = useCallback(() => {
+    writeSplit(splitKind, splitRef.current);
+  }, [splitKind]);
+
+  /** 双击复位（D47 §B）。回默认值并存下来 —— 不然刷新一下又回到刚才拖歪的位置 */
+  const resetSplit = useCallback(() => {
+    const r = gridRef.current?.getBoundingClientRect();
+    applySplit(clampSplit(defaultSplit, r?.width ?? 0));
+    writeSplit(splitKind, defaultSplit);
+  }, [applySplit, clampSplit, defaultSplit, splitKind]);
+
+  const onHandleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Home") {
+        e.preventDefault();
+        resetSplit();
+        return;
+      }
+      const delta = e.key === "ArrowLeft" ? -SPLIT_STEP : e.key === "ArrowRight" ? SPLIT_STEP : 0;
+      if (!delta) return;
+      e.preventDefault();
+      const r = gridRef.current?.getBoundingClientRect();
+      const next = clampSplit(splitRef.current + delta, r?.width ?? 0);
+      applySplit(next);
+      writeSplit(splitKind, next);
+    },
+    [applySplit, clampSplit, resetSplit, splitKind],
+  );
+
+  // 上次拖到哪儿就从哪儿开始。**在 effect 里直改 DOM，不 setState** ——
+  // 服务端渲染不出 localStorage，走 state 就是一次必然的水合不一致。
+  useEffect(() => {
+    const stored = readSplit(splitKind);
+    if (stored != null) applySplit(stored);
+  }, [splitKind, applySplit]);
+
+  /**
+   * 按住缝开始拖。监听挂在 **window** 上而不是那条缝上 —— 指针一动就滑出那 24px 了。
+   *
+   * 挂载与拆除都在这个函数里就地做完（不走 `useEffect` + state）：
+   * 一次拖动只有"越过门槛"和"松手"两次 setState，而且那两次都只影响遮罩和线的颜色。
+   * 拆到一半就卸载的情况由下面那个 effect 兜底。
+   */
+  const teardownDragRef = useRef<(() => void) | null>(null);
+  const startDrag = useCallback(
+    (e: React.PointerEvent) => {
+      // 只认主键。右键 / 中键按下去不该开始拖
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      teardownDragRef.current?.();
+      const startX = e.clientX;
+      let moved = false;
+      const onMove = (ev: PointerEvent) => {
+        if (!moved) {
+          if (Math.abs(ev.clientX - startX) < DRAG_THRESHOLD_PX) return;
+          moved = true;
+          setDragging(true); // 真的动了才盖遮罩 —— 见 DRAG_THRESHOLD_PX 上的说明
+        }
+        dragTo(ev.clientX);
+      };
+      const stop = () => {
+        teardownDragRef.current?.();
+        if (!moved) return; // 只是点了一下（多半是双击的前半程），什么都别改、更别存
+        setDragging(false);
+        commitSplit();
+      };
+      const teardown = () => {
+        teardownDragRef.current = null;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", stop);
+        window.removeEventListener("pointercancel", stop);
+      };
+      teardownDragRef.current = teardown;
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", stop);
+      window.addEventListener("pointercancel", stop);
+    },
+    [dragTo, commitSplit],
+  );
+  // 拖到一半整页被换掉（返回 / 换片）：把监听收干净，别留一个指向已卸载组件的闭包
+  useEffect(() => () => teardownDragRef.current?.(), []);
+
   // ── 台面底缘：沉浸磨砂层和暂停面板的上边缘，两个浮层共用同一个值（所以只量一次） ──
   //
   // **只允许落在两条「缝」上，中间一律不许**：
@@ -218,7 +431,52 @@ export function WatchStage({
     // 退到缝②的门槛：留给浮层的高度低于这个数就不值当了（1280×620 上按缝① 只剩 93px）。
     // 300 是量出来的：他那台 1512×859 按缝① 还有 332px，够，不会被这条退路误伤。
     const MIN_LAYER_H = 300;
+
+    /**
+     * 片 b：**把片 a 借来的那个估算常数换成量出来的真值**（D47 账二）。
+     *
+     * 片 a 写的是 `max-w-[calc((100dvh-20rem)*16/9)]` —— 20rem 是"页头 + 状态卡 +
+     * 点点条 + 各处间距 + 母语猜测横幅"的**估算**，而这几样东西的高度随语言、
+     * 随字号、随横幅在不在**天天变**。估小了点点条被剪掉，估大了视频白白变小。
+     * 现在直接量：视频上面剩多少、下面占多少，一减就是它能有多高。
+     *
+     * 换成 grid 轨道之后还顺带解决了片 a 欠的另一笔账：上限生效时**多出来的宽度
+     * 归右栏**（轨道自己变窄，`1fr` 吃掉剩下的），不再是左栏里一块白留白。
+     */
+    const measureCap = () => {
+      const grid = gridRef.current;
+      const wrap = videoWrapRef.current;
+      // 窄屏不分栏，这条上限没有意义 —— 而且那时页面是滚的，量出来的数是错的。
+      // 播客那一档压根没有"高度跟着宽度长"这回事（见 capsHeight），也就没有上限可言。
+      if (!grid || !wrap || !capsHeight || window.innerWidth < LG_PX) return;
+      const w = wrap.getBoundingClientRect();
+      // 视频**上面**的（页头 + 母语猜测横幅 + main 上内边距）和**下面**的（状态卡 + 点点条 + 两道间距）。
+      // 两个都是"和视频多宽无关"的量，所以「量 → 写 → 回流 → 再量」会一步收敛，不会来回荡。
+      const above = Math.max(0, w.top);
+      // ⚠️ **不能拿左栏自己的 bottom 当"下面"**（第一版就是这么写的，读数看着还挺像那么回事）：
+      // 左栏是 grid 子项，默认 `align-items: stretch`，**它的高度永远等于整行的高度**，
+      // 跟里面装了什么无关。于是 `col.bottom - video.bottom` 量的其实是"视频底下的空白"，
+      // 而那块空白又是视频高度的函数 —— 整个式子变成自指，收敛到一个**看起来合理、
+      // 其实毫无意义的不动点**（1512×859 上算出 712px，比真值 1040px 小了三成）。
+      // 只有逐个量视频后面那几个**真实兄弟节点**才是"下面到底占了多少"。
+      let below = 0;
+      for (let el = wrap.nextElementSibling; el; el = el.nextElementSibling) {
+        below = Math.max(below, el.getBoundingClientRect().bottom - w.bottom);
+      }
+      const room = window.innerHeight - above - Math.max(0, below) - CAP_SPARE_PX;
+      const next = Math.max(CAP_FLOOR_PX, Math.round((room * 16) / 9));
+      if (Math.abs(next - capRef.current) < CAP_EPSILON_PX) return;
+      capRef.current = next;
+      grid.style.setProperty("--video-cap", `${next}px`);
+      // 上限收紧之后，存着的比例可能已经越界了 —— 把缝拉回它现在能到的地方，
+      // **但不回写 localStorage**：窗口只是暂时矮了，他调好的那个数得留着。
+      const gw = grid.getBoundingClientRect().width;
+      const clamped = clampSplit(splitRef.current, gw);
+      if (Math.abs(clamped - splitRef.current) > 0.5) applySplit(clamped);
+    };
+
     const measure = () => {
+      measureCap();
       const card = stageRef.current?.getBoundingClientRect();
       const video = videoWrapRef.current?.getBoundingClientRect();
       if (!card) return;
@@ -234,6 +492,8 @@ export function WatchStage({
     measure();
     const ro = new ResizeObserver(measure);
     if (stageRef.current) ro.observe(stageRef.current);
+    // 左栏也要盯着：拖中缝会改它的宽 → 视频高跟着变 → 台面底缘和高度上限都得重算
+    if (leftColRef.current) ro.observe(leftColRef.current);
     window.addEventListener("resize", measure);
     // 播放器加载 / 手机地址栏收放都会引起回流，兜底轮询一小会儿
     const t = window.setInterval(measure, 400);
@@ -244,7 +504,7 @@ export function WatchStage({
       window.clearInterval(t);
       window.clearTimeout(stop);
     };
-  }, []);
+  }, [capsHeight, applySplit, clampSplit]);
 
   // 服务端数据变了（router.refresh 之后）就跟着换。渲染期校正，不用 effect
   const [seen, setSeen] = useState(interrupts);
@@ -1084,22 +1344,35 @@ export function WatchStage({
     // 窄屏这边**一个像素都没动**：外层仍是 `flex flex-col gap-3`，左右两栏只是两个
     // 中间容器，左栏内部也是 gap-3，所以竖着排下来的间距和以前逐像素一致。
     //
-    // 62% 走 CSS 变量：片 b 的可拖中缝只要改这一个变量，不用重排 DOM、更不用重渲播放器。
+    // 比例走 CSS 变量：片 b 的可拖中缝只改这一个变量，不重排 DOM、更不重渲播放器。
+    //
+    // 三条轨道 = 左栏 / 中缝 / 右栏，中缝那 1.5rem **就是**两栏之间的沟（所以
+    // `lg:gap-x-0`，总沟宽和片 a 的 `gap-x-6` 一样是 24px，只是现在它能拖了）。
+    //
+    // 左栏轨道是 `min(比例, 高度上限)`：**上限一生效，多出来的宽度自动归右栏**
+    // （`1fr` 吃掉剩下的），不再像片 a 那样在左栏里留一块白。
+    // `--video-cap` 的初值是片 a 那个 CSS 估算 —— 只活到量尺跑完的那一帧（见 measureCap）。
     <div
-      className="flex flex-col gap-3 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[var(--split-video)_1fr] lg:gap-x-6"
-      style={{ "--split-video": "62%" } as React.CSSProperties}
+      ref={gridRef}
+      className="flex flex-col gap-3 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[min(var(--split-video),var(--video-cap))_1.5rem_1fr] lg:gap-x-0"
+      style={
+        {
+          "--split-video": `${defaultSplit}%`,
+          // 播客那一档给一个**永远夹不住**的值（见 capsHeight）
+          "--video-cap": capsHeight ? "calc((100dvh - 20rem) * 16 / 9)" : "100%",
+        } as React.CSSProperties
+      }
     >
       {/* ── 左栏：视频 + 状态卡 + 点点条。**不滚。** ──
           点点条跟视频走，不去右栏（2026-08-05 创始人确认，也是计划 §A 的骨架图）：
           它本质上是**时间轴**，和播放器进度条是同一根 26 分钟 —— 宽度不一致就没有"位置感"，
           同样几个点挤进 38% 的右栏也更难点中。
 
-          ⚠️ `lg:max-w-[…]` 是**高度上限**（账二）：视频是 16:9，宽度一涨高度跟着涨，
-          桌面上真正的天花板是**窗口有多高**而不是多宽。不夹这一下，1280×620 这种矮窗口上
-          左栏会比窗口高 49px，点点条直接被 `overflow-hidden` 剪掉。
-          17rem ≈ 页头 + 状态卡 + 点点条 + 各处间距。片 b 会换成量出来的真值，
-          并把多出来的宽度让给右栏（现在只是留白）。 */}
-      <div className="flex min-w-0 flex-col gap-3 lg:min-h-0 lg:max-w-[calc((100dvh-20rem)*16/9)]">
+          ⚠️ 高度上限（账二）现在长在**外层的 grid 轨道**上，不在这个 div 上：
+          视频是 16:9，宽度一涨高度跟着涨，桌面真正的天花板是**窗口有多高**而不是多宽。
+          不夹这一下，1280×620 这种矮窗口上左栏会比窗口高 49px，点点条直接被
+          `overflow-hidden` 剪掉。片 b 已把片 a 那个估算常数换成量出来的真值（measureCap）。*/}
+      <div ref={leftColRef} className="flex min-w-0 flex-col gap-3 lg:min-h-0">
         {/* D18：画面越大越好 —— 手机上让播放器顶掉页面左右内边距，整整宽出 40px。
             sm 以上回到圆角卡片（桌面宽度富余，全出血反而失衡） */}
         <div ref={videoWrapRef} className="-mx-5 sm:mx-0">
@@ -1169,6 +1442,34 @@ export function WatchStage({
         />
       </div>
 
+      {/* ── 中缝：按住拖 / 双击复位 / 方向键微调（D47 §B） ──
+          命中区是整条 24px 的沟（计划要求 ≥8px），**看得见的只有中间那 1px** ——
+          它是两栏之间的沟本身，不是额外占的地。窄屏 `hidden`：那儿根本没有两栏。
+          `touch-none` 挡掉浏览器的手势接管（否则触屏笔电上一拖就变成滚页面）。 */}
+      <div
+        ref={handleElRef}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="拖动调整视频与学习区的宽度，双击复位"
+        aria-valuemin={SPLIT_MIN}
+        aria-valuemax={SPLIT_MAX}
+        aria-valuenow={Math.round(defaultSplit)}
+        tabIndex={0}
+        onPointerDown={startDrag}
+        onDoubleClick={resetSplit}
+        onKeyDown={onHandleKeyDown}
+        className={`group hidden select-none touch-none lg:flex lg:cursor-col-resize lg:items-center lg:justify-center ${
+          dragging ? "" : "focus-visible:outline-none"
+        }`}
+      >
+        <span
+          aria-hidden
+          className={`h-full w-px rounded-full transition-colors ${
+            dragging ? "bg-teal-400" : "bg-ink-700 group-hover:bg-teal-400 group-focus-visible:bg-teal-400"
+          }`}
+        />
+      </div>
+
       {/* ── 右栏：字幕（选词 / 查词的主战场）。**整页只有这一栏会滚。** ──
           `lg:min-h-0` + `lg:overflow-y-auto` 两个一起才成立：grid 子项不写 min-h-0
           就不肯缩到内容以下，overflow 永远触发不了、页面改成整体撑高。 */}
@@ -1202,6 +1503,17 @@ export function WatchStage({
           }}
         />
       </div>
+
+      {/* 拖中缝时整页盖一层透明遮罩 —— **这一层不是装饰，是拖动能不能成立的前提**（D47 §B）。
+          光标一旦掠过 YouTube 的 `<iframe>`，指针事件就被 iframe 内部吞掉，
+          window 上的 `pointermove` 当场断供、缝卡在半路。`setPointerCapture` 在部分浏览器
+          挡不住跨源 iframe，**盖一层才是可靠解**。松手立刻拆掉（`dragging` 一 false 就卸载）。
+          z-[80]：连词卡（z-[70]）都要压住 —— 拖动过程中不该有任何东西还能抢指针。 */}
+      {dragging && (
+        <ViewportLayer>
+          <div className="fixed inset-0 z-[80] cursor-col-resize select-none" aria-hidden />
+        </ViewportLayer>
+      )}
 
       {/* 悬浮捕获球。轻点 = 记下这一刻并开面板；长按 = 进/出沉浸聊天。
           M2a：球色接上真状态 —— 灰=这一刻还没字幕，青=这一刻有字幕（D5 的双态色）。
