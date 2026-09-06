@@ -88,6 +88,11 @@ function NavArrow({
  *
  * 悬浮和点击都能打开（他要的是「鼠标悬浮/点击」）：悬浮走 `hover`，
  * 点击走 `pinned` —— 两者分开存，否则触屏上点一下会被紧接着合成的 mouseleave 关掉。
+ *
+ * **第四轮它搬到了整条的最前面**（创始人 2026-09-06：「这个问号直接提到前面去」）——
+ * 右端腾出来给「播放控制」那颗折叠开关。⚠️ 外层刻意**不写 z-index**：
+ * 写了就成了层叠上下文，气泡的 `z-20` 只在它自己家里管用，
+ * 会被后面那两颗 `z-10` 的箭头压在底下（气泡现在朝右长，正好横穿它们）。
  */
 function CaptureHelp({ text, label }: { text: string; label: string }) {
   const [hover, setHover] = useState(false);
@@ -115,8 +120,8 @@ function CaptureHelp({ text, label }: { text: string; label: string }) {
         </span>
       </button>
       {open && (
-        // 气泡朝左上长：这颗问号钉在整条的最右端，往右会顶出屏幕
-        <p className="glass-card absolute bottom-full right-0 z-20 mb-1 w-64 rounded-xl px-3 py-2 text-[0.68rem] leading-5 text-ink-200">
+        // 气泡朝**右**上长：问号现在钉在整条的最左端，朝左会顶出屏幕（264px 宽，直接跑到负数去）
+        <p className="glass-card absolute bottom-full left-0 z-20 mb-1 w-64 rounded-xl px-3 py-2 text-[0.68rem] leading-5 text-ink-200">
           {text}
         </p>
       )}
@@ -133,14 +138,19 @@ interface DotBarProps {
   onSeek(t: number): void;
   onDelete(id: string): Promise<void>;
   /**
-   * 顶在这一条上面的一个小控件（现在装的是「播放控制」的折叠开关，**且只在折叠时才传**）。
+   * 钉在这一条**最右端**的一个小控件（现在装的是「播放控制」的折叠开关，**且只在折叠时才传**）。
    *
    * 展开时那颗开关长在播放控制卡自己身上（创始人 2026-09-06：「这个隐藏提到那个红圈那里去」
-   * —— 开关就该长在它收起来的那个东西上）；卡片一收起来，开关就落到这儿，
-   * 位置只往上挪了一层，横坐标不变。**外面那层排版（右对齐 / 只在宽屏出现）由调用方带来**，
-   * 点点条不认得被折叠的是谁。
+   * —— 开关就该长在它收起来的那个东西上）；卡片一收起来，开关就落到这儿。
+   * **第四轮它不再单占一行**（创始人 2026-09-06：「把这一行往上提 然后和播放控制一行」）——
+   * 直接进到点点条这一行的末尾，整条因此上移 32.32px（1512×900 实测）。
+   *
+   * ⚠️ **一个点都没有 / 时长还没读出来时这一行根本不存在**，那时它退回到占位块上面单独一层。
+   * 不这么兜的话：新导入一条内容 + 之前收起过控制条 = 开关永远找不回来
+   * （卡片是 `lg:hidden`，窄屏那边也没有开关），控制条就此锁死。
+   * **外面那层"只在宽屏出现"仍由调用方带来**（开关自己带 `lg:inline-flex`），点点条不认得被折叠的是谁。
    */
-  headerAction?: React.ReactNode;
+  trailing?: React.ReactNode;
 }
 
 export function DotBar({
@@ -149,7 +159,7 @@ export function DotBar({
   getCurrentTime,
   onSeek,
   onDelete,
-  headerAction,
+  trailing,
 }: DotBarProps) {
   // 记住"用户点开的是哪个点"而不是"哪个簇" —— 簇是算出来的，
   // 删掉一个点整个簇的构成就变了，记簇会让展开层莫名其妙地关掉。
@@ -242,24 +252,42 @@ export function DotBar({
     }
   }
 
+  // 一个点都没有（或时长还没读出来）时下面那一行不存在，折叠开关只好退回来单占一层。
+  // **刻意不写 `mb-*`**：窄屏上开关自己是 `display:none`，这个 div 就是 0 高、0 边距，
+  // 一个像素都不占；下面那块占位的 `mt-2` 照旧从这儿量起，窄屏几何原样不动。
+  const trailingRow = trailing ? (
+    <div className="flex justify-end px-1">{trailing}</div>
+  ) : null;
+
   return (
     // 创始人 2026-09-06：`CAPTURES / 捕获点` 那一行整行拿掉（"甚至直接隐藏"），
     // 这一条整体再往上提一层。名字没有丢 —— 读屏的人从 aria-label 拿到它，
-    // 看得见的人从最右边那个问号拿到一句更有用的人话。
+    // 看得见的人从**最左边**那个问号拿到一句更有用的人话。
+    //
+    // 第四轮（同日）：折叠开关不再单占一行，进到下面这一行的末尾 ——
+    // 「把这一行往上提 然后和播放控制一行」。
     <section aria-label={t("watch.captures.aria")}>
-      {headerAction}
-
       {sorted.length === 0 ? (
-        <p className="mt-2 rounded-2xl border border-dashed border-ink-700 px-4 py-3 text-xs leading-5 text-ink-500">
-          播到卡住的地方，点一下悬浮球 —— 这里会留下一个点，随时点回去。
-        </p>
+        <>
+          {trailingRow}
+          <p className="mt-2 rounded-2xl border border-dashed border-ink-700 px-4 py-3 text-xs leading-5 text-ink-500">
+            播到卡住的地方，点一下悬浮球 —— 这里会留下一个点，随时点回去。
+          </p>
+        </>
       ) : !ready ? (
-        <p className="mt-2 rounded-2xl border border-dashed border-ink-700 px-4 py-3 text-xs leading-5 text-ink-500">
-          读取时长中，马上就能显示这 {sorted.length} 个点。
-        </p>
+        <>
+          {trailingRow}
+          <p className="mt-2 rounded-2xl border border-dashed border-ink-700 px-4 py-3 text-xs leading-5 text-ink-500">
+            读取时长中，马上就能显示这 {sorted.length} 个点。
+          </p>
+        </>
       ) : (
         <>
           <div className="mt-2 flex items-center">
+            {/* 问号提到整条最前面（创始人 2026-09-06 第四轮）。它是"这些点是什么"的答案，
+                站在开头更像一个开场白；右端也就空出来给折叠开关。 */}
+            <CaptureHelp text={t("watch.captures.help")} label={t("watch.captures.helpAria")} />
+
             {/* 上一个 / 下一个捕获点。透明、无边框，只在能用时才显形（disabled 时压到 15%）。
                 z-10：两端圆点的 44px 命中区会探进来一点，箭头必须压在上面 */}
             <NavArrow ref={prevRef} direction={-1} onClick={() => step(-1)} />
@@ -304,12 +332,12 @@ export function DotBar({
 
             <NavArrow ref={nextRef} direction={1} onClick={() => step(1)} />
 
-            {/* 问号**紧挨着最右那颗箭头**（创始人 2026-09-06 在图上点的就是这个位置）；
-                个数从原来那行标题搬下来，仍然右对齐在整条的末端 */}
-            <CaptureHelp text={t("watch.captures.help")} label={t("watch.captures.helpAria")} />
-            <span className="ui-mono shrink-0 pl-0.5 text-[0.68rem] text-ink-500">
+            {/* 个数（从原来那行标题搬下来的），再往右就是折叠开关 —— 它原来自己占一行，
+                现在归到这一行的末尾，横坐标几乎没动，整条往上提了一层 */}
+            <span className="ui-mono shrink-0 px-1 text-[0.68rem] text-ink-500">
               {t("watch.captures.count", sorted.length)}
             </span>
+            {trailing}
           </div>
 
           {open && (

@@ -1447,10 +1447,12 @@ export function WatchStage({
   /**
    * 「播放控制」的折叠开关。**同一份，长在两个地方**（创始人 2026-09-06）：
    * 展开时钉在控制卡那一行的最右端（开关就该长在它收起来的东西上）；
-   * 收起后卡片整个不在了，它落到点点条上面那一层 —— 横坐标不变，只往上挪一层。
+   * 收起后卡片整个不在了，它落到**点点条那一行的末尾** —— 横坐标基本不变，
+   * 但不再自己占一行（第四轮：「把这一行往上提 然后和播放控制一行」）。
    *
    * 两处不会同时看得见：展开时点点条那边压根不传；收起时卡片是 `lg:hidden`
    * （整棵子树连同这颗按钮一起从无障碍树里消失）。窄屏两处都是 `display:none`。
+   * `shrink-0`：进到点点条那一行后它和 `flex-1` 的轨道做邻居，不写就会被挤到换行。
    */
   const controlsToggle = (
     <button
@@ -1459,7 +1461,7 @@ export function WatchStage({
       aria-expanded={controlsShown}
       aria-label={controlsShown ? t("watch.controls.hide") : t("watch.controls.show")}
       title={controlsShown ? t("watch.controls.hide") : t("watch.controls.show")}
-      className="hidden items-center gap-1.5 rounded-lg px-1.5 py-1 text-[0.68rem] text-ink-500 transition-colors hover:text-teal-300 lg:inline-flex"
+      className="hidden shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1 text-[0.68rem] text-ink-500 transition-colors hover:text-teal-300 lg:inline-flex"
     >
       <Chevron up={controlsShown} />
       {t("watch.controls.label")}
@@ -1585,13 +1587,10 @@ export function WatchStage({
           getCurrentTime={getCurrentTime}
           onSeek={handleSeek}
           onDelete={handleDelete}
-          // 收起来的时候，开关落到这儿（展开时它在控制卡上，见 controlsToggle）。
-          // 外层这个 `hidden lg:flex` 是给窄屏的：那儿不折叠，这一层连高度都不该占。
-          headerAction={
-            controlsShown ? null : (
-              <div className="mb-1 hidden justify-end px-1 lg:flex">{controlsToggle}</div>
-            )
-          }
+          // 收起来的时候，开关落到这一行的**末尾**（展开时它在控制卡上，见 controlsToggle）。
+          // 这里传的是**光秃秃一颗按钮**，右对齐/藏起来的事交给点点条和按钮自己：
+          // 按钮自带 `hidden lg:inline-flex`，所以窄屏上它就是不存在，一个像素都不占。
+          trailing={controlsShown ? null : controlsToggle}
         />
       </div>
 
