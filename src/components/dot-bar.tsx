@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useCopy } from "@/components/copy-provider";
 import { mmss } from "@/lib/time";
 import type { InterruptRow } from "@/lib/types";
 
@@ -81,6 +82,48 @@ function NavArrow({
   );
 }
 
+/**
+ * 那个问号（创始人 2026-09-06）。原来这一条上面顶着一行 `CAPTURES / 捕获点`，
+ * 只为说一个名字就占掉一整行；**名字换成一句人话，藏在问号里**，行让给内容。
+ *
+ * 悬浮和点击都能打开（他要的是「鼠标悬浮/点击」）：悬浮走 `hover`，
+ * 点击走 `pinned` —— 两者分开存，否则触屏上点一下会被紧接着合成的 mouseleave 关掉。
+ */
+function CaptureHelp({ text, label }: { text: string; label: string }) {
+  const [hover, setHover] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const open = hover || pinned;
+  return (
+    <div className="relative flex shrink-0 items-center">
+      <button
+        type="button"
+        aria-label={label}
+        aria-expanded={open}
+        onClick={() => setPinned((v) => !v)}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        onBlur={() => setPinned(false)}
+        className="flex h-11 w-7 items-center justify-center text-ink-500 transition-colors hover:text-teal-300"
+      >
+        <span
+          aria-hidden
+          className={`flex h-[15px] w-[15px] items-center justify-center rounded-full border text-[0.6rem] leading-none ${
+            open ? "border-teal-400 text-teal-300" : "border-current"
+          }`}
+        >
+          ?
+        </span>
+      </button>
+      {open && (
+        // 气泡朝左上长：这颗问号钉在整条的最右端，往右会顶出屏幕
+        <p className="glass-card absolute bottom-full right-0 z-20 mb-1 w-64 rounded-xl px-3 py-2 text-[0.68rem] leading-5 text-ink-200">
+          {text}
+        </p>
+      )}
+    </div>
+  );
+}
+
 interface DotBarProps {
   points: InterruptPoint[];
   /** 总时长（秒）。0 表示播放器还没报出来 */
@@ -90,11 +133,12 @@ interface DotBarProps {
   onSeek(t: number): void;
   onDelete(id: string): Promise<void>;
   /**
-   * 塞进这一行标题右边的小控件（现在装的是「播放控制」的折叠开关）。
+   * 顶在这一条上面的一个小控件（现在装的是「播放控制」的折叠开关，**且只在折叠时才传**）。
    *
-   * **为什么挂在这儿**：折叠之后播放控制卡整个不见了，开关得有个**永远在场**的家 ——
-   * 而「捕获点」这一行正是创始人 2026-09-06 点名"折叠之后仍然要在"的那一条。
-   * 用一个不认得内容的插槽，点点条不必知道被折叠的是谁。
+   * 展开时那颗开关长在播放控制卡自己身上（创始人 2026-09-06：「这个隐藏提到那个红圈那里去」
+   * —— 开关就该长在它收起来的那个东西上）；卡片一收起来，开关就落到这儿，
+   * 位置只往上挪了一层，横坐标不变。**外面那层排版（右对齐 / 只在宽屏出现）由调用方带来**，
+   * 点点条不认得被折叠的是谁。
    */
   headerAction?: React.ReactNode;
 }
@@ -109,6 +153,7 @@ export function DotBar({
 }: DotBarProps) {
   // 记住"用户点开的是哪个点"而不是"哪个簇" —— 簇是算出来的，
   // 删掉一个点整个簇的构成就变了，记簇会让展开层莫名其妙地关掉。
+  const t = useCopy();
   const [anchorId, setAnchorId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -198,18 +243,11 @@ export function DotBar({
   }
 
   return (
-    <section aria-labelledby="dotbar-title">
-      <div className="flex items-center justify-between px-1">
-        <p id="dotbar-title" className="eyebrow">
-          captures / 捕获点
-        </p>
-        <div className="flex items-center gap-3">
-          {headerAction}
-          <span className="ui-mono text-[0.68rem] text-ink-500">
-            {sorted.length ? `${sorted.length} 个` : "还没有"}
-          </span>
-        </div>
-      </div>
+    // 创始人 2026-09-06：`CAPTURES / 捕获点` 那一行整行拿掉（"甚至直接隐藏"），
+    // 这一条整体再往上提一层。名字没有丢 —— 读屏的人从 aria-label 拿到它，
+    // 看得见的人从最右边那个问号拿到一句更有用的人话。
+    <section aria-label={t("watch.captures.aria")}>
+      {headerAction}
 
       {sorted.length === 0 ? (
         <p className="mt-2 rounded-2xl border border-dashed border-ink-700 px-4 py-3 text-xs leading-5 text-ink-500">
@@ -265,6 +303,13 @@ export function DotBar({
             </div>
 
             <NavArrow ref={nextRef} direction={1} onClick={() => step(1)} />
+
+            {/* 问号**紧挨着最右那颗箭头**（创始人 2026-09-06 在图上点的就是这个位置）；
+                个数从原来那行标题搬下来，仍然右对齐在整条的末端 */}
+            <CaptureHelp text={t("watch.captures.help")} label={t("watch.captures.helpAria")} />
+            <span className="ui-mono shrink-0 pl-0.5 text-[0.68rem] text-ink-500">
+              {t("watch.captures.count", sorted.length)}
+            </span>
           </div>
 
           {open && (

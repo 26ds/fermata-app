@@ -70,6 +70,7 @@ export function PlayerControls({
   onRate,
   onSeekBy,
   canSeek = true,
+  trailing,
 }: {
   /** 当前步长（秒）。写在两颗箭头里 */
   step: number;
@@ -83,6 +84,14 @@ export function PlayerControls({
    * 从没播过的 YouTube 播放器一 seek 就整块变黑，且封面回不来（观看页 seekBy 上有全文）。
    */
   canSeek?: boolean;
+  /**
+   * 钉在这一行**最右端**的东西（现在是「播放控制」的折叠开关）。
+   *
+   * 创始人 2026-09-06：倍速和「跳 N 秒」两颗**往左归队**、和两颗箭头站在一起，
+   * 空出来的右端留给那颗折叠开关 —— **开关要长在它收起来的那个东西上**，
+   * 而不是隔一行摆在「捕获点」那边（他的原话：那样"显得很 confusing"）。
+   */
+  trailing?: React.ReactNode;
 }) {
   const skipBtn = `flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-colors ${
     canSeek
@@ -121,18 +130,16 @@ export function PlayerControls({
           <SkipGlyph seconds={step} forward />
         </button>
 
-        {!canSeek && (
-          <span className="min-w-0 text-[0.68rem] leading-4 text-ink-500">{COPY.notStarted}</span>
-        )}
-
-        {/* 两颗设置钮靠右。倍速不是 1 时点亮 —— 忘了自己开着 1.5 倍速然后
-            怪"这人怎么说这么快"，是每个播放器都出过的洋相 */}
+        {/* 倍速与「跳 N 秒」**和两颗箭头站在一起**（创始人 2026-09-06）：
+            它们本来就是同一类东西（都在调"怎么播"），原来一个在最左一个在最右，
+            眼睛要横跨整条才凑得齐。倍速不是 1 时点亮 —— 忘了自己开着 1.5 倍速
+            然后怪"这人怎么说这么快"，是每个播放器都出过的洋相 */}
         <button
           type="button"
           onClick={() => toggle("rate")}
           aria-label={COPY.rateMenu}
           aria-expanded={open === "rate"}
-          className={`ui-mono ml-auto min-h-9 shrink-0 rounded-full px-3 text-[0.78rem] font-semibold transition-colors ${
+          className={`ui-mono min-h-9 shrink-0 rounded-full px-3 text-[0.78rem] font-semibold transition-colors ${
             open === "rate"
               ? "border border-teal-400 text-teal-300"
               : rate !== 1
@@ -155,6 +162,14 @@ export function PlayerControls({
         >
           {COPY.stepChip(step)}
         </button>
+
+        {!canSeek && (
+          <span className="min-w-0 text-[0.68rem] leading-4 text-ink-500">{COPY.notStarted}</span>
+        )}
+
+        {/* 右端：折叠开关（宽屏才有，它自己带 `hidden lg:inline-flex`）。
+            `ml-auto` 在有没有那行灰字说明时都把它推到最右 */}
+        {trailing && <div className="ml-auto flex shrink-0 items-center">{trailing}</div>}
       </div>
 
       {open !== "none" && (

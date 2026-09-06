@@ -41,4 +41,11 @@ export const en = {
   "watch.controls.label": "Playback controls",
   "watch.controls.hide": "Hide playback controls (speed, ±N s)",
   "watch.controls.show": "Show playback controls (speed, ±N s)",
+
+  // ── Watch page · capture bar ───────────────────────────────────────────
+  "watch.captures.aria": "Pause points and question points",
+  "watch.captures.helpAria": "What are these dots?",
+  "watch.captures.help":
+    "Pause points and question points. Click one to jump straight to that moment in the video and to the matching place in the chat, and your last playback position is kept as you go. (Still being built.)",
+  "watch.captures.count": (n: number) => (n === 1 ? "1 point" : `${n} points`),
 } as const satisfies CopyDict;

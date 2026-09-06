@@ -1444,6 +1444,28 @@ export function WatchStage({
 
   const { Player } = shell;
 
+  /**
+   * 「播放控制」的折叠开关。**同一份，长在两个地方**（创始人 2026-09-06）：
+   * 展开时钉在控制卡那一行的最右端（开关就该长在它收起来的东西上）；
+   * 收起后卡片整个不在了，它落到点点条上面那一层 —— 横坐标不变，只往上挪一层。
+   *
+   * 两处不会同时看得见：展开时点点条那边压根不传；收起时卡片是 `lg:hidden`
+   * （整棵子树连同这颗按钮一起从无障碍树里消失）。窄屏两处都是 `display:none`。
+   */
+  const controlsToggle = (
+    <button
+      type="button"
+      onClick={() => setControlsOpen(!controlsShown)}
+      aria-expanded={controlsShown}
+      aria-label={controlsShown ? t("watch.controls.hide") : t("watch.controls.show")}
+      title={controlsShown ? t("watch.controls.hide") : t("watch.controls.show")}
+      className="hidden items-center gap-1.5 rounded-lg px-1.5 py-1 text-[0.68rem] text-ink-500 transition-colors hover:text-teal-300 lg:inline-flex"
+    >
+      <Chevron up={controlsShown} />
+      {t("watch.controls.label")}
+    </button>
+  );
+
   return (
     // ── M3.12 片 a：宽屏两栏工作台（D47） ──
     //
@@ -1548,6 +1570,7 @@ export function WatchStage({
             onStep={changeStep}
             onRate={changeRate}
             onSeekBy={seekBy}
+            trailing={controlsToggle}
           />
         </div>
 
@@ -1562,20 +1585,12 @@ export function WatchStage({
           getCurrentTime={getCurrentTime}
           onSeek={handleSeek}
           onDelete={handleDelete}
-          // 折叠开关的家在这一行 —— 卡片收起来之后，这是**唯一还在场**的一行。
-          // `hidden lg:inline-flex`：窄屏不出现（那儿不折叠）
+          // 收起来的时候，开关落到这儿（展开时它在控制卡上，见 controlsToggle）。
+          // 外层这个 `hidden lg:flex` 是给窄屏的：那儿不折叠，这一层连高度都不该占。
           headerAction={
-            <button
-              type="button"
-              onClick={() => setControlsOpen(!controlsShown)}
-              aria-expanded={controlsShown}
-              aria-label={controlsShown ? t("watch.controls.hide") : t("watch.controls.show")}
-              title={controlsShown ? t("watch.controls.hide") : t("watch.controls.show")}
-              className="hidden items-center gap-1.5 rounded-lg px-1.5 py-1 text-[0.68rem] text-ink-500 transition-colors hover:text-teal-300 lg:inline-flex"
-            >
-              <Chevron up={controlsShown} />
-              {t("watch.controls.label")}
-            </button>
+            controlsShown ? null : (
+              <div className="mb-1 hidden justify-end px-1 lg:flex">{controlsToggle}</div>
+            )
           }
         />
       </div>
