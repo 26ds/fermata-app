@@ -60,4 +60,21 @@ export interface TranscriptProvider {
  * 转写失败且**原因该讲给用户听**时抛这个（→ 落库 failed + 中文原文）。
  * 其余异常一律当成"抽风"，提示重试。与 SourceResolveError 同款分工。
  */
-export class TranscribeError extends Error {}
+export class TranscribeError extends Error {
+  /**
+   * 这个失败是**永久性**的吗 —— 重试一万次也回同一句（不公开视频、地区限制…）。
+   *
+   * 加这个字段是因为界面本来在骗人：转写失败时它给的是一个大大的「重试」，
+   * 而"视频读不了"这一类**重试永远不会成功**。有了这一位，界面才分得清
+   * 「等一分钟再点」和「别点了，换条路」——**后者要把人引到「粘贴字幕」去**。
+   *
+   * `watch-stage` 那边其实早就知道有这回事（failed 不自动重来，注释里写着
+   * "私享视频那类是永久性失败"），只是这个判断一直没能传到按钮上。
+   */
+  readonly permanent: boolean;
+
+  constructor(message: string, options?: { permanent?: boolean }) {
+    super(message);
+    this.permanent = options?.permanent ?? false;
+  }
+}

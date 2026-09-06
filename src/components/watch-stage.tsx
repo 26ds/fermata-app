@@ -179,7 +179,9 @@ export function WatchStage({
     running: boolean;
     coveredS: number | null;
     error: string;
-  }>({ running: false, coveredS: null, error: "" });
+    /** 这次失败重试也没用（视频读不了）。决定按钮怎么摆，见 CaptionGeneration.permanent */
+    permanent: boolean;
+  }>({ running: false, coveredS: null, error: "", permanent: false });
   const runningRef = useRef(false);
   // 字幕本体。热路径（250ms 那一轮）要查"这一刻有没有字幕"，所以走 ref
   const segmentsRef = useRef<TranscriptSegment[]>(source.transcript ?? []);
@@ -1078,10 +1080,12 @@ export function WatchStage({
     runningRef.current = true;
     // 只查缓存那次是"静默"的：命中就让字幕自己冒出来，没命中什么都不显示，
     // 别闪一下"生成中"再缩回去。真要花钱转时才亮出进度。
-    if (!cacheOnly) setGen({ running: true, coveredS: null, error: "" });
+    if (!cacheOnly) setGen({ running: true, coveredS: null, error: "", permanent: false });
 
     let complete = false;
     let note = "";
+    /** 服务端说这次失败是永久性的吗。throw 会把 Error 之外的东西弄丢，所以搁在这儿接着 */
+    let permanent = false;
     try {
       const res = await fetch("/api/transcript", {
         method: "POST",
@@ -1118,6 +1122,7 @@ export function WatchStage({
             complete?: boolean;
             message?: string;
             note?: string | null;
+            permanent?: boolean;
           };
           try {
             event = JSON.parse(raw);
@@ -1141,13 +1146,14 @@ export function WatchStage({
             if (!complete && event.note) note = event.note;
           } else if (event.type === "error") {
             setStatus("failed");
+            permanent = event.permanent === true;
             throw new Error(event.message ?? "字幕没生成出来");
           }
           // event.type === "miss"：缓存没命中。什么都不做 —— 状态留 pending，
           // 让 YouTube 的「生成字幕」按钮候着，等用户真要花钱时再点。
         }
       }
-      if (!cacheOnly) setGen({ running: false, coveredS: null, error: note });
+      if (!cacheOnly) setGen({ running: false, coveredS: null, error: note, permanent: false });
     } catch (e) {
       // 只查缓存那次失败就默默算了（多半是迁移还没跑），别拿红字吓用户
       if (!cacheOnly) {
@@ -1155,6 +1161,8 @@ export function WatchStage({
           running: false,
           coveredS: null,
           error: e instanceof Error ? e.message : "字幕没生成出来，稍后再试",
+          // 网络/解析那类异常没走到服务端的分类，一律当"还能再试"
+          permanent,
         });
       }
     } finally {
@@ -1498,6 +1506,7 @@ export function WatchStage({
             coveredS: gen.coveredS,
             totalS: durationS || source.duration_s,
             error: gen.error,
+            permanent: gen.permanent,
             resumable: status === "partial",
             onRun: () => void runTranscription(),
           }}

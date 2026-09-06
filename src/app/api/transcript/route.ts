@@ -208,7 +208,9 @@ export async function POST(request: Request) {
           // 该讲给用户听的原因 → 记 failed 并原样告诉他；其余异常换下一个 Provider
           if (e instanceof TranscribeError) {
             await save(existing, "failed");
-            push({ type: "error", message: e.message });
+            // `permanent` = 重试也回同一句（视频读不了那一类）。界面靠它决定
+            // 主按钮是「重试」还是「粘贴字幕」—— 别让人对着死路一直点。
+            push({ type: "error", message: e.message, permanent: e.permanent });
             controller.close();
             return;
           }
