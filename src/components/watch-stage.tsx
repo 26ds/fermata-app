@@ -477,10 +477,30 @@ export function WatchStage({
       if (Math.abs(clamped - splitRef.current) > 0.5) applySplit(clamped);
     };
 
+    /**
+     * **右栏和视频一样高就够了** —— 创始人 2026-09-06 在截图上画了一道线：
+     * 字幕不该一路拖到窗口底，到视频下沿就收住。
+     *
+     * 只量、只写一个 CSS 变量（右栏那边是 `lg:h-[var(--right-h)]`），
+     * 不进 React state：拖中缝时这个数每帧都在变，setState 会把播放器一起重渲。
+     *
+     * ⚠️ **只有 YouTube 这一档才收**（`capsHeight`，与 D59 ⒜ 同一条规矩）：
+     * 播客左边是一张 137px 高的控制卡，照它收字幕就只剩 137px —— 而播客的
+     * 主战场本来就是字幕（D47 §B2）。所以播客那一档右栏照旧吃满整行。
+     */
+    const measureRightH = (video?: DOMRect) => {
+      const grid = gridRef.current;
+      if (!grid || !video || !capsHeight || window.innerWidth < LG_PX) return;
+      const h = Math.round(video.bottom - grid.getBoundingClientRect().top);
+      // 量不出来（首帧 / 播放器还没起来）就别写，让 CSS 里那个估算先顶着
+      if (h > CAP_FLOOR_PX / 2) grid.style.setProperty("--right-h", `${h}px`);
+    };
+
     const measure = () => {
       measureCap();
       const card = stageRef.current?.getBoundingClientRect();
       const video = videoWrapRef.current?.getBoundingClientRect();
+      measureRightH(video);
       if (!card) return;
       const vh = window.innerHeight;
       const seamCard = Math.max(0, Math.round(card.bottom));
@@ -1368,6 +1388,10 @@ export function WatchStage({
           "--split-video": `${defaultSplit}%`,
           // 播客那一档给一个**永远夹不住**的值（见 capsHeight）
           "--video-cap": capsHeight ? "calc((100dvh - 20rem) * 16 / 9)" : "100%",
+          // 右栏收到视频下沿（见 measureRightH）。这里的初值只活到量尺跑完那一帧 ——
+          // 用的是和 `--video-cap` 同一个估算（视频上下之外还剩多少高），
+          // 所以首帧就已经接近真值，不会先撑满再跳一下。播客不收，给 auto。
+          "--right-h": capsHeight ? "calc(100dvh - 20rem)" : "auto",
         } as React.CSSProperties
       }
     >
@@ -1480,8 +1504,13 @@ export function WatchStage({
 
       {/* ── 右栏：字幕（选词 / 查词的主战场）。**整页只有这一栏会滚。** ──
           `lg:min-h-0` + `lg:overflow-y-auto` 两个一起才成立：grid 子项不写 min-h-0
-          就不肯缩到内容以下，overflow 永远触发不了、页面改成整体撑高。 */}
-      <div className="flex min-w-0 flex-col lg:min-h-0 lg:overflow-y-auto lg:pr-1">
+          就不肯缩到内容以下，overflow 永远触发不了、页面改成整体撑高。
+
+          `lg:h-[var(--right-h)]`：**到视频下沿就收住，不一路拖到窗口底**
+          （创始人 2026-09-06 在截图上画的那条线）。这个数由 measureRightH 量出来；
+          播客那一档是 `auto`，照旧吃满整行（左边那张控制卡只有 137px 高，
+          照它收字幕等于把主战场砍没了）。 */}
+      <div className="flex min-w-0 flex-col lg:h-[var(--right-h)] lg:min-h-0 lg:overflow-y-auto lg:pr-1">
         {/* D4：字幕可开关、字号可调、行宽自适应 —— 视频与播客共用同一层 */}
         <CaptionLayer
           sourceId={source.id}

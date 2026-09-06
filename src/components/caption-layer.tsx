@@ -536,6 +536,10 @@ export function CaptionLayer({
     <section
       ref={rootRef}
       aria-labelledby="captions-title"
+      // M3.12：宽屏下这一整块要**吃满右栏给的高度**（右栏自己有多高，由 watch-stage
+      // 按视频下沿量出来 —— 见那边的 measureCaptions）。窄屏一个像素不动（全是 `lg:`）：
+      // 手机上字幕本来就是视频下面的一个 256px 小窗，那样是对的。
+      className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col"
       style={{ "--caption-size": `${SIZE_DEFAULT}px` } as CSSProperties}
     >
       <div className="flex items-center justify-between px-1">
@@ -772,7 +776,9 @@ export function CaptionLayer({
               {COPY.pickHint}
             </p>
           )}
-          <div className="mt-2 max-h-64 overflow-y-auto rounded-2xl border border-ink-700 p-2">
+          {/* `lg:` 那三个类：宽屏下这个框自己长满剩下的高度（`min-h-0` 不写它就不肯
+              缩到内容以下，`overflow-y-auto` 会失效）。窄屏仍是 `max-h-64` 的小窗。 */}
+          <div className="mt-2 max-h-64 overflow-y-auto rounded-2xl border border-ink-700 p-2 lg:max-h-none lg:min-h-0 lg:flex-1">
             <ul className="caption-copy flex flex-col">
               {segments.map((seg, i) => {
                 const isActive = i === active;
