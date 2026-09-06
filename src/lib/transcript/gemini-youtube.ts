@@ -137,6 +137,67 @@ export function linesToSegments(lines: ParsedLine[], startS: number, endS: numbe
   return segments;
 }
 
+/** SDK 把报错真身当字符串塞在 message 里，剥出 Google 的原话 */
+function detailOf(raw: string): string {
+  // SDK 把真身当字符串塞在 message 里：`ApiError: {"error":{...}}`
+  const json = raw.match(/\{[\s\S]*\}/)?.[0];
+  if (!json) return raw;
+  try {
+    const parsed = JSON.parse(json) as { error?: { message?: string } };
+    return parsed.error?.message ?? raw;
+  } catch {
+    return raw; /* 不是 JSON 就用原文 */
+  }
+}
+
+/**
+ * 五类失败，**次序就是判定次序**（429 不是一种错，是一箩筐错，见下面那段病史）。
+ *
+ * 拆成一个分类器、两个薄壳，是为了让「说什么话」和「要不要给重试按钮」
+ * **物理上不可能各说各话** —— 从前它们是两条独立的正则，迟早会漂。
+ */
+type FailureKind = "spending-cap" | "daily-quota" | "rate-limit" | "unreadable" | "unknown";
+
+/** 消费上限：跟额度无关，等多久都没用，必须去改设置 */
+const SPENDING_CAP = /spending cap|spend cap/i;
+/** 真·免费额度：Google 会明说是 per day / free tier 的配额 */
+const DAILY_QUOTA = /per day|daily limit|free.{0,15}tier|FreeTier/i;
+/** 每分钟限流：等一下就好 */
+const RATE_LIMIT = /per minute|rate limit|too many requests/i;
+/**
+ * 视频本身读不了。**这一类跟上面三种有本质区别：重试一万次也不会变。**
+ *
+ * 最常见的其实不是"私享"，是 **不公开（unlisted）** —— 伯克利那类课程视频
+ * 基本都是这种链接，人能打开、播放器也能嵌，但 Gemini 文档明写
+ * 「You can only upload public videos (not private or unlisted videos)」，
+ * 它那一头直接就够不着。
+ */
+const UNREADABLE = /not found|private|unlisted|unavailable|403|permission/i;
+
+function classify(raw: string): { kind: FailureKind; detail: string } {
+  const detail = detailOf(raw);
+  // 前三条**必须排在 UNREADABLE 前面**：额度类的原文里偶尔也带 permission / 403 之类的
+  // 字眼，先判它们，才不会把"等一分钟就好"误判成"这条路彻底断了"。
+  if (SPENDING_CAP.test(detail)) return { kind: "spending-cap", detail };
+  if (DAILY_QUOTA.test(detail)) return { kind: "daily-quota", detail };
+  if (RATE_LIMIT.test(detail)) return { kind: "rate-limit", detail };
+  if (UNREADABLE.test(detail)) return { kind: "unreadable", detail };
+  return { kind: "unknown", detail };
+}
+
+/**
+ * 这个失败是不是**永久性**的 —— 重试没有任何意义，得换一条路（粘贴字幕）。
+ *
+ * 只有"视频读不了"算。额度 / 限流 / 消费上限都**不算**：
+ * 那三种等一等或改个设置就好了，把「重试」按钮从它们手里拿走反而是帮倒忙。
+ *
+ * 单独导出而不是让 `explainGeminiError` 改回对象，是因为它有六个调用方
+ * （问答 / 聊天 / 翻译 / 扫词都在复用），不值得为这一处把签名全掀了。
+ */
+export function isPermanentGeminiFailure(raw: string): boolean {
+  return classify(raw).kind === "unreadable";
+}
+
 /**
  * 把 Gemini 的报错翻译成人话。
  *
@@ -154,34 +215,21 @@ export function linesToSegments(lines: ParsedLine[], startS: number, endS: numbe
  * 分不出来的，就把 Google 的原话原样端给用户，也好过编一个错的原因。
  */
 export function explainGeminiError(raw: string): string {
-  // SDK 把真身当字符串塞在 message 里：`ApiError: {"error":{...}}`
-  const json = raw.match(/\{[\s\S]*\}/)?.[0];
-  let detail = raw;
-  if (json) {
-    try {
-      const parsed = JSON.parse(json) as { error?: { message?: string } };
-      if (parsed.error?.message) detail = parsed.error.message;
-    } catch {
-      /* 不是 JSON 就用原文 */
-    }
+  const { kind, detail } = classify(raw);
+  switch (kind) {
+    case "spending-cap":
+      return "Google 那边的项目设了「每月消费上限」，已经到顶了 —— 这不是免费额度用完，等明天也不会好。去 ai.studio/spend 把上限调高或去掉，再回来点「继续生成」。";
+    case "daily-quota":
+      return "今天的免费额度用完了，明天再试。";
+    case "rate-limit":
+      return "调用太密集被限流了，等一分钟再点「继续生成」就行。";
+    // 永久性的那一类。**措辞只描述病因、不给药方** —— 这个函数还被问答/翻译/扫词
+    // 复用，它们那儿"粘贴字幕"是句废话。该怎么办由界面（caption-layer）自己说。
+    case "unreadable":
+      return "这支视频读不了 —— 自动转写只收公开视频，不公开（unlisted）/ 私享 / 会员 / 地区限制的都拿不到。";
+    default:
+      return `读这支视频时出错了：${detail.slice(0, 200)}`;
   }
-
-  // 消费上限：跟额度无关，等多久都没用，必须去改设置
-  if (/spending cap|spend cap/i.test(detail)) {
-    return "Google 那边的项目设了「每月消费上限」，已经到顶了 —— 这不是免费额度用完，等明天也不会好。去 ai.studio/spend 把上限调高或去掉，再回来点「继续生成」。";
-  }
-  // 真·免费额度：Google 会明说是 per day / free tier 的配额
-  if (/per day|daily limit|free.{0,15}tier|FreeTier/i.test(detail)) {
-    return "今天的免费额度用完了，明天再试。";
-  }
-  // 每分钟限流：等一下就好，别让用户以为要等到明天
-  if (/per minute|rate limit|too many requests/i.test(detail)) {
-    return "调用太密集被限流了，等一分钟再点「继续生成」就行。";
-  }
-  if (/not found|private|unavailable|403|permission/i.test(detail)) {
-    return "这支视频读不了 —— 私享 / 会员 / 地区限制的视频拿不到内容。";
-  }
-  return `读这支视频时出错了：${detail.slice(0, 200)}`;
 }
 
 function clientFor(): GoogleGenAI {
@@ -287,7 +335,17 @@ export const geminiYoutubeProvider: TranscriptProvider = {
         0,
       );
 
-    let failure: string | null = null;
+    let failure: { message: string; permanent: boolean } | null = null;
+    /**
+     * 第一片就炸 → 一句都没转出来，抛出去。
+     *
+     * **包成函数不是为了好看，是为了能编译**：`failure` 只在闭包 `runOne` 里被赋值，
+     * TS 的控制流分析看不见那一步，在外层直接 `if (failure)` 会把它收窄成 `never`。
+     * 隔一层函数边界，它就老老实实按声明的类型来了。
+     */
+    const throwIfFailed = () => {
+      if (failure) throw new TranscribeError(failure.message, { permanent: failure.permanent });
+    };
     /** 转到一半停下来的原因（预算到点是正常的，不算原因；出错才算） */
     let stopReason: string | null = null;
     let stopped = false;
@@ -307,10 +365,12 @@ export const geminiYoutubeProvider: TranscriptProvider = {
         segments.sort((a, b) => a.start - b.start); // 并行回来的顺序是乱的
         await onPartial({ segments, coveredS: transcribedS(), totalS });
       } catch (e) {
-        const why = explainGeminiError(e instanceof Error ? e.message : String(e));
-        // 第一片就炸 = 这条内容一句都没转出来，直接失败并把原因说清楚
+        const rawMessage = e instanceof Error ? e.message : String(e);
+        const why = explainGeminiError(rawMessage);
+        // 第一片就炸 = 这条内容一句都没转出来，直接失败并把原因说清楚。
+        // **顺带把"是不是白重试"一并带出去**：视频读不了那一类，界面得改口。
         if (chunk.startS === 0) {
-          failure = why;
+          failure = { message: why, permanent: isPermanentGeminiFailure(rawMessage) };
           return;
         }
         // 后面的片子炸 = 已转的仍然算数，留 partial 让用户接着来。
@@ -339,13 +399,13 @@ export const geminiYoutubeProvider: TranscriptProvider = {
     // 别让它跟后面的大片挤在一起，那样首屏又要等半分钟
     const first = queue.shift();
     if (first) await runOne(first);
-    if (failure) throw new TranscribeError(failure);
+    throwIfFailed();
 
     // 剩下的并行铺开
     if (!stopped && queue.length > 0) {
       await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
     }
-    if (failure) throw new TranscribeError(failure);
+    throwIfFailed();
 
     return {
       segments,

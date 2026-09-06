@@ -38,6 +38,23 @@ const COPY = {
   pickHint: "点词收进词库（收进后悬浮或长按可查意思）· 点行首时间戳跳到那一句",
 };
 
+/**
+ * YouTube 自家「显示转录」的三步点击路径。
+ *
+ * **抽出来是因为它现在要出现在两个地方**：粘贴框里（点开之后），以及
+ * 自动转写走进死路时（点开之前 —— 那时候人最需要它，却最看不见）。
+ * 一份文案，别让两处慢慢长歪。
+ */
+function YoutubeCopySteps() {
+  return (
+    <ol className="ml-4 list-decimal space-y-0.5">
+      <li>电脑浏览器打开这个视频 → 视频下方「<span className="text-ink-300">...更多</span>」→「<span className="text-ink-300">显示转录 / Show transcript</span>」</li>
+      <li>在弹出的转录里 <span className="text-ink-300">全选、复制</span></li>
+      <li>回到这里，整段 <span className="text-ink-300">粘</span> 进「粘贴字幕」的框</li>
+    </ol>
+  );
+}
+
 const SIZE_KEY = "fermata.captions.size";
 const SIZE_MIN = 14;
 const SIZE_MAX = 28;
@@ -77,6 +94,11 @@ export interface CaptionGeneration {
   totalS: number | null;
   /** 失败原因（人话）。空字符串 = 没失败 */
   error: string;
+  /**
+   * 这次失败**重试也没用**（视频不公开 / 地区限制…，服务端分类的，见
+   * `isPermanentGeminiFailure`）。true 时「重试」不再当主按钮 —— 换「粘贴字幕」上。
+   */
+  permanent?: boolean;
   /** 还剩一截没转完（上次被打断），可以接着来 */
   resumable: boolean;
   /** 开始 / 继续 / 重试，都是这一个动作 */
@@ -467,6 +489,49 @@ export function CaptionLayer({
       return next;
     });
 
+  /**
+   * **死路**：转写失败了，而且重试一万次也回同一句（视频不公开 / 地区限制…）。
+   *
+   * 这个状态从前长得跟"抽风了，再点一下"一模一样 —— 一个大绿「重试」，
+   * 而真正管用的「粘贴字幕」是暗色的、缩在右边。创始人 2026-08-31 就撞在这上面：
+   * 一支伯克利的 unlisted 课程视频，人能看、YouTube 的 CC 也在放，
+   * 界面却只会请他再点一次那个永远不会成功的按钮。**主次在这儿必须对调。**
+   */
+  const deadEnd = Boolean(generation?.error) && generation?.permanent === true;
+
+  const PRIMARY_BTN = "min-h-11 flex-1 rounded-xl bg-teal-400 px-4 text-sm font-semibold text-teal-950";
+  const SECONDARY_BTN = "min-h-11 rounded-xl border border-ink-700 px-4 text-sm text-ink-300";
+
+  // 两颗按钮先做出来，**摆放顺序由 deadEnd 决定** —— 用 DOM 顺序换位置而不是 CSS
+  // `order`，这样看到的顺序和 Tab 走的顺序永远是同一个。
+  const retryBtn = generation ? (
+    <button
+      key="retry"
+      type="button"
+      onClick={generation.onRun}
+      className={deadEnd ? SECONDARY_BTN : PRIMARY_BTN}
+    >
+      {generation.error
+        ? deadEnd
+          ? "仍要重试"
+          : "重试"
+        : generation.resumable
+          ? "继续生成"
+          : "生成字幕"}
+    </button>
+  ) : null;
+
+  const pasteBtn = (
+    <button
+      key="paste"
+      type="button"
+      onClick={() => setPasting(true)}
+      className={deadEnd ? PRIMARY_BTN : SECONDARY_BTN}
+    >
+      {youtube ? "粘贴字幕" : "手动粘贴"}
+    </button>
+  );
+
   return (
     <section
       ref={rootRef}
@@ -513,11 +578,7 @@ export function CaptionLayer({
             {youtube ? (
               <div className="text-xs leading-5 text-ink-500">
                 <p className="mb-1 text-ink-300">有字幕(CC)的话，粘过来免费（手机上没有「显示转录」入口，这条要在电脑上做）：</p>
-                <ol className="ml-4 list-decimal space-y-0.5">
-                  <li>电脑浏览器打开这个视频 → 视频下方「<span className="text-ink-300">...更多</span>」→「<span className="text-ink-300">显示转录 / Show transcript</span>」</li>
-                  <li>在弹出的转录里 <span className="text-ink-300">全选、复制</span></li>
-                  <li>回到这里，整段 <span className="text-ink-300">粘</span> 进下面的框</li>
-                </ol>
+                <YoutubeCopySteps />
                 <p className="mt-1">认 YouTube 那种「时间戳+文字」，也认 .srt / .vtt。手机上直接用「生成字幕」就行。</p>
               </div>
             ) : (
@@ -570,9 +631,21 @@ export function CaptionLayer({
                 正在生成字幕{percent != null ? `（${percent}%）` : "…"}第一段大约二十秒后出来。
               </p>
             ) : generation?.error ? (
-              <p role="alert" className="text-xs leading-5 text-red-400">
-                {generation.error}
-              </p>
+              <>
+                <p role="alert" className="text-xs leading-5 text-red-400">
+                  {generation.error}
+                </p>
+                {/* 死路上光报错等于把人扔在原地。**能打开这支视频，就说明字幕
+                    本来就在那儿** —— 把搬运方法当场摊开，不用先点开粘贴框才看得见。 */}
+                {deadEnd && youtube && (
+                  <div className="text-xs leading-5 text-ink-500">
+                    <p className="mb-1 text-ink-300">
+                      但你能打开这支视频，就说明字幕就在那儿 —— 自己搬过来，一样用（手机上没有「显示转录」入口，这条要在电脑上做）：
+                    </p>
+                    <YoutubeCopySteps />
+                  </div>
+                )}
+              </>
             ) : youtube ? (
               <p className="text-xs leading-5 text-ink-500">
                 点<span className="text-ink-300">「生成字幕」</span>一键自动生成（约二十秒）。在电脑上打开、这视频有 CC 的话，也可以「粘贴字幕」免费拿。
@@ -583,24 +656,10 @@ export function CaptionLayer({
 
             {!generation?.running && (
               // 手机上「显示转录」没入口，粘贴基本只对电脑用户成立（D30/D28）。
-              // 所以「生成字幕」（一键，命中缓存则免费）永远是主按钮，粘贴降为次选。
+              // 所以平时「生成字幕」（一键，命中缓存则免费）是主按钮，粘贴降为次选。
+              // **走进死路时整个对调**（deadEnd）：那时候「重试」是假出路，不配当主按钮。
               <div className="flex flex-wrap gap-2">
-                {generation && (
-                  <button
-                    type="button"
-                    onClick={generation.onRun}
-                    className="min-h-11 flex-1 rounded-xl bg-teal-400 px-4 text-sm font-semibold text-teal-950"
-                  >
-                    {generation.error ? "重试" : generation.resumable ? "继续生成" : "生成字幕"}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setPasting(true)}
-                  className="min-h-11 rounded-xl border border-ink-700 px-4 text-sm text-ink-300"
-                >
-                  {youtube ? "粘贴字幕" : "手动粘贴"}
-                </button>
+                {deadEnd ? [pasteBtn, retryBtn] : [retryBtn, pasteBtn]}
               </div>
             )}
           </div>
