@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { activeSegmentIndex, segmentsInWindow } from "@/lib/captions";
 import { CaptionLayer } from "@/components/caption-layer";
 import { CaptureOrb } from "@/components/capture-orb";
+import { useCopy } from "@/components/copy-provider";
 import { DotBar } from "@/components/dot-bar";
 import { ImmersiveChat } from "@/components/immersive-chat";
 import { InterruptPanel, type PanelLine } from "@/components/interrupt-panel";
@@ -74,6 +75,77 @@ const CAP_FLOOR_PX = 280;
 /** 量出来的上限和上一次差不到这么多就不写回去 —— 挡住「写 → 回流 → 再量」的抖动 */
 const CAP_EPSILON_PX = 4;
 
+// ── 播放控制条能折叠（创始人 2026-09-06）───────────────────────────────
+//
+// 「点击以后可以收起来这个调进度的长方形（+-多少秒），点击当然可以展开，
+//   但是 capture point 那一条仍然在，并且向上弹，占位肯定少一些」——
+// 腾出来的那块地将来是聊天的。**只在宽屏（≥1024px）生效**：折叠是用
+// `lg:hidden` 做的，所以窄屏永远看得见那张卡，也就不会出现"手机上收起来了
+// 却找不到开关"这种死角（开关本身也是 `hidden lg:inline-flex`）。
+//
+// 走模块级小仓库 + `useSyncExternalStore` 而不是 `useEffect` 里 setState：
+// 服务端渲染不出 localStorage，走 state 就是一次必然的水合不一致，而那条
+// eslint 规则（`react-hooks/set-state-in-effect`）也会拦。
+const CONTROLS_KEY = "fermata.watch.controls";
+let controlsOpen = true;
+let controlsLoaded = false;
+const controlsListeners = new Set<() => void>();
+
+function getControlsOpen(): boolean {
+  if (!controlsLoaded) {
+    controlsLoaded = true;
+    try {
+      controlsOpen = window.localStorage.getItem(CONTROLS_KEY) !== "0";
+    } catch {
+      // Safari 无痕模式下 localStorage 会抛。记不住比崩了强
+      controlsOpen = true;
+    }
+  }
+  return controlsOpen;
+}
+/** 服务端与水合首帧一律"展开" —— 和今天的样子一致，收起是水合完才生效的 */
+const getControlsOpenOnServer = () => true;
+
+function subscribeControls(cb: () => void): () => void {
+  controlsListeners.add(cb);
+  return () => {
+    controlsListeners.delete(cb);
+  };
+}
+
+function setControlsOpen(next: boolean) {
+  controlsLoaded = true;
+  if (controlsOpen === next) return;
+  controlsOpen = next;
+  try {
+    window.localStorage.setItem(CONTROLS_KEY, next ? "1" : "0");
+  } catch {
+    // 存不下就只在这一次观看里有效
+  }
+  for (const cb of controlsListeners) cb();
+}
+
+/** 折叠开关上那个小箭头。收起时朝下（＝点了会展开），展开时朝上 */
+function Chevron({ up }: { up: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 12 8"
+      className={`h-2 w-3 shrink-0 transition-transform ${up ? "" : "rotate-180"}`}
+      aria-hidden
+      focusable="false"
+    >
+      <path
+        d="M1 6 L6 2 L11 6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 /**
  * 视频和播客**分开记**（D47 §B2）：看视频调好的宽度，不该在听播客时被套用。
  * `manual` 归到视频那一档 —— 它没有播放器，走哪个默认都无所谓，别为它多开一个键。
@@ -141,6 +213,13 @@ export function WatchStage({
 }) {
   // 只问"用哪个壳"。这条链接是什么平台、叫什么名字，是服务端 registry 的活（M1d）
   const shell = playerFor(source.kind);
+  const t = useCopy();
+  /** 播放控制卡展开着吗（宽屏专有，见文件顶上那段说明） */
+  const controlsShown = useSyncExternalStore(
+    subscribeControls,
+    getControlsOpen,
+    getControlsOpenOnServer,
+  );
 
   const handleRef = useRef<PlayerHandle | null>(null);
   const currentTimeRef = useRef(0);
@@ -503,8 +582,11 @@ export function WatchStage({
       measureRightH(video);
       if (!card) return;
       const vh = window.innerHeight;
-      const seamCard = Math.max(0, Math.round(card.bottom));
-      const seamVideo = video ? Math.max(0, Math.round(video.bottom)) : seamCard;
+      const seamVideo = video ? Math.max(0, Math.round(video.bottom)) : 0;
+      // ⚠️ 状态卡被折叠（`lg:hidden`）时它的矩形全是 0 —— 直接拿 `card.bottom` 当
+      // 台面底缘会算出 0，暂停面板当场铺满整个视口、把视频盖死（D18 的红线）。
+      // 卡片不在场时，台面底缘就是视频下沿。
+      const seamCard = card.height > 0 ? Math.max(0, Math.round(card.bottom)) : seamVideo;
       const seam = vh - seamCard >= MIN_LAYER_H ? seamCard : seamVideo;
       // 兜底：**手机横屏（844×390）连视频本身都比窗口高**，两条缝全在屏幕外面，
       // 不夹一下浮层高度会算成负数 —— 面板当场变 0 高、完全看不见。
@@ -1416,8 +1498,17 @@ export function WatchStage({
           />
         </div>
 
-        {/* 状态卡。它的下边缘就是「台面底缘」—— 沉浸磨砂层和暂停面板都锚在这儿 */}
-        <div ref={stageRef} className="rounded-2xl border border-ink-700 px-4 py-2.5">
+        {/* 状态卡。它的下边缘就是「台面底缘」—— 沉浸磨砂层和暂停面板都锚在这儿。
+            **宽屏下可以折叠**（创始人 2026-09-06）：收起用 `lg:hidden`，不是拆掉 ——
+            ⒜ 窄屏永远看得见（那儿没有开关，拆了就找不回来）；
+            ⒝ `PlayerControls` 保持挂载，展开回来时它摊开的那个选择盘还在原样；
+            ⒞ 时钟 `clockRef` 还在 DOM 里，250ms 那一轮照写不误，不用加判断。 */}
+        <div
+          ref={stageRef}
+          className={`rounded-2xl border border-ink-700 px-4 py-2.5 ${
+            controlsShown ? "" : "lg:hidden"
+          }`}
+        >
           <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <span
@@ -1471,6 +1562,21 @@ export function WatchStage({
           getCurrentTime={getCurrentTime}
           onSeek={handleSeek}
           onDelete={handleDelete}
+          // 折叠开关的家在这一行 —— 卡片收起来之后，这是**唯一还在场**的一行。
+          // `hidden lg:inline-flex`：窄屏不出现（那儿不折叠）
+          headerAction={
+            <button
+              type="button"
+              onClick={() => setControlsOpen(!controlsShown)}
+              aria-expanded={controlsShown}
+              aria-label={controlsShown ? t("watch.controls.hide") : t("watch.controls.show")}
+              title={controlsShown ? t("watch.controls.hide") : t("watch.controls.show")}
+              className="hidden items-center gap-1.5 rounded-lg px-1.5 py-1 text-[0.68rem] text-ink-500 transition-colors hover:text-teal-300 lg:inline-flex"
+            >
+              <Chevron up={controlsShown} />
+              {t("watch.controls.label")}
+            </button>
+          }
         />
       </div>
 

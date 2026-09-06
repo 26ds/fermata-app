@@ -25,12 +25,20 @@ const COPY = {
   notStarted: "先点播放，这两颗才跳得动",
 };
 
-/** 环形箭头 + 中间的秒数 —— 手机播放器上通用的那个「跳一段」记号，一眼不会读成"重播" */
-function SkipGlyph({ seconds, back }: { seconds: number; back?: boolean }) {
+/**
+ * 环形箭头 + 中间的秒数 —— 手机播放器上通用的那个「跳一段」记号，一眼不会读成"重播"。
+ *
+ * ⚠️ **箭头必须指在"走过来"的方向上**（2026-09-06 创始人报「图标画反了」，属实）。
+ * 底稿画的是**逆时针＝后退**：缺口在左上，墨迹从 9 点起绕过底部、沿右侧一路回到 12 点，
+ * 所以箭头落在 12 点、**指向左** —— 那正是它下一步要去的地方。
+ * 老写法把箭头画成指右，等于让箭头背对着自己的墨迹跑，两个方向就都读反了。
+ * **前进＝把整个组照镜子**（缺口翻到右上、箭头指右）。
+ * 中间那个数字**故意留在 `<g>` 外面**，不然镜像会把它一起翻过去。
+ */
+function SkipGlyph({ seconds, forward }: { seconds: number; forward?: boolean }) {
   return (
     <svg viewBox="0 0 32 32" className="h-[26px] w-[26px]" aria-hidden focusable="false">
-      {/* 缺口留在左上，箭头压在正上方；back 就整体照镜子，逆时针 */}
-      <g transform={back ? "translate(32,0) scale(-1,1)" : undefined}>
+      <g transform={forward ? "translate(32,0) scale(-1,1)" : undefined}>
         <path
           d="M16 5.6a10.4 10.4 0 1 1-10.4 10.4"
           fill="none"
@@ -38,7 +46,7 @@ function SkipGlyph({ seconds, back }: { seconds: number; back?: boolean }) {
           strokeWidth="1.9"
           strokeLinecap="round"
         />
-        <path d="M12.4 2.1 17.2 5.6 12.4 9.1Z" fill="currentColor" />
+        <path d="M19.6 2.1 14.8 5.6 19.6 9.1Z" fill="currentColor" />
       </g>
       <text
         x="16"
@@ -101,7 +109,7 @@ export function PlayerControls({
           aria-label={COPY.back(step)}
           className={skipBtn}
         >
-          <SkipGlyph seconds={step} back />
+          <SkipGlyph seconds={step} />
         </button>
         <button
           type="button"
@@ -110,7 +118,7 @@ export function PlayerControls({
           aria-label={COPY.forward(step)}
           className={skipBtn}
         >
-          <SkipGlyph seconds={step} />
+          <SkipGlyph seconds={step} forward />
         </button>
 
         {!canSeek && (

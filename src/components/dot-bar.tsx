@@ -89,9 +89,24 @@ interface DotBarProps {
   getCurrentTime(): number;
   onSeek(t: number): void;
   onDelete(id: string): Promise<void>;
+  /**
+   * 塞进这一行标题右边的小控件（现在装的是「播放控制」的折叠开关）。
+   *
+   * **为什么挂在这儿**：折叠之后播放控制卡整个不见了，开关得有个**永远在场**的家 ——
+   * 而「捕获点」这一行正是创始人 2026-09-06 点名"折叠之后仍然要在"的那一条。
+   * 用一个不认得内容的插槽，点点条不必知道被折叠的是谁。
+   */
+  headerAction?: React.ReactNode;
 }
 
-export function DotBar({ points, durationS, getCurrentTime, onSeek, onDelete }: DotBarProps) {
+export function DotBar({
+  points,
+  durationS,
+  getCurrentTime,
+  onSeek,
+  onDelete,
+  headerAction,
+}: DotBarProps) {
   // 记住"用户点开的是哪个点"而不是"哪个簇" —— 簇是算出来的，
   // 删掉一个点整个簇的构成就变了，记簇会让展开层莫名其妙地关掉。
   const [anchorId, setAnchorId] = useState<string | null>(null);
@@ -188,9 +203,12 @@ export function DotBar({ points, durationS, getCurrentTime, onSeek, onDelete }: 
         <p id="dotbar-title" className="eyebrow">
           captures / 捕获点
         </p>
-        <span className="ui-mono text-[0.68rem] text-ink-500">
-          {sorted.length ? `${sorted.length} 个` : "还没有"}
-        </span>
+        <div className="flex items-center gap-3">
+          {headerAction}
+          <span className="ui-mono text-[0.68rem] text-ink-500">
+            {sorted.length ? `${sorted.length} 个` : "还没有"}
+          </span>
+        </div>
       </div>
 
       {sorted.length === 0 ? (
