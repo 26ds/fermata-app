@@ -36,4 +36,16 @@ export const en = {
   // ⏳ 临时的，M3.9 片 f 做完要连同 zh.ts 那条一起删掉
   "settings.lang.uiPartial":
     "The interface is still being moved over page by page — for now only this card and the native-language notice follow this setting.",
+
+  // ── Watch page · collapsible playback controls (2026-09-06) ────────────
+  "watch.controls.label": "Playback controls",
+  "watch.controls.hide": "Hide playback controls (speed, ±N s)",
+  "watch.controls.show": "Show playback controls (speed, ±N s)",
+
+  // ── Watch page · capture bar ───────────────────────────────────────────
+  "watch.captures.aria": "Pause points and question points",
+  "watch.captures.helpAria": "What are these dots?",
+  "watch.captures.help":
+    "Pause points and question points. Click one to jump straight to that moment in the video and to the matching place in the chat, and your last playback position is kept as you go. (Still being built.)",
+  "watch.captures.count": (n: number) => (n === 1 ? "1 point" : `${n} points`),
 } as const satisfies CopyDict;
