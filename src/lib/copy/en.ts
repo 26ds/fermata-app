@@ -48,4 +48,19 @@ export const en = {
   "watch.captures.help":
     "Pause points and question points. Click one to jump straight to that moment in the video and to the matching place in the chat, and your last playback position is kept as you go. (Still being built.)",
   "watch.captures.count": (n: number) => (n === 1 ? "1 point" : `${n} points`),
+
+  // ── Watch page · the three right-rail tabs (M3.15 slice a, D61) ───────
+  // Wide screens only (≥1024px). Nothing on phones changed.
+  "watch.rail.aria": "Q&A workbench",
+  "watch.rail.tab.chat": "Ask",
+  "watch.rail.tab.questions": "Questions",
+  "watch.rail.tab.takeaway": "Takeaway",
+  "watch.rail.empty.chat":
+    "Pausing no longer pops open the ask panel on wide screens — ask right here instead. The input and answers land in the next slice (not built yet).",
+  "watch.rail.empty.questions":
+    "Questions you asked about this piece will be listed here in time order, follow-ups indented (not built yet). For now, the dots below are the map.",
+  "watch.rail.empty.takeaway":
+    "Key points from each answer show up here; tick one to add it to your notes. Generated only when you open this tab, so ignoring it costs nothing (not built yet).",
+  "watch.rail.capture": "Just mark this moment",
+  "watch.rail.capturing": "Marking…",
 } as const satisfies CopyDict;
