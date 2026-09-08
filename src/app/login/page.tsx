@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
+import { enabledProviders } from "@/lib/supabase/providers";
 import { LoginForm } from "@/components/login-form";
 import { SetupNotice } from "@/components/setup-notice";
 
@@ -18,6 +19,8 @@ export default async function LoginPage({
   if (user) redirect("/");
 
   const { error } = await searchParams;
+  // 后台开了 Google 才渲染那颗按钮（现查 GoTrue，不靠环境变量、不用重新部署）
+  const { google } = await enabledProviders();
 
   return (
     <main className="relative flex min-h-dvh flex-1 flex-col overflow-hidden px-5 py-6 sm:px-8">
@@ -47,13 +50,16 @@ export default async function LoginPage({
           <div className="mb-5 flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-ink-100">进入你的学习舱</p>
-              <p className="mt-1 text-xs text-ink-500">无密码 · 只用邮箱确认身份</p>
+              <p className="mt-1 text-xs text-ink-500">
+                {google ? "无密码 · Google 或邮箱都行" : "无密码 · 只用邮箱确认身份"}
+              </p>
             </div>
             <span className="flex h-9 w-9 items-center justify-center rounded-full border border-teal-600/60 text-sm text-teal-300" aria-hidden>
               ↗
             </span>
           </div>
         <LoginForm
+          showGoogle={google}
           initialError={
             error === "auth" ? "登录链接无效或已过期，请重新发送一封。" : undefined
           }
