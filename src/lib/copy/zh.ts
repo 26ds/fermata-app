@@ -36,11 +36,6 @@ export const zh = {
   "settings.lang.uiFallback": (native: string, actual: string) =>
     `界面还没有「${native}」的文案，所以现在显示的是${actual}。`,
   "settings.lang.uiFixed": (label: string) => `固定用${label}，不跟母语变。`,
-  // ⏳ **临时的，M3.9 片 f 做完要连同 en.ts 那条一起删掉。**
-  // 开关现在只改得动两块（这张卡 + 母语提示），其余界面还硬编码着中文。
-  // 片 a 拒绝提前摆这个开关的理由是「选了没反应就是骗人」——
-  // 「选了只有一部分有反应」是同一条线上浅一格，**写出来才不算骗**。
-  "settings.lang.uiPartial": "界面正在逐页搬家 —— 现在只有这一块和母语提示会跟着变。",
 
   // ── 观看页 · 播放控制条的折叠开关（创始人 2026-09-06）──────────────────
   // 只在宽屏出现。折叠之后那张卡（状态 + 时间 + 倍速 + ±N 秒）整个收起来，
@@ -79,4 +74,600 @@ export const zh = {
   // 悬浮球在宽屏上的替身（计划 §F）。**先不问、只记下这一刻**
   "watch.rail.capture": "只记下这一刻",
   "watch.rail.capturing": "记着…",
+  // ── 中 / EN 一键切换（创始人 2026-09-09）────────────────────────────────
+  // 「中」「EN」两个标签本身**不进表**：语言开关必须用各自的语言写自己
+  // （endonym）—— 写成「英文」，只读英文的人就认不出那是给他的了。
+  "lang.toggle.aria": "界面语言",
+  "lang.toggle.toZh": "切换到简体中文",
+  "lang.toggle.toEn": "切换到 English",
+  // D44：说得出是哪一种失败。界面**确实已经切了**（cookie 那层生效了），
+  // 没成的只是"记进账号"这一半 —— 别把两件事混成一句笼统的"失败了"
+  "lang.toggle.saveFailed": "这台设备已经切好了，但没能存进你的账号 —— 换台设备可能还是原来的语言。",
+
+  // ── 底部导航（D37 三分）────────────────────────────────────────────────
+  "nav.aria": "主要导航",
+  "nav.watch": "观看",
+  "nav.library": "历史与知识库",
+  "nav.live": "Live 实验",
+
+  // ── 通用 ────────────────────────────────────────────────────────────────
+  "common.settings": "设置",
+  "common.home": "Fermata 首页",
+  "common.signOut": "退出登录",
+  "common.back": "返回",
+
+  // ── 首页（门脸）────────────────────────────────────────────────────────
+  "home.title": "知识，慢慢长出来。",
+  "home.lede": "看视频、听播客，停下来的每一刻都被记着。回头看的时候，它们就是你的知识。",
+  "home.toLive": "开始一次对话",
+  "home.toWatch": "去看点什么",
+  "home.toLibrary": "看看我看过什么 →",
+
+  // ── 404 ─────────────────────────────────────────────────────────────────
+  "nf.title": "这一页找不到了。",
+  "nf.lede": "多半是这条内容已经被删掉，或者链接不完整。你攒下的暂停点和词库都还在。",
+  "nf.toHome": "回首页",
+  "nf.toLibrary": "去历史与知识库",
+
+  // ── 设置页外壳 ──────────────────────────────────────────────────────────
+  "settings.title": "设置",
+  "settings.lede": "母语，和你看这些东西是为了什么。改完立刻生效，不用重新登录。",
+
+  // ── 没配 Supabase 时的引导（开发者才看得到，但不能因此说中文）──────────
+  "setup.title": "还差一步：连接 Supabase",
+  "setup.step1": "在 supabase.com 创建项目，打开 Project Settings → API Keys",
+  "setup.step2a": "把项目根目录的",
+  "setup.step2b": "复制为",
+  "setup.step2c": "，填入 Project URL 和 anon public key",
+  "setup.step3a": "在 Supabase SQL Editor 里运行",
+  "setup.step4": "重启 npm run dev",
+  "setup.more": "详细步骤见 README.md",
+
+  // ── 返回箭头的去处（lib/nav.ts）────────────────────────────────────────
+  // 图标只有一个 ←，「退到哪儿」全靠这句读屏文字说清楚。
+  // **存 key 不存字符串**：nav.ts 是纯函数、拿不到用户语言，
+  // 让它返回 key、由调用处翻，类型闸门就顺带把这几条也罩住了。
+  "back.libraryItem": "返回这条内容的暂停点与聊天",
+  "back.favorites": "返回收藏列表",
+  "back.vocab": "返回全部词库",
+  "back.watchList": "返回观看列表",
+  "back.lastContent": "返回刚才那条内容",
+  "back.watch": "返回观看",
+  "back.live": "返回 Live 实验",
+  "back.library": "返回历史与知识库",
+
+  // ── 历史与知识库（列表页）──────────────────────────────────────────────
+  "library.name": "历史与知识库",
+  "library.title": "你看过的，都在这儿。",
+  "library.lede": "停下来想过的每一刻、存下来的每一个词，都跟着它那条内容。",
+  "library.atomsTitle": "知识原子",
+  "library.atomsHint": "看的时候存下来的词和概念，会长在这里",
+  "library.atomsAria": (n: number) => `知识原子：${n} 条`,
+  "library.tabByDate": "按日期",
+  "library.tabFolders": "智能分类",
+  "library.migrationNotice": "「什么时候看的」还没启用：去 Supabase → SQL Editor 跑一次",
+  "library.migrationTail": "。跑之前，下面这些会全落在「时间不详」一组，其余功能不受影响。",
+
+  // ── 内容详情（回看页）──────────────────────────────────────────────────
+  "detail.openInWatch": "在观看页打开 →",
+  "common.untitled": "未命名内容",
+  "common.openOrigin": (title: string) => `在原网站打开：${title}`,
+
+  // ── 全部词库 ────────────────────────────────────────────────────────────
+  "vocab.title": "你收下的词与概念。",
+  "vocab.lede": "每一条都记得它出现在哪、那句话原本怎么说 —— 点一下就回到那一秒。",
+  "vocab.count": (n: number) => `${n} 条`,
+
+  // ── 观看列表（/watch）──────────────────────────────────────────────────
+  "watch.name": "观看",
+  "watch.title": "看点什么？",
+  "watch.lede": "贴一条链接就行。Fermata 只记住「你在第几秒停下来过」，不下载、不存视频。",
+  "watch.tabAll": "全部",
+  "watch.tabFavorites": "★ 收藏",
+  "watch.migrationNotice": "有功能还没启用：去 Supabase → SQL Editor 跑一次",
+  "watch.migrationTail": "。其余功能不受影响。",
+  "detail.watchedTimes": (n: number) => `看过 ${n} 次`,
+
+  // ── 登录页 ──────────────────────────────────────────────────────────────
+  // 这是**外国人看到的第一屏**，也是唯一一个不登录就能看到的产品界面。
+  "login.aria": "登录",
+  "login.headline1": "让每一次停留，",
+  "login.headline2": "都留下点什么。",
+  "login.lede": "看视频、听播客的时候，Fermata 帮你把好奇心变成记得住的东西。",
+  "login.cardTitle": "进入你的学习舱",
+  "login.cardHintGoogle": "无密码 · Google 或邮箱都行",
+  "login.cardHintEmail": "无密码 · 只用邮箱确认身份",
+  "login.tagline": "停留之处，即学习之处。",
+  "login.privacy": "隐私政策",
+  "login.terms": "服务条款",
+  "login.emailLabel": "你的邮箱",
+  "login.sendBtn": "发送登录邮件",
+  "login.sending": "正在发送…",
+  "login.googleBtn": "用 Google 登录",
+  "login.googleGoing": "正在跳转 Google…",
+  "login.orEmail": "或者用邮箱",
+  "login.sentTitle": "确认邮件已出发",
+  // ⚠️ 这两条**不是逐字搬家**（M3.9 计划要求「搬家就是搬家」，这里破了例，理由记在
+  // M3.9-log）：原文是一整句、中间夹着两个 `<span>` 强调「这台设备 / 别的设备」。
+  // 夹在句子中间的强调片段翻不了 —— 英文的语序会把它们冲到别的位置，
+  // 拆成五个碎片 key 更糟。改成两句各自完整、强调落在句首，意思一字未改。
+  "login.sentSameDevice": "在这台设备上：点邮件里的登录按钮。",
+  "login.sentOtherDevice": "邮件是在别的设备上打开的：把里面的数字验证码填到下面。",
+  "login.codePlaceholder": "邮件里的验证码",
+  "login.verifySubmit": "用验证码登录",
+  "login.verifying": "确认中…",
+  "login.changeEmail": "换个邮箱 / 重新发送",
+
+  // ── 登录报错（D44：说得出是哪一种失败，一条一个真实起因）────────────────
+  "login.errAuth": "登录链接无效或已过期，请重新发送一封。",
+  "login.errTooFrequent": "发送太频繁：安全限制要求两次发送之间间隔 60 秒。",
+  "login.errTooFrequentWait": (s: string) =>
+    `发送太频繁：安全限制要求两次发送之间间隔 60 秒（还需等约 ${s} 秒）。`,
+  "login.errRateLimit": "这一小时的邮件发送额度用完了，过一会儿再试。",
+  "login.errGoogleOff": "Google 登录暂时不可用，请用下面的邮箱登录。",
+  "login.errSignupsOff": "这个邮箱还没法注册：新用户注册暂时是关着的。",
+  "login.errBadEmail": "这个邮箱地址填得不对，检查一下有没有漏字符。",
+  "login.errBadCode": "验证码不对或已过期，重新发送一封再试。",
+  "login.errSendFailed":
+    "邮件没能发出去 —— 是发信这一侧的故障，不是你的邮箱填错了。稍后再试一次；一直这样的话把这句话截图给我们。",
+  "legal.updated": "最后更新",
+
+  // ── 导入表单 ────────────────────────────────────────────────────────────
+  "import.label": "贴一条链接",
+  "import.placeholder": "YouTube / 小宇宙 / Apple Podcasts…",
+  "import.submit": "开始看",
+  "import.busy": "正在导入…",
+  "import.failed": "导入失败，请重试",
+  "import.offline": "网络不通，检查一下连接再试",
+  "import.hintA": "苹果播客里点这一集的",
+  "import.hintB": "，直接拷贝网址粘贴进来；小宇宙等其他 App 就是「分享 → 复制链接」。贴节目主页或 RSS 也认，那会导入最新一集。",
+
+  // ── 内容列表（/watch 下半屏）────────────────────────────────────────────
+  "list.empty": "这里还是空的。上面贴一条链接试试。",
+  "list.groupPinned": "置顶",
+  "list.groupUnknown": "时间不详",
+  "list.groupToday": "今天导入",
+  "list.groupYesterday": "昨天导入",
+  "list.groupWeek": "本周导入",
+  "list.groupOlder": "更早导入",
+  "list.pinned": "已置顶",
+  "list.favorited": "已收藏",
+  "list.moreActions": (title: string) => `${title} 的更多操作`,
+  "list.actionsAria": "内容操作",
+  "list.close": "关闭",
+  "list.pin": "置顶",
+  "list.unpin": "取消置顶",
+  "list.favorite": "加入收藏",
+  "list.unfavorite": "取消收藏",
+  "list.delete": "删除",
+  "list.cancel": "取消",
+  "list.changeFailed": "改不动，请重试",
+  "list.changeOffline": "网络不通，没改成",
+  "list.deleteFailed": "删除失败，请重试",
+  "list.deleteOffline": "网络不通，没能删掉",
+  "list.flagsMigration": "置顶和收藏需要先在 Supabase 跑一次",
+
+  // ── 观看历史（/library 列表）────────────────────────────────────────────
+  "history.empty": "还没有看过的东西。去「观看」贴一条链接，看几分钟，这里就有了。",
+  "history.emptyFolders": "智能分类还没做好。等它上线，这里会自动把看过的东西归成几个文件夹。",
+  "history.watchedTo": (t: string) => `看到 ${t}`,
+  "history.times": (n: number) => `看过 ${n} 次`,
+  "history.pauses": (n: number) => `${n} 个暂停点`,
+  "history.bucketToday": "今天看的",
+  "history.bucketYesterday": "昨天看的",
+  "history.bucketWeek": "本周看的",
+  "history.bucketOlder": "更早看过",
+  "history.bucketUnknown": "时间不详",
+  "history.unknownNote": "这些是加迁移 0007 之前看的 —— 那会儿还没有字段记「什么时候看的」。再看一遍就归位了。",
+
+  // ── 词库列表 ────────────────────────────────────────────────────────────
+  "vlist.empty": "还没收过词。看视频时停一下，在字幕里点一个词就收到这儿了；想收一整段，就再点一个词。",
+  "vlist.emptyAll": "词库还是空的。任意一条内容里停一下，在字幕里点一个词就收进来了。",
+  "vlist.remove": "从词库去掉",
+  "vlist.removeAria": (term: string) => `从词库去掉：${term}`,
+  "vlist.removeFailed": "没删掉，请重试",
+  "vlist.jumpAria": (term: string) => `跳回原声：${term}`,
+  "vlist.glossMissing": "解释还没取到",
+  "vlist.glossRetry": "再试一次",
+  "vlist.glossBusy": "取解释中…",
+  "vlist.glossFailed": "还是没取到，等会儿再试",
+
+  // ── 播放控制条（倍速、±N 秒）────────────────────────────────────────────
+  "play.back": (n: number) => `后退 ${n} 秒`,
+  "play.forward": (n: number) => `前进 ${n} 秒`,
+  "play.stepChip": (n: number) => `跳 ${n} 秒`,
+  "play.stepMenu": "改成一跳几秒",
+  "play.rateMenu": "改播放倍速",
+  "play.stepHint": "按一下箭头跳多少秒",
+  "play.rateHint": "播放速度（听不清就慢下来）",
+  "play.notStarted": "先点播放，这两颗才跳得动",
+
+  // ── 捕获点那一条（点点条）──────────────────────────────────────────────
+  "dots.next": "跳到下一个捕获点",
+  "dots.prev": "跳到上一个捕获点",
+  "dots.deleteFailed": "没删掉，请重试",
+  "dots.empty": "播到卡住的地方，点一下悬浮球 —— 这里会留下一个点，随时点回去。",
+  "dots.loading": (n: number) => `读取时长中，马上就能显示这 ${n} 个点。`,
+  "dots.clusterAria": (time: string, n: number) => `${time} 附近的 ${n} 个捕获点，展开选择`,
+  "dots.jumpAria": (time: string) => `跳回 ${time}`,
+  "dots.crowded": (n: number) => `这里挤了 ${n} 个点，挑一个：`,
+  "dots.jumpHere": "跳回这里",
+  "dots.deleteAria": (time: string) => `删除 ${time} 这个点`,
+
+  // ── 悬浮捕获球 ──────────────────────────────────────────────────────────
+  "orb.immersive": "沉浸聊天：长按收起",
+  "orb.ready": "捕获球：轻点记这一刻，长按进入沉浸聊天",
+  "orb.pending": "捕获球：字幕准备中，长按进入沉浸聊天",
+
+  // ── 字幕行尾那颗收词按钮 ────────────────────────────────────────────────
+  "phrase.save": "收进词库",
+  "phrase.unsave": "从词库去掉",
+  "phrase.saveLine": "收下这一行标出来的",
+  "phrase.saved": "已在词库里",
+
+  // ── 悬浮词卡（D46）──────────────────────────────────────────────────────
+  "bubble.loading": "查这个词…",
+  "bubble.failed": "没查到",
+  "bubble.retry": "再试一次",
+  "bubble.otherSenses": "其他常用意思",
+  "bubble.noOther": "没有别的常用意思",
+  "bubble.close": "关掉",
+
+  // ── 暂停点回看 ──────────────────────────────────────────────────────────
+  "pause.tagAsked": "问了",
+  "pause.tagAnswered": "答过",
+  "pause.tagStoppedAt": "停在这句",
+  "pause.justStopped": "只是停了一下",
+  "pause.deleteFailed": "没删掉，请重试",
+  "pause.heading": "replay / 暂停点回看",
+  "pause.collapse": "收起 ⌃",
+  "pause.expand": (n: number) => `展开 ⌄ ${n}`,
+  "pause.chatRow": (n: number) => `和这条内容聊过 ${n} 轮`,
+  "pause.chatOpen": "打开 →",
+  "pause.empty": "这条内容你还没停过。看的时候点右下角悬浮球，停下的每一刻都会记在这里。",
+  "pause.jumpAria": (time: string) => `跳回 ${time}`,
+  "pause.toggleAria": (open: string, time: string) => `${open} ${time} 的完整问答`,
+  "pause.toggleOpen": "展开",
+  "pause.toggleClose": "收起",
+  "pause.deleteAria": (time: string) => `删除 ${time} 这个暂停点`,
+  "pause.youAsked": "你问：",
+
+  // ── 内容详情页（回看）──────────────────────────────────────────────────
+  "detail.tabPauses": "暂停点与聊天",
+  "detail.tabVocab": "词库",
+  "detail.emptyPauses": "这条内容你还没停过。回观看页看的时候点右下角悬浮球，停下的每一刻都会记在这里。",
+  // 「那次看的」这个后缀原来是拼在四种日期后面的。拼串在英文里语序会散，
+  // 所以四条各自写完整（`detail.dayOn` 的日期由 `Intl.DateTimeFormat` 按界面语言排版）
+  "detail.dayToday": "今天 · 那次看的",
+  "detail.dayYesterday": "昨天 · 那次看的",
+  "detail.dayUnknown": "时间不详 · 那次看的",
+  "detail.dayOn": (date: string) => `${date} · 那次看的`,
+
+  // ── 划词选段（点两下选一段，D45/M3.10）──────────────────────────────────
+  "sel.take": "收下",
+  "sel.drop": "已在词库 · 去掉",
+  "sel.cancel": "取消",
+  "sel.hint": "再点一个词，就一直选到那儿",
+  "sel.word": (word: string) => `选中「${word}」`,
+  "sel.saved": "已收进词库",
+  "sel.glossBusy": "查这个词的意思…",
+  "sel.glossFailed": "没查到意思",
+  "sel.glossRetry": "再试一次",
+  "sel.glossDismiss": "收起",
+
+  // ── 字幕层 ──────────────────────────────────────────────────────────────
+  "cap.title": "captions / 字幕",
+  // 创始人 2026-08-04 指名要加「收进词库才能查看意思」——
+  // 悬浮在没收过的词上是没反应的，不说出口就像功能坏了
+  "cap.pickHint": "点词收进词库（收进后悬浮或长按可查意思）· 点行首时间戳跳到那一句",
+  "cap.follow": "跟随中",
+  "cap.noFollow": "不跟随",
+  "cap.hide": "隐藏",
+  "cap.show": "显示",
+  "cap.jumpAria": (time: string) => `跳到 ${time}`,
+
+  // YouTube 自家「显示转录」的三步。**出现在两个地方**（粘贴框里、以及自动转写走进
+  // 死路时），一份文案别让两处慢慢长歪
+  "cap.ytStep1a": "电脑浏览器打开这个视频 → 视频下方「",
+  "cap.ytStep1b": "」→「",
+  "cap.ytStep1More": "...更多",
+  "cap.ytStep1Show": "显示转录 / Show transcript",
+  "cap.ytStep1c": "」",
+  "cap.ytStep2a": "在弹出的转录里",
+  "cap.ytStep2Copy": "全选、复制",
+  "cap.ytStep3a": "回到这里，整段",
+  "cap.ytStep3Paste": "粘",
+  "cap.ytStep3b": "进「粘贴字幕」的框",
+
+  // 生成 / 粘贴那几颗按钮
+  "cap.retryAnyway": "仍要重试",
+  "cap.retry": "重试",
+  "cap.resume": "继续生成",
+  "cap.generate": "生成字幕",
+  "cap.pasteYt": "粘贴字幕",
+  "cap.pasteManual": "手动粘贴",
+  "cap.generating": (pct: string) => `生成中${pct}`,
+  "cap.generatingLong": (pct: string) => `正在生成字幕${pct}第一段大约二十秒后出来。`,
+  "cap.cancel": "取消",
+  "cap.saving": "正在存…",
+  "cap.save": "存下这份字幕",
+  "cap.none": "还没有字幕。",
+  "cap.tailNote": "后面还有没转完的部分。",
+
+  // 粘贴框里的说明
+  "cap.pasteYtLead": "有字幕(CC)的话，粘过来免费（手机上没有「显示转录」入口，这条要在电脑上做）：",
+  "cap.pasteYtTail": "认 YouTube 那种「时间戳+文字」，也认 .srt / .vtt。手机上直接用「生成字幕」就行。",
+  "cap.pasteManualLeadA": "把 .srt 或 .vtt 的内容整段贴进来（要带",
+  "cap.pasteManualLeadB": "这样的时间轴）。自动转写不灵的时候，这里永远是最后一条路。",
+  "cap.pastePlaceholderYt": "0:00\n第一句话\n0:04\n第二句话",
+  "cap.pastePlaceholderSrt": "1\n00:00:00,000 --> 00:00:03,200\n第一句话",
+  "cap.parseFailed":
+    "没认出任何一条字幕。可以是 YouTube「显示转录」复制的内容（时间戳+文字），也可以是 .srt / .vtt 文件内容。",
+  "cap.saveFailed": "没存上，请重试",
+  // 走进死路时那段（点开粘贴框之前就摊开搬运方法 —— 那时候人最需要它，却最看不见）
+  "cap.deadEndLead": "但你能打开这支视频，就说明字幕就在那儿 —— 自己搬过来，一样用（手机上没有「显示转录」入口，这条要在电脑上做）：",
+  "cap.hintGenerateA": "点",
+  "cap.hintGenerateBtn": "「生成字幕」",
+  "cap.hintGenerateB": "一键自动生成（约二十秒）。在电脑上打开、这视频有 CC 的话，也可以「粘贴字幕」免费拿。",
+
+  // AI 自动标词那颗拨动开关（D45，默认关）
+  "cap.scanLabel": "AI 标词",
+  "cap.scanOn": "打开 AI 自动标词，并马上扫这一片",
+  "cap.scanOff": "关掉 AI 自动标词",
+  "cap.scanRunning": "正在扫这一片…",
+  "cap.scanIsOn": "开着，会把值得收的词标出来",
+  "cap.scanIsOff": "关着（开了要花钱，每片只扫一次）",
+
+  // 字号 / 译文那一排
+  "cap.size": "字号",
+  "cap.sizeAria": "字幕字号",
+  "cap.translation": "译文",
+  "cap.translationAria": "译文语言",
+  "cap.translationOff": "关闭",
+  "cap.sameLangSuffix": "（原文，不用翻）",
+  "cap.flipAria": "对调原文与译文的大小",
+  "cap.flipToTr": "译文大 ⇅",
+  "cap.flipToOrig": "原文大 ⇅",
+  "cap.trOnlyCurrent": "只当前行",
+  "cap.trEveryLine": "每行译文",
+  "cap.translating": (pct: string) => `翻译中${pct}`,
+  "cap.trNoResponse": "翻译服务没响应",
+  "cap.trSameLang": "这条内容的原文就是这个语言。",
+  "cap.trFailed": "翻译没成，稍后再试。",
+
+  // ── 观看页舞台（watch-stage）────────────────────────────────────────────
+  "stage.noPlayer": (kind: string) => `这类内容（${kind}）的播放器还没做。`,
+  "stage.playing": "播放中",
+  "stage.paused": "已暂停",
+  "stage.capReady": "字幕就绪",
+  "stage.capRunning": "字幕生成中",
+  "stage.capFailed": "字幕没生成出来",
+  "stage.capPartial": "字幕生成了一半",
+  "stage.capPending": "字幕待生成",
+  "stage.positionAria": "播放位置",
+  "stage.splitterAria": "拖动调整视频与学习区的宽度，双击复位",
+  // 各种失败（D44：每条对应一个真起因，别压成一句"出错了"）
+  "stage.captureFailed": "没记下来，请重试",
+  "stage.captureLost": "没记下这一刻，稍后再问一次",
+  "stage.answerFailed": "没答出来，稍后再试",
+  "stage.transcribeFailed": "字幕没生成出来，稍后再试",
+  "stage.transcribeFailedShort": "字幕没生成出来",
+  "stage.deleteFailed": "没删掉，请重试",
+
+  // ── 打断面板（暂停时弹出来那张）────────────────────────────────────────
+  "panel.stuckAt": "卡在",
+  "panel.askHint": "问一句，我扣着这段字幕答你。",
+  "panel.lastTwoSeconds": "刚才这两秒",
+  // 创始人 2026-08-04 指名要加：**只有收进词库的词才查得了意思**。
+  // 不说清楚的话，悬浮在普通词上没反应，看着就像功能坏了
+  "panel.pickHint": "点词收进词库 · 收进后才能查意思",
+  "panel.noCaptionHere": "这一刻附近没有字幕。",
+  "panel.collapse": "点我收起，去看字幕",
+  "panel.expand": "展开",
+  "panel.expandLabel": "展开面板",
+  "panel.close": "关闭",
+  "panel.collapsedAria": "打断面板（已收起）",
+  "panel.backToPick": "回到暂停那两秒挑词",
+  "panel.askShort": "问一句",
+  "panel.addWord": "＋词",
+  "panel.chat": "沉浸聊天",
+  "panel.rescan": "再扫一次",
+  "panel.placeholder": "这里在讲什么？这个词什么意思？",
+  "panel.thinking": "思考中…",
+  "panel.send": "发送",
+  "panel.immersiveTitle": "长问答沉浸聊天",
+  "panel.immersiveHint": "有诸多疑惑？进来接着问，我扣着当前进度答。",
+  "panel.justCapture": "只记下这一刻，先不问",
+  "panel.done": "完成",
+  "panel.cancel": "取消",
+  "panel.saveFailed": "没记下来，请重试",
+
+  // 扫描的几种结局，每一种都得说人话 —— 说不清楚的失败等于没做
+  "panel.scanOff": "AI 标词关着 —— 开关在下面「字幕」那一行。",
+  "panel.scanScanning": "正在把这条内容里值得收的表达标出来…",
+  "panel.scanReady": (n: number) => `全片标出 ${n} 个，下面的字幕里也都标了`,
+  "panel.scanEmpty": "整片扫完了，一个都没标出来。",
+  "panel.scanNotReady": "字幕还太少，等它多转出一段再来扫。",
+  "panel.scanRunning": "上一次扫描还没结束（或卡住了）。",
+  "panel.scanFailed": "这次没扫成。",
+
+  // 这一份是按**旧的语言设置**扫的。说清楚是哪儿旧了，别只丢一个按钮
+  "panel.driftMode": "你改过语言设置了 —— 这一份是按之前那套标的。",
+  "panel.driftSupport": "你换了母语 —— 这些解释还是用之前那门语言写的。",
+  "panel.driftRescan": "按新的重扫",
+
+  // 第一次遇到非母语内容时问的那一句（D42）
+  "panel.targetTitle": (lang: string) => `这条内容是 ${lang}。`,
+  "panel.targetQuestion": "你是想学这门语言，还是只想搞懂内容？",
+  "panel.targetLearn": (lang: string) => `我想学 ${lang}`,
+  "panel.targetJustContent": "只想搞懂内容",
+
+  // ── 快捷问 ──────────────────────────────────────────────────────────────
+  // ⚠️ `quick.*Q` 这两条是**真的发给模型的那句话**，不是界面标签。
+  // 放进文案表是想清楚了的：它不是"提示词模板"（D42 红线禁的是那个），
+  // 而是**替用户打的那句话** —— 聊天流里会原样显示成「你问：…」。
+  // 用英文界面的人按下去，冒出来一句中文"我问的问题"，那是荒谬的；
+  // 而且创始人 2026-09-09 明说 AI 的输出语言应当跟着**用户的输入语言**走。
+  "quick.explainLabel": "解释这段",
+  "quick.explainHint": "整段没跟上",
+  "quick.explainQ": "把刚才这段内容讲清楚一点，我没跟上。",
+  "quick.wordLabel": "有个词没听懂",
+  "quick.wordHint": "卡在某个词",
+  "quick.wordQ": "刚才这段里有没有比较难懂的词或术语？挑出来解释一下。",
+
+  // ── 沉浸聊天 ────────────────────────────────────────────────────────────
+  "chat.aria": "长问答沉浸聊天",
+  "chat.paletteLabel": "更换流光配色",
+  "chat.paletteAria": (name: string) => `配色：${name}`,
+  "chat.fontLabel": "调字号",
+  "chat.fontHint": "字号",
+  "chat.empty": "有什么想问的？扣着当前进度，接着聊。",
+  "chat.thinking": "正在想…",
+  "chat.toLatest": "回到最新 ↓",
+  "chat.placeholder": "接着问一句…",
+  "chat.send": "发送",
+  "chat.exitHint": "长按悬浮球退出",
+  "chat.answerFailed": "没答出来，稍后再试",
+  // 流光配色的名字
+  "chat.glowAurora": "极光",
+  "chat.glowBamboo": "青竹",
+  "chat.glowDusk": "暮霞",
+  "chat.glowNebula": "星云",
+  "chat.glowInk": "素墨",
+  // 字号四档
+  "chat.fsS": "小",
+  "chat.fsM": "中",
+  "chat.fsL": "大",
+  "chat.fsXL": "特大",
+
+  // ── Live 语音实验台 ─────────────────────────────────────────────────────
+  // ⚠️ 这个文件里还有一条**给模型的系统提示词**（"你是 Fermata 的语音对话伙伴…"），
+  // **不在这张表里、也永远不许进来**（D42 红线）。它自己就写着"用户用哪种语言你就用
+  // 哪种语言回应"，那正是创始人 2026-09-09 要的行为。
+  "live.notReadyTitle": "Live 还在准备中",
+  "live.notReadyBodyA": "服务器还没配置",
+  "live.notReadyBodyB": "。配置完成后，就可以在这里和学习伙伴自然地说话。",
+  "live.notReadyHint": "去 Google AI Studio 创建 API Key，填入 Vercel 的 Environment Variables 后重新部署。",
+  "live.title": "和你的学习伙伴聊聊。",
+  "live.statusIdle": "待机",
+  "live.statusConnecting": "连接中",
+  "live.statusEnded": (clock: string) => `结束 ${clock}`,
+  "live.interrupts": (n: number) => `打断 ${n}`,
+  "live.latency": (s: string) => `响应 ${s}s`,
+  "live.listeningAria": "正在聆听",
+  "live.listening": "正在聆听 · 随时可以插话",
+  "live.captionsTitle": "live captions / 双向字幕",
+  "live.waitingFirst": "等待第一句话",
+  "live.turns": (n: number) => `${n} turns`,
+  "live.emptyLive": "开口说话吧，中英文随意混用。正在说的话会浮在上面小球下方，说完一句才落进这里。它说到一半时插话，就能感受打断。",
+  "live.emptyIdle": "点下面的按钮开始，允许麦克风权限后，戴上耳机效果最好。",
+  "live.roleYou": "you / 你",
+  "live.roleAssistant": "fermata / 学习伙伴",
+  "live.interrupted": "（被打断）",
+  "live.sendTextLabel": "发送文字",
+  "live.textPlaceholder": "也可以输入文字…",
+  "live.send": "发送",
+  "live.end": "结束这次对话",
+  "live.voice": "voice / 音色",
+  "live.connecting": "正在连接…",
+  "live.restart": "重新开始这次对话",
+  "live.start": "开始语音对话",
+  "live.reclaim": "服务器即将回收连接，正在无缝续接…",
+  "live.reconnecting": (n: number) => `连接断了，正在第 ${n} 次续接…`,
+  "live.closedWith": (reason: string) => `连接被关闭：${reason}`,
+  "live.closed": "连接断开了。可以点「重新开始」再来一轮。",
+  "live.connError": "连接出错",
+  // 麦克风 / 额度那几种失败（D44：每条对应一个真起因）
+  "live.errMicDenied": "麦克风权限被拒绝了。iPhone：设置 → Safari（或该 App）→ 麦克风 → 允许；电脑：点地址栏左边的锁图标允许麦克风。",
+  "live.errNoMic": "没找到麦克风设备。",
+  "live.errQuota": "Gemini 免费额度暂时用完了，等几分钟再试。",
+  "live.errNoModel": (msg: string) => `模型不存在或已下线：${msg}（可在 Vercel 设 GEMINI_LIVE_MODEL 换一个模型）`,
+  // 音色。名字是专有名词不翻，后面那句描述要翻
+  "live.voicePuck": "Puck · 偏男声，活泼",
+  "live.voiceCharon": "Charon · 偏男声，低沉",
+  "live.voiceFenrir": "Fenrir · 偏男声，带劲",
+  "live.voiceOrus": "Orus · 偏男声，坚定",
+  "live.voiceKore": "Kore · 偏女声，沉稳",
+  "live.voiceAoede": "Aoede · 偏女声，轻快",
+  "live.voiceLeda": "Leda · 偏女声，年轻",
+  "live.voiceZephyr": "Zephyr · 偏女声，明亮",
+  "live.tokenFailed": (code: number) => `token 接口返回 ${code}`,
+
+  // ── API 报错（`src/app/api/**`）─────────────────────────────────────────
+  // 这些是**直接回给客户端、原样显示**的人话（M3.9 计划 §E：不改成错误码，
+  // 那是更干净但更大的重构，本片不做）。语言取自 `getUiLang()` ——
+  // cookie → Accept-Language → 英文。
+  //
+  // **登录之前那几条（未配置 / 请先登录）读设备语言是对的**：此刻我们确实还不知道
+  // 这个人是谁，读设备是唯一诚实的信号；而且**只用于显示，不写进任何人的档案**，
+  // 和 D42 修订①禁止的"拿设备语言冒充人的母语"是两回事。别把这里当反例。
+  "err.noSupabase": "Supabase 未配置",
+  "err.needLogin": "请先登录",
+  "err.badRequest": "请求参数不合法",
+  "err.badFormat": "请求格式不对",
+  "err.noSource": "找不到这条内容",
+  "err.sourceMissing": "内容不存在",
+  "err.noInterrupt": "这个打断点不存在",
+  "err.noInterruptPoint": "找不到这个打断点",
+  "err.noAtom": "找不到这条词",
+  "err.needUrl": "请贴一条链接",
+  "err.needQuestion": "先写一句想问的",
+  "err.needSourceId": "缺少内容 id",
+  "err.missingSourceId": "缺少 sourceId",
+  "err.nothingToUpdate": "没有要更新的字段",
+  "err.noCaptionsAsk": "这条内容还没有字幕，先生成字幕再问。",
+  "err.noCaptionsChat": "这条内容还没有字幕，先生成字幕再聊。",
+  "err.chatCreateFailed": "建立对话失败，请重试",
+  "err.answerFailed": (detail: string) => `回答时出错了：${detail}`,
+  "err.glossTimeout": "取解释超时了（20 秒没回来）。",
+  "err.glossFailed": "取解释时出错了。",
+  "err.lookupTimeout": "查这个词超时了。",
+  "err.lookupFailed": "查这个词时出错了。",
+  "err.atomSaveFailed": "没收进词库，请重试",
+  "err.interruptSaveFailed": "没记下来，请重试",
+  "err.phraseScanFailed": "这次没扫出词组，稍后再试。",
+  "err.unknownLink": "这条链接暂时认不出来。现在支持 YouTube 视频、播客 RSS，以及音频直链。",
+  "err.upstreamTimeout": "对方服务器没响应，过一会儿再试",
+  "err.saveFailed": "保存失败，请重试",
+  "err.noGeminiKey": "服务器还没配置 GEMINI_API_KEY",
+  "err.noGeminiKeyHint": "服务器还没配置 GEMINI_API_KEY（Vercel → Settings → Environment Variables）",
+  "err.emptyToken": "Gemini 返回了空 token，请稍后重试",
+  "err.badGeminiKey": "GEMINI_API_KEY 无效：去 aistudio.google.com 重新复制一遍，注意别带空格",
+  "err.geminiQuota": "Gemini 免费额度暂时用完了，等几分钟再试",
+  "err.allTranscriptSourcesFailed": "所有字幕来源都没成。可以手动粘贴字幕，或稍后重试。",
+  "err.translateFailed": (detail: string) => `翻译时出错了：${detail}`,
+  "err.badTargetLang": "不支持的目标语言",
+  "err.noCaptionsTranslate": "这条内容还没有字幕，先生成字幕再翻译。",
+  // D51：**一个不可证伪的拒绝等于一个藏起来的 bug** —— 说得出"我以为它是哪门语言"
+  "err.sameLangNoTranslate": (lang: string) =>
+    `这条内容的原文我判断就是${lang}，跟你选的译文是同一门语言 —— 没翻，也没花那笔翻译的钱。`,
+  "err.alreadyThatScript": (lang: string) => `你现在看的字幕已经是${lang}了。`,
+  "err.noTranscriberFor": (kind: string) => `这类内容（${kind}）的字幕还没接上`,
+  "err.tooLong": "这条内容超过 4 小时，暂时不自动转写 —— 可以手动粘贴字幕。",
+  "err.providerFellBack": (name: string) => `${name} 没成，换下一个`,
+  "err.compactFailed": "浓缩这次对话时出错了，稍后再试。",
+  "skeleton.recent": "最近导入",
+  "skeleton.player": "播放器",
+  "skeleton.preparingPlayer": "正在准备播放器…",
+
+  // ── 站点元信息（浏览器标签 / PWA 安装名）──────────────────────────────
+  "meta.description": "视频时代的主动学习层 — 停留之处即学习之处",
+  "meta.descriptionShort": "视频时代的主动学习层",
+
+  // ── 播客播放器 ──────────────────────────────────────────────────────────
+  "podcast.untitled": "未命名节目",
+  "podcast.play": "播放",
+  "podcast.pause": "暂停",
+  "podcast.progress": "播放进度",
+
+  // ── 导入播客时说得清的那几种失败（`lib/sources/podcast.ts` 抛 key）──────
+  "podcast.errFetch": (code: number) => `这条链接打不开（${code}），检查一下再试`,
+  "podcast.errNotFeed": "这条链接不是播客订阅源（RSS）。在播客 App 里找「复制 RSS 地址」，或直接贴一条 .mp3 链接。",
+  "podcast.errNoAudio": "这个订阅源里没找到可播放的音频（没有 enclosure）",
+  "podcast.errTooOld": "这一期太旧了，苹果的接口翻不到（它只回最近两百期）。贴这档节目的 RSS 地址就能导入。",
+  "podcast.errAppleLookup": "这条 Apple Podcasts 链接查不到内容。确认一下链接是不是完整的，或者贴这档节目的 RSS 地址。",
+  "podcast.errNoEpisode": "这个页面里没找到能播的单集。如果它是节目主页，请打开**某一期**再复制链接；或者贴这档节目的 RSS 地址。",
+
+  // ── 翻译服务 ────────────────────────────────────────────────────────────
+  "err.noGeminiKeyTranslate": "服务器还没配置 GEMINI_API_KEY，翻译暂时不可用。",
 } as const;

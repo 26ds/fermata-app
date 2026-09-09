@@ -6,6 +6,8 @@ import { BottomNav } from "@/components/bottom-nav";
 import { LangBootstrap } from "@/components/lang-bootstrap";
 import { LangGuessBanner } from "@/components/lang-guess-banner";
 import { SettingsLink } from "@/components/settings-link";
+import { LangToggle } from "@/components/lang-toggle";
+import { getT } from "@/lib/ui-lang";
 import { SetupNotice } from "@/components/setup-notice";
 import { getLangPrefs } from "@/lib/settings";
 import { ImportForm } from "@/components/import-form";
@@ -89,6 +91,7 @@ export default async function WatchPage({
   // D42：母语探一次就够（`navigator.language`）。放在登录后最常落地的这一页，
   // 让它在真正需要语言判定（词库扫描）之前就已经有值。
   const prefs = await getLangPrefs(supabase, user.id);
+  const t = await getT();
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
@@ -97,15 +100,17 @@ export default async function WatchPage({
       <header className="relative flex items-center justify-between px-5 pb-4 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8">
         {/* M3.6：/watch 从"首页的下一级"升成了底部第一个 tab（D37），
             所以这里不再是「← 返回知识库」，而是回门脸的 logo */}
-        <Link href="/" className="group flex min-h-11 items-center gap-2.5 text-sm text-ink-300 hover:text-ink-100" aria-label="Fermata 首页">
+        <Link href="/" className="group flex min-h-11 items-center gap-2.5 text-sm text-ink-300 hover:text-ink-100" aria-label={t("common.home")}>
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-400 text-lg leading-none text-teal-950" aria-hidden>𝄐</span>
           <span className="text-sm font-semibold tracking-[0.12em]">FERMATA</span>
         </Link>
         <div className="flex items-center gap-3">
           <div className="text-right">
             <p className="eyebrow text-teal-300">watch</p>
-            <p className="mt-1 text-xs text-ink-500">观看</p>
+            <p className="mt-1 text-xs text-ink-500">{t("watch.name")}</p>
           </div>
+          {/* 创始人 2026-09-09：语言开关每个界面都要有 */}
+          <LangToggle />
           {/* 创始人 2026-08-02：设置得在一眼看得到的地方 */}
           <SettingsLink from="watch" />
         </div>
@@ -118,11 +123,9 @@ export default async function WatchPage({
 
         <section className="pt-4">
           <h1 className="display-serif text-[2rem] leading-tight tracking-[-0.04em] text-ink-100">
-            看点什么？
+            {t("watch.title")}
           </h1>
-          <p className="mt-3 max-w-md text-sm leading-7 text-ink-300">
-            贴一条链接就行。Fermata 只记住「你在第几秒停下来过」，不下载、不存视频。
-          </p>
+          <p className="mt-3 max-w-md text-sm leading-7 text-ink-300">{t("watch.lede")}</p>
         </section>
 
         <section className="mt-7 rounded-[1.75rem] border border-ink-500/50 bg-ink-700 p-5 sm:p-6">
@@ -139,7 +142,7 @@ export default async function WatchPage({
                   onlyFavorites ? "text-ink-500 hover:text-ink-100" : "bg-ink-700 text-teal-300"
                 }`}
               >
-                全部
+                {t("watch.tabAll")}
               </Link>
               <Link
                 href="/watch?tab=favorites"
@@ -148,7 +151,7 @@ export default async function WatchPage({
                   onlyFavorites ? "bg-ink-700 text-teal-300" : "text-ink-500 hover:text-ink-100"
                 }`}
               >
-                ★ 收藏
+                {t("watch.tabFavorites")}
               </Link>
             </div>
             <span className="rounded-full border border-ink-500/50 px-2.5 py-1 text-xs tabular-nums text-ink-300">
@@ -158,11 +161,11 @@ export default async function WatchPage({
 
           {pendingMigrations.length > 0 && (
             <p className="mt-3 rounded-xl border border-ink-500/50 px-3 py-2 text-xs leading-5 text-ink-300">
-              有功能还没启用：去 Supabase → SQL Editor 跑一次
+              {t("watch.migrationNotice")}
               {pendingMigrations.map((f) => (
                 <code key={f} className="text-ink-100"> {f}</code>
               ))}
-              。其余功能不受影响。
+              {t("watch.migrationTail")}
             </p>
           )}
           {/* 在「★ 收藏」那一栏点进去，返回时要退回收藏而不是"全部" */}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { withFrom, type BackFrom } from "@/lib/nav";
 import { hms } from "@/lib/time";
+import { useCopy } from "@/components/copy-provider";
 
 // M3.7 词库列表（D40）—— 两处共用一份：
 //   `/library/[id]` tab2  本片词库
@@ -12,23 +13,8 @@ import { hms } from "@/lib/time";
 // 点一条 = **回观看页跳到它出现的那一秒**，和点暂停点完全一样的动作 ——
 // 用户学一次会两处（D40 原话）。这一页没有播放器，所以只能真跳页。
 
-// D42：文案集中在这里，M3.9 抽语言表时只动这一处
-const COPY = {
-  // M3.10 / D45：这两句原来写的是"面板里高亮的词组点一下"—— 而 AI 标词现在**默认关着**，
-  // 照着做根本不会有高亮出现。空状态在教一个不存在的动作，是最坏的一种文案
-  empty: "还没收过词。看视频时停一下，在字幕里点一个词就收到这儿了；想收一整段，就再点一个词。",
-  emptyAll: "词库还是空的。任意一条内容里停一下，在字幕里点一个词就收进来了。",
-  remove: "从词库去掉",
-  removeFailed: "没删掉，请重试",
-  noTime: "—",
-  jumpHint: "跳回原声",
-  // D44：取不到解释要**说出来**，并给一条自己动手的路。空着的话，
-  // "还没取"和"这个词本来就没解释"从外面看一模一样
-  glossMissing: "解释还没取到",
-  glossRetry: "再试一次",
-  glossBusy: "取解释中…",
-  glossFailed: "还是没取到，等会儿再试",
-};
+// 时间未知时那一格画什么。**不是文案**（每种语言都是这一个破折号），故不进表
+const NO_TIME = "—";
 
 export interface VocabItem {
   id: string;
@@ -53,6 +39,7 @@ export function VocabList({
   showSource?: boolean;
   emptyAll?: boolean;
 }) {
+  const t = useCopy();
   const router = useRouter();
   const [rows, setRows] = useState(items);
   const [error, setError] = useState("");
@@ -76,12 +63,13 @@ export function VocabList({
     setRows((prev) => prev.filter((r) => r.id !== id));
     try {
       const res = await fetch(`/api/atoms/${id}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(COPY.removeFailed);
+      if (!res.ok) throw new Error(t("vlist.removeFailed"));
     } catch {
       setRows(snapshot); // 回滚，别让一条词凭空消失
-      setError(COPY.removeFailed);
+      setError(t("vlist.removeFailed"));
     }
-  }, []);
+    // `t` 进依赖：报错那句话要跟着界面语言走
+  }, [t]);
 
   /**
    * M3.10：这条词还没有解释 —— 再要一次。
@@ -96,7 +84,7 @@ export function VocabList({
       const res = await fetch(`/api/atoms/${id}/gloss`, { method: "POST" });
       const body = await res.json().catch(() => ({}));
       const gloss = typeof body?.atom?.gloss === "string" ? body.atom.gloss : "";
-      if (!res.ok || !gloss) throw new Error(body?.error ?? COPY.glossFailed);
+      if (!res.ok || !gloss) throw new Error(body?.error ?? t("vlist.glossFailed"));
       setRows((prev) => prev.map((r) => (r.id === id ? { ...r, gloss } : r)));
       setGlossing((prev) => {
         const next = { ...prev };
@@ -107,9 +95,10 @@ export function VocabList({
       setGlossing((prev) => ({ ...prev, [id]: "failed" }));
       // 服务端已经把"是哪一种失败"写成人话了（没配 key / 超时 / 模型给了空答案），
       // 原样转达，别在这里统一压成一句"失败"
-      setError(e instanceof Error ? e.message : COPY.glossFailed);
+      setError(e instanceof Error ? e.message : t("vlist.glossFailed"));
     }
-  }, []);
+    // 同上
+  }, [t]);
 
   const open = useCallback(
     (row: VocabItem) => {
@@ -126,7 +115,7 @@ export function VocabList({
         <span className="text-2xl text-ink-500" aria-hidden>
           ✓
         </span>
-        <p className="mt-3 text-sm leading-6 text-ink-500">{emptyAll ? COPY.emptyAll : COPY.empty}</p>
+        <p className="mt-3 text-sm leading-6 text-ink-500">{emptyAll ? t("vlist.emptyAll") : t("vlist.empty")}</p>
       </div>
     );
   }
@@ -146,7 +135,7 @@ export function VocabList({
             type="button"
             onClick={() => open(row)}
             disabled={!row.source_id}
-            aria-label={`${COPY.jumpHint}：${row.term}`}
+            aria-label={t("vlist.jumpAria", row.term)}
             className="absolute inset-0 rounded-2xl transition-colors hover:bg-ink-700/40 disabled:cursor-default disabled:hover:bg-transparent"
           />
           <div className="pointer-events-none relative flex items-start gap-3 px-4 py-3">
@@ -154,7 +143,7 @@ export function VocabList({
               <p className="flex items-baseline gap-2">
                 <span className="min-w-0 break-words text-sm font-semibold text-ink-100">{row.term}</span>
                 <span className="ui-mono shrink-0 text-[0.68rem] text-teal-300">
-                  {row.t_s != null ? hms(row.t_s) : COPY.noTime}
+                  {row.t_s != null ? hms(row.t_s) : NO_TIME}
                 </span>
               </p>
               {row.gloss ? (
@@ -165,10 +154,10 @@ export function VocabList({
                 <p className="mt-0.5 flex items-center gap-2 text-xs leading-5 text-ink-500">
                   <span>
                     {glossing[row.id] === "busy"
-                      ? COPY.glossBusy
+                      ? t("vlist.glossBusy")
                       : glossing[row.id] === "failed"
-                        ? COPY.glossFailed
-                        : COPY.glossMissing}
+                        ? t("vlist.glossFailed")
+                        : t("vlist.glossMissing")}
                   </span>
                   {glossing[row.id] !== "busy" && (
                     <button
@@ -176,7 +165,7 @@ export function VocabList({
                       onClick={() => refetchGloss(row.id)}
                       className="pointer-events-auto relative z-10 min-h-7 shrink-0 rounded-lg border border-teal-400/50 px-2 text-[0.68rem] text-teal-300 transition-colors hover:bg-teal-400/10"
                     >
-                      {COPY.glossRetry}
+                      {t("vlist.glossRetry")}
                     </button>
                   )}
                 </p>
@@ -191,7 +180,7 @@ export function VocabList({
             <button
               type="button"
               onClick={() => remove(row.id)}
-              aria-label={`${COPY.remove}：${row.term}`}
+              aria-label={t("vlist.removeAria", row.term)}
               className="pointer-events-auto relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm text-ink-500 transition-colors hover:bg-ink-700 hover:text-teal-300"
             >
               ×

@@ -112,3 +112,44 @@ export function makeT(lang: string | null | undefined): Translate {
     return typeof v === "function" ? (v as (...a: unknown[]) => string)(...args) : (v as string);
   };
 }
+
+/**
+ * 这个字符串是不是一条真的文案 key（M3.9 片 c）。
+ *
+ * **为什么需要它**：`zod` 的 `.min(1, "…")` 挂在**模块级常量**上，
+ * 那时候拿不到"这个人用什么语言看界面"。所以 schema 里挂的是 **key**
+ * （`"err.needUrl"`），出错时在路由里翻。
+ * 但 zod 自己也会产生消息（`"Invalid input"` 之类），那些不是 key ——
+ * 所以翻之前先问一句，不是 key 就原样奉还，**绝不把 `err.needUrl` 这种东西显示给人看**。
+ */
+export function isCopyKey(s: string | null | undefined): s is CopyKey {
+  return typeof s === "string" && s in zh;
+}
+
+/** 翻一条"可能是 key、也可能是现成人话"的消息。见 `isCopyKey` */
+export function tMaybeKey(t: Translate, message: string | null | undefined, fallback: CopyKey): string {
+  if (isCopyKey(message)) return t(message);
+  return message?.trim() ? message : t(fallback);
+}
+
+/**
+ * 用一个**运行时才知道**的 key + 一串运行时参数取文案（M3.9 片 c）。
+ *
+ * 正常情况下 `t("a.b", x)` 的参数是**类型推出来的**（见 keys.ts 的 `CopyArgs`），
+ * 那是这张表最值钱的一道闸门，别绕开它。这个函数是给一种绕不开的场合用的：
+ * 服务端库（如 `lib/sources/podcast.ts`）抛错时带一个 key 上来，
+ * 路由拿到的是 `string` + `unknown[]`，**编译期无从对齐**。
+ *
+ * 所以那个 `as` 就集中在这一处、写明白理由，而不是散在每个调用点。
+ * key 不认识就返回 null，由调用方决定兜底 —— **绝不把 `podcast.errFetch`
+ * 这种东西显示给人看**。
+ */
+export function tDynamic(
+  lang: string | null | undefined,
+  key: string | null | undefined,
+  args: readonly unknown[] = [],
+): string | null {
+  if (!isCopyKey(key)) return null;
+  const v = getCopy(lang)[key];
+  return typeof v === "function" ? (v as (...a: unknown[]) => string)(...args) : (v as string);
+}

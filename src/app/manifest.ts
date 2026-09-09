@@ -1,10 +1,15 @@
 import type { MetadataRoute } from "next";
+import { getT } from "@/lib/ui-lang";
 
-export default function manifest(): MetadataRoute.Manifest {
+// PWA 安装卡片上的那句话。改成 `async` 读界面语言 —— 装到主屏那一下，
+// 名字和说明用的该是这个人读得懂的语言。
+export default async function manifest(): Promise<MetadataRoute.Manifest> {
+  const t = await getT();
+
   return {
     name: "Fermata",
     short_name: "Fermata",
-    description: "视频时代的主动学习层",
+    description: t("meta.descriptionShort"),
     start_url: "/",
     display: "standalone",
     background_color: "#2c2c2a",

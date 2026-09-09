@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ViewportLayer } from "@/components/viewport-layer";
 import { sourceOriginUrl } from "@/lib/source-origin";
 import { withFrom, type BackFrom } from "@/lib/nav";
+import { useCopy } from "@/components/copy-provider";
 
 export interface SourceListItem {
   id: string;
@@ -38,14 +39,24 @@ function mmss(seconds: number): string {
  *
  * 自动分类（②）和自建文件夹（③）本片不做。
  */
-function bucketOf(createdAt: string | null, todayStart: number): { key: string; label: string } {
-  if (!createdAt) return { key: "unknown", label: "时间不详" };
+// M3.9 片 c：只返回 key，那句话由调用处 `t()` 出来 —— 这是个纯函数，
+// 拿不到"这个人用什么语言看界面"
+const GROUP_KEYS = {
+  unknown: "list.groupUnknown",
+  today: "list.groupToday",
+  yesterday: "list.groupYesterday",
+  week: "list.groupWeek",
+  older: "list.groupOlder",
+} as const;
+
+function bucketOf(createdAt: string | null, todayStart: number): keyof typeof GROUP_KEYS {
+  if (!createdAt) return "unknown";
   const day = new Date(createdAt).setHours(0, 0, 0, 0);
   const days = Math.round((todayStart - day) / 86_400_000);
-  if (days <= 0) return { key: "today", label: "今天导入" };
-  if (days === 1) return { key: "yesterday", label: "昨天导入" };
-  if (days < 7) return { key: "week", label: "本周导入" };
-  return { key: "older", label: "更早导入" };
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 7) return "week";
+  return "older";
 }
 
 /**
@@ -93,6 +104,7 @@ export function SourceList({
    */
   from?: BackFrom;
 }) {
+  const t = useCopy();
   const router = useRouter();
   const [rows, setRows] = useState(items);
   const [menuId, setMenuId] = useState<string | null>(null);
@@ -120,20 +132,21 @@ export function SourceList({
     const pinned = rows.filter((r) => r.pinned_at);
     const rest = rows.filter((r) => !r.pinned_at);
     // 置顶永远排最前，且不进日期分组（D16）
-    if (pinned.length > 0) out.push({ key: "pinned", label: "置顶", rows: pinned });
+    if (pinned.length > 0) out.push({ key: "pinned", label: t("list.groupPinned"), rows: pinned });
     if (todayStart == null) {
       if (rest.length > 0) out.push({ key: "all", label: "", rows: rest });
       return out;
     }
     // rest 已经是导入时间倒序（服务端排的），顺着连成组即可，组的先后天然就对
     for (const r of rest) {
-      const b = bucketOf(r.created_at, todayStart);
+      const key = bucketOf(r.created_at, todayStart);
       const last = out[out.length - 1];
-      if (last && last.key === b.key) last.rows.push(r);
-      else out.push({ ...b, rows: [r] });
+      if (last && last.key === key) last.rows.push(r);
+      else out.push({ key, label: t(GROUP_KEYS[key]), rows: [r] });
     }
     return out;
-  }, [rows, todayStart]);
+    // `t` 进依赖：换了界面语言，分组标题也得跟着重算
+  }, [rows, todayStart, t]);
 
   // 打开面板时锁住背景滚动，并支持 Esc 关闭
   useEffect(() => {
@@ -171,13 +184,13 @@ export function SourceList({
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         setRows(snapshot);
-        setError(data?.error ?? "改不动，请重试");
+        setError(data?.error ?? t("list.changeFailed"));
       } else {
         router.refresh();
       }
     } catch {
       setRows(snapshot);
-      setError("网络不通，没改成");
+      setError(t("list.changeOffline"));
     } finally {
       setBusy(false);
     }
@@ -195,13 +208,13 @@ export function SourceList({
       if (!res.ok) {
         const data = await res.json().catch(() => null);
         setRows(snapshot);
-        setError(data?.error ?? "删除失败，请重试");
+        setError(data?.error ?? t("list.deleteFailed"));
       } else {
         router.refresh();
       }
     } catch {
       setRows(snapshot);
-      setError("网络不通，没能删掉");
+      setError(t("list.deleteOffline"));
     } finally {
       setBusy(false);
     }
@@ -209,9 +222,7 @@ export function SourceList({
 
   if (rows.length === 0) {
     return (
-      <p className="py-8 text-center text-sm text-ink-500">
-        这里还是空的。上面贴一条链接试试。
-      </p>
+      <p className="py-8 text-center text-sm text-ink-500">{t("list.empty")}</p>
     );
   }
 
@@ -246,17 +257,17 @@ export function SourceList({
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-1.5">
                       {s.pinned_at && (
-                        <span className="shrink-0 text-xs text-teal-300" title="已置顶" aria-label="已置顶">
+                        <span className="shrink-0 text-xs text-teal-300" title={t("list.pinned")} aria-label={t("list.pinned")}>
                           ↑
                         </span>
                       )}
                       {s.favorited_at && (
-                        <span className="shrink-0 text-xs text-teal-300" title="已收藏" aria-label="已收藏">
+                        <span className="shrink-0 text-xs text-teal-300" title={t("list.favorited")} aria-label={t("list.favorited")}>
                           ★
                         </span>
                       )}
                       <span className="truncate text-ink-100">
-                        {s.title ?? s.url ?? "未命名内容"}
+                        {s.title ?? s.url ?? t("common.untitled")}
                       </span>
                     </span>
                     <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
@@ -279,7 +290,7 @@ export function SourceList({
                       href={origin}
                       target="_blank"
                       rel="noopener noreferrer"
-                      aria-label={`在原网站打开：${s.title ?? "这条内容"}`}
+                      aria-label={t("common.openOrigin", s.title ?? t("common.untitled"))}
                       className="flex h-11 w-8 shrink-0 items-center justify-center text-base text-ink-500 hover:text-teal-300"
                     >
                       ↗
@@ -292,7 +303,7 @@ export function SourceList({
                   type="button"
                   onClick={() => setMenuId(s.id)}
                   disabled={busy}
-                  aria-label={`${s.title ?? "这条内容"} 的更多操作`}
+                  aria-label={t("list.moreActions", s.title ?? t("common.untitled"))}
                   aria-haspopup="dialog"
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-lg text-ink-500 hover:bg-ink-700 hover:text-ink-100 disabled:opacity-40"
                 >
@@ -313,17 +324,17 @@ export function SourceList({
           className="fixed inset-0 z-50 flex flex-col justify-end"
           role="dialog"
           aria-modal="true"
-          aria-label="内容操作"
+          aria-label={t("list.actionsAria")}
         >
           <button
             type="button"
-            aria-label="关闭"
+            aria-label={t("list.close")}
             onClick={() => setMenuId(null)}
             className="absolute inset-0 bg-black/55"
           />
           <div className="glass relative mx-2 mb-[max(0.5rem,env(safe-area-inset-bottom))] overflow-hidden rounded-3xl">
             <p className="truncate border-b border-ink-500/25 px-5 py-3.5 text-xs text-ink-300">
-              {active.title ?? active.url ?? "未命名内容"}
+              {active.title ?? active.url ?? t("common.untitled")}
             </p>
 
             <button
@@ -333,7 +344,7 @@ export function SourceList({
               className="flex min-h-14 w-full items-center gap-3 border-b border-ink-500/20 px-5 text-left text-sm text-ink-100 disabled:opacity-40"
             >
               <span className="w-5 text-center text-base text-teal-300" aria-hidden>↑</span>
-              {active.pinned_at ? "取消置顶" : "置顶"}
+              {active.pinned_at ? t("list.unpin") : t("list.pin")}
             </button>
 
             <button
@@ -343,7 +354,7 @@ export function SourceList({
               className="flex min-h-14 w-full items-center gap-3 border-b border-ink-500/20 px-5 text-left text-sm text-ink-100 disabled:opacity-40"
             >
               <span className="w-5 text-center text-base text-teal-300" aria-hidden>★</span>
-              {active.favorited_at ? "取消收藏" : "加入收藏"}
+              {active.favorited_at ? t("list.unfavorite") : t("list.favorite")}
             </button>
 
             <button
@@ -352,12 +363,12 @@ export function SourceList({
               className="flex min-h-14 w-full items-center gap-3 px-5 text-left text-sm text-red-400"
             >
               <span className="w-5 text-center text-base" aria-hidden>✕</span>
-              删除
+              {t("list.delete")}
             </button>
 
             {!flagsEnabled && (
               <p className="border-t border-ink-500/20 px-5 py-3 text-xs leading-5 text-ink-500">
-                置顶和收藏需要先在 Supabase 跑一次
+                {t("list.flagsMigration")}
                 <code className="text-ink-300"> 0003_source_flags.sql</code>
               </p>
             )}
@@ -368,7 +379,7 @@ export function SourceList({
             onClick={() => setMenuId(null)}
             className="glass relative mx-2 mb-[max(0.75rem,env(safe-area-inset-bottom))] mt-2 min-h-14 rounded-3xl text-sm font-semibold text-ink-100"
           >
-            取消
+            {t("list.cancel")}
           </button>
         </div>
         </ViewportLayer>

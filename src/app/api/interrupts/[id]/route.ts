@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
+import { getT } from "@/lib/ui-lang";
+import { tMaybeKey } from "@/lib/copy";
 
 // M1c — 给已记下的打断点补一个"卡在哪"的类型。
 // 点球 = 先把这一刻记下来（POST），面板里选 chip = 回头补类型（这里）。
@@ -15,8 +17,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const t = await getT();
   if (!supabaseConfigured) {
-    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+    return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   }
 
   const supabase = await createClient();
@@ -24,7 +27,7 @@ export async function PATCH(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
   }
 
   // Next 16：params 是 Promise，必须 await
@@ -35,13 +38,13 @@ export async function PATCH(
     const result = patchSchema.safeParse(await request.json());
     if (!result.success) {
       return NextResponse.json(
-        { error: result.error.issues[0]?.message ?? "请求格式不对" },
+        { error: tMaybeKey(t, result.error.issues[0]?.message, "err.badFormat") },
         { status: 400 },
       );
     }
     body = result.data;
   } catch {
-    return NextResponse.json({ error: "请求格式不对" }, { status: 400 });
+    return NextResponse.json({ error: t("err.badFormat") }, { status: 400 });
   }
 
   const { data, error } = await supabase
@@ -56,7 +59,7 @@ export async function PATCH(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
   if (!data) {
-    return NextResponse.json({ error: "这个打断点不存在" }, { status: 404 });
+    return NextResponse.json({ error: t("err.noInterrupt") }, { status: 404 });
   }
 
   return NextResponse.json(data);
@@ -71,8 +74,9 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const t = await getT();
   if (!supabaseConfigured) {
-    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+    return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   }
 
   const supabase = await createClient();
@@ -80,7 +84,7 @@ export async function DELETE(
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
   }
 
   // Next 16：params 是 Promise，必须 await
@@ -107,7 +111,7 @@ export async function DELETE(
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
   if (!data) {
-    return NextResponse.json({ error: "这个打断点不存在" }, { status: 404 });
+    return NextResponse.json({ error: t("err.noInterrupt") }, { status: 404 });
   }
 
   return NextResponse.json({ id: data.id });

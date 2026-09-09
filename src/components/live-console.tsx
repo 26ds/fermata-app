@@ -17,6 +17,8 @@ import {
   recorderWorkletUrl,
 } from "@/lib/live/audio";
 import { MIC_ACTIVE_RMS, computeRms, micLevelToScale } from "@/lib/live/use-mic-level";
+import { useCopy } from "@/components/copy-provider";
+import type { Translate } from "@/lib/copy";
 
 // M0.5 Live 通路 spike — 验收三条硬标准：
 //   ① 与 Live 完成 2 分钟中英混说对话（计时器满 2:00 亮绿牌）
@@ -28,15 +30,16 @@ type Status = "idle" | "connecting" | "live" | "ended";
 
 // Live API 预置音色（完整 30 个可在 AI Studio 试听，这里精选 8 个）
 // 音色在一次会话内固定不变；换音色要重新开始对话。
+// 名字（Puck / Kore …）是 Live API 的专有名词，不翻；后面那句描述要翻
 const VOICES = [
-  { name: "Puck", label: "Puck · 偏男声，活泼" },
-  { name: "Charon", label: "Charon · 偏男声，低沉" },
-  { name: "Fenrir", label: "Fenrir · 偏男声，带劲" },
-  { name: "Orus", label: "Orus · 偏男声，坚定" },
-  { name: "Kore", label: "Kore · 偏女声，沉稳" },
-  { name: "Aoede", label: "Aoede · 偏女声，轻快" },
-  { name: "Leda", label: "Leda · 偏女声，年轻" },
-  { name: "Zephyr", label: "Zephyr · 偏女声，明亮" },
+  { name: "Puck", labelKey: "live.voicePuck" },
+  { name: "Charon", labelKey: "live.voiceCharon" },
+  { name: "Fenrir", labelKey: "live.voiceFenrir" },
+  { name: "Orus", labelKey: "live.voiceOrus" },
+  { name: "Kore", labelKey: "live.voiceKore" },
+  { name: "Aoede", labelKey: "live.voiceAoede" },
+  { name: "Leda", labelKey: "live.voiceLeda" },
+  { name: "Zephyr", labelKey: "live.voiceZephyr" },
 ] as const;
 
 interface CaptionTurn {
@@ -55,25 +58,26 @@ interface Captions {
 
 const EMPTY_CAPTIONS: Captions = { turns: [], pendingUser: "", pendingModel: "" };
 
-/** 把连接期的原始报错翻译成人话 */
-function friendlyLiveError(raw: string): string {
+/** 把连接期的原始报错翻译成人话。D44：每条对应一个真起因，顺序不能乱 */
+function friendlyLiveError(raw: string, t: Translate): string {
   const msg = raw || "";
   if (/NotAllowedError|Permission denied|denied/i.test(msg)) {
-    return "麦克风权限被拒绝了。iPhone：设置 → Safari（或该 App）→ 麦克风 → 允许；电脑：点地址栏左边的锁图标允许麦克风。";
+    return t("live.errMicDenied");
   }
   if (/NotFoundError|no.*device/i.test(msg)) {
-    return "没找到麦克风设备。";
+    return t("live.errNoMic");
   }
   if (/quota|RESOURCE_EXHAUSTED/i.test(msg)) {
-    return "Gemini 免费额度暂时用完了，等几分钟再试。";
+    return t("live.errQuota");
   }
   if (/not found|does not exist|NOT_FOUND/i.test(msg)) {
-    return `模型不存在或已下线：${msg}（可在 Vercel 设 GEMINI_LIVE_MODEL 换一个模型）`;
+    return t("live.errNoModel", msg);
   }
   return msg;
 }
 
 export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean }) {
+  const t = useCopy();
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -273,7 +277,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
         resumeHandleRef.current = update.newHandle;
       }
       if (msg.goAway) {
-        setNotice("服务器即将回收连接，正在无缝续接…");
+        setNotice(t("live.reclaim"));
       }
 
       const sc = msg.serverContent;
@@ -313,7 +317,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
         flushAllCaptions();
       }
     },
-    [appendUserCaption, appendModelCaption, flushUserCaption, flushModelCaption, flushAllCaptions],
+    [appendUserCaption, appendModelCaption, flushUserCaption, flushModelCaption, flushAllCaptions, t],
   );
 
   // 找服务端要一次性通行证（真钥匙不出服务器 — D13）
@@ -325,10 +329,10 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
         body: JSON.stringify({ model: modelName }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? `token 接口返回 ${res.status}`);
+      if (!res.ok) throw new Error(body.error ?? t("live.tokenFailed", res.status));
       return body;
     },
-    [],
+    [t],
   );
 
   // 断线重连要在 onclose 回调里调用 openSession 自己 —— 经 ref 转一手避免自引用
@@ -345,23 +349,23 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       model,
       callbacks: {
         onmessage: handleMessage,
-        onerror: (e) => setError(friendlyLiveError(e.message ?? "连接出错")),
+        onerror: (e) => setError(friendlyLiveError(e.message ?? t("live.connError"), t)),
         onclose: (e) => {
           sessionRef.current = null;
           if (closedByUserRef.current) return;
           // 意外断线：有续接凭据就自动重连（最多 2 次），对话状态不丢
           if (resumeHandleRef.current && reconnectsRef.current < 2) {
             reconnectsRef.current += 1;
-            setNotice(`连接断了，正在第 ${reconnectsRef.current} 次续接…`);
+            setNotice(t("live.reconnecting", reconnectsRef.current));
             openSessionRef.current?.().catch((err) =>
-              setError(friendlyLiveError(err instanceof Error ? err.message : String(err))),
+              setError(friendlyLiveError(err instanceof Error ? err.message : String(err), t)),
             );
           } else {
             setStatus("ended");
             setError(
               e.reason
-                ? `连接被关闭：${e.reason}`
-                : "连接断开了。可以点「重新开始」再来一轮。",
+                ? t("live.closedWith", e.reason)
+                : t("live.closed"),
             );
           }
         },
@@ -398,7 +402,9 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
     });
     sessionRef.current = session;
     setNotice("");
-  }, [voice, handleMessage, fetchToken]);
+    // `t` 进依赖是安全的：openSession 只被 `openSessionRef` 那个 effect 读走（写个 ref
+    // 而已），真正建连是用户点「开始语音对话」触发的 —— 切界面语言不会自己去连一次
+  }, [voice, handleMessage, fetchToken, t]);
 
   useEffect(() => {
     openSessionRef.current = openSession;
@@ -439,7 +445,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
     } catch (e) {
       stopSessionAudio();
       setStatus("idle");
-      setError(friendlyLiveError(e instanceof Error ? e.message : String(e)));
+      setError(friendlyLiveError(e instanceof Error ? e.message : String(e), t));
     }
   }
 
@@ -507,12 +513,13 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       <main className="relative flex flex-1 flex-col items-center justify-center px-6 text-center">
         <div className="w-full max-w-sm rounded-[1.75rem] border border-ink-500/50 bg-ink-700 p-6 shadow-[0_24px_70px_rgba(0,0,0,0.2)]">
           <div className="teal-halo mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-teal-600/60 text-3xl text-teal-300" aria-hidden>⌁</div>
-          <p className="mt-6 text-lg font-semibold text-ink-100">Live 还在准备中</p>
+          <p className="mt-6 text-lg font-semibold text-ink-100">{t("live.notReadyTitle")}</p>
           <p className="mt-3 text-sm leading-6 text-ink-300">
-            服务器还没配置 <code className="rounded-md bg-ink-900 px-1.5 py-0.5 text-teal-300">GEMINI_API_KEY</code>。配置完成后，就可以在这里和学习伙伴自然地说话。
+            {t("live.notReadyBodyA")} <code className="rounded-md bg-ink-900 px-1.5 py-0.5 text-teal-300">GEMINI_API_KEY</code>
+            {t("live.notReadyBodyB")}
           </p>
           <p className="mt-5 border-t border-ink-500/30 pt-4 text-xs leading-5 text-ink-500">
-            去 Google AI Studio 创建 API Key，填入 Vercel 的 Environment Variables 后重新部署。
+            {t("live.notReadyHint")}
           </p>
         </div>
       </main>
@@ -525,18 +532,18 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       <div className="flex items-center justify-between gap-3 py-1.5">
         <div>
           <p className="eyebrow mb-1">conversation deck</p>
-          <h1 className="display-serif text-lg text-ink-100 sm:text-xl">和你的学习伙伴聊聊。</h1>
+          <h1 className="display-serif text-lg text-ink-100 sm:text-xl">{t("live.title")}</h1>
         </div>
         <div className="flex flex-wrap justify-end gap-1.5 text-[0.68rem]">
           <span className={`ui-mono inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 ${status === "live" ? "border-teal-600/70 bg-teal-950 text-teal-300" : "border-ink-500/50 text-ink-500"}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${status === "live" ? "animate-pulse bg-teal-400" : "bg-ink-500"}`} />
-            {status === "idle" && "待机"}
-            {status === "connecting" && "连接中"}
+            {status === "idle" && t("live.statusIdle")}
+            {status === "connecting" && t("live.statusConnecting")}
             {status === "live" && `${mm}:${ss}`}
-            {status === "ended" && `结束 ${mm}:${ss}`}
+            {status === "ended" && t("live.statusEnded", `${mm}:${ss}`)}
           </span>
-          {interruptCount > 0 && <span className="ui-mono rounded-full border border-ink-500/50 px-2.5 py-1 text-ink-300">打断 {interruptCount}</span>}
-          {lastLatencyMs !== null && <span className="ui-mono rounded-full border border-ink-500/50 px-2.5 py-1 text-ink-300">响应 {(lastLatencyMs / 1000).toFixed(1)}s</span>}
+          {interruptCount > 0 && <span className="ui-mono rounded-full border border-ink-500/50 px-2.5 py-1 text-ink-300">{t("live.interrupts", interruptCount)}</span>}
+          {lastLatencyMs !== null && <span className="ui-mono rounded-full border border-ink-500/50 px-2.5 py-1 text-ink-300">{t("live.latency", (lastLatencyMs / 1000).toFixed(1))}</span>}
           {elapsed >= 120 && <span className="ui-mono rounded-full border border-teal-600/70 bg-teal-950 px-2.5 py-1 text-teal-300">✓ 2 min</span>}
         </div>
       </div>
@@ -545,7 +552,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
           靠右、模型灰色靠左，各自说完才汇入下面的对话框 */}
       {status === "live" && (
         <div className="flex flex-col items-center gap-2 py-2">
-          <div className="relative flex h-24 w-24 items-center justify-center" aria-label="正在聆听">
+          <div className="relative flex h-24 w-24 items-center justify-center" aria-label={t("live.listeningAria")}>
             <div className="absolute inset-0 animate-pulse rounded-full border border-teal-600/40" />
             <div
               ref={orbRef}
@@ -569,7 +576,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
               )}
             </div>
           ) : (
-            <p className="text-xs text-ink-500">正在聆听 · 随时可以插话</p>
+            <p className="text-xs text-ink-500">{t("live.listening")}</p>
           )}
         </div>
       )}
@@ -577,9 +584,9 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
       {/* 对话框：只收说完的整句 */}
       <section className="flex min-h-0 flex-1 flex-col" aria-labelledby="caption-title">
         <div className="mb-2 flex items-center justify-between px-1">
-          <p id="caption-title" className="eyebrow">live captions / 双向字幕</p>
+          <p id="caption-title" className="eyebrow">{t("live.captionsTitle")}</p>
           <span className="ui-mono text-[0.68rem] text-ink-500">
-            {captions.turns.length ? `${captions.turns.length} turns` : "等待第一句话"}
+            {captions.turns.length ? t("live.turns", captions.turns.length) : t("live.waitingFirst")}
           </span>
         </div>
         {/* 手机上聊天框吃满至少 55vh —— 它是主角，其余部件让位（创始人 2026-07-19） */}
@@ -592,21 +599,22 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
               <span className="mb-4 text-2xl text-teal-300" aria-hidden>⌁</span>
               <p className="max-w-sm text-sm leading-6 text-ink-300">
                 {status === "live"
-                  ? "开口说话吧，中英文随意混用。正在说的话会浮在上面小球下方，说完一句才落进这里。它说到一半时插话，就能感受打断。"
-                  : "点下面的按钮开始，允许麦克风权限后，戴上耳机效果最好。"}
+                  ? t("live.emptyLive")
+                  : t("live.emptyIdle")}
               </p>
             </div>
           )}
-          {captions.turns.map((t) => (
+          {/* 形参叫 `turn` 不叫 `t` —— `t` 是翻译函数，同名会把它遮住 */}
+          {captions.turns.map((turn) => (
             <div
-              key={t.id}
+              key={turn.id}
               className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-6 ${
-                t.role === "user" ? "ml-auto bg-teal-950 text-teal-100" : "mr-auto bg-ink-900 text-ink-100"
+                turn.role === "user" ? "ml-auto bg-teal-950 text-teal-100" : "mr-auto bg-ink-900 text-ink-100"
               }`}
             >
-              <div className="eyebrow mb-1.5 text-[0.65rem]">{t.role === "user" ? "you / 你" : "fermata / 学习伙伴"}</div>
-              <span className="caption-copy">{t.text}</span>
-              {t.interrupted && <span className="ml-2 text-xs text-ink-500">（被打断）</span>}
+              <div className="eyebrow mb-1.5 text-[0.65rem]">{turn.role === "user" ? t("live.roleYou") : t("live.roleAssistant")}</div>
+              <span className="caption-copy">{turn.text}</span>
+              {turn.interrupted && <span className="ml-2 text-xs text-ink-500">{t("live.interrupted")}</span>}
             </div>
           ))}
         </div>
@@ -624,12 +632,12 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
         {status === "live" ? (
           <>
             <form onSubmit={sendText} className="flex gap-2">
-              <label htmlFor="debug-message" className="sr-only">发送文字</label>
+              <label htmlFor="debug-message" className="sr-only">{t("live.sendTextLabel")}</label>
               <input
                 id="debug-message"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="也可以输入文字…"
+                placeholder={t("live.textPlaceholder")}
                 className="min-w-0 flex-1 rounded-xl border border-ink-500/60 bg-ink-900 px-4 py-3 text-sm text-ink-100 placeholder:text-ink-500 outline-none focus:border-teal-400"
               />
               <button
@@ -637,7 +645,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
                 disabled={!draft.trim()}
                 className="min-h-11 rounded-xl border border-ink-500/60 px-4 text-sm font-semibold text-ink-300 hover:border-teal-400 hover:text-teal-300 disabled:opacity-40"
               >
-                发送
+                {t("live.send")}
               </button>
             </form>
             <button
@@ -645,7 +653,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
               onClick={disconnect}
               className="mt-2 min-h-11 w-full rounded-xl border border-ink-500/60 text-sm font-semibold text-ink-300 hover:border-teal-400 hover:text-teal-300"
             >
-              结束这次对话
+              {t("live.end")}
             </button>
           </>
         ) : (
@@ -669,7 +677,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
                 </label>
               )}
               <label className={models.length > 0 ? "min-w-0" : "col-span-2 min-w-0"}>
-                <span className="eyebrow mb-1.5 block px-1 text-[0.65rem]">voice / 音色</span>
+                <span className="eyebrow mb-1.5 block px-1 text-[0.65rem]">{t("live.voice")}</span>
                 <select
                   value={voice}
                   onChange={(e) => {
@@ -679,7 +687,7 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
                   className="picker h-10 w-full min-w-0 rounded-xl border border-ink-500/60 bg-ink-900 px-3 text-ink-100 outline-none focus:border-teal-400"
                 >
                   {VOICES.map((v) => (
-                    <option key={v.name} value={v.name}>{v.label}</option>
+                    <option key={v.name} value={v.name}>{t(v.labelKey)}</option>
                   ))}
                 </select>
               </label>
@@ -694,7 +702,11 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
               className="mt-1.5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-teal-400 px-4 font-semibold text-teal-950 hover:bg-teal-300 disabled:opacity-50"
             >
               <span className="flex h-6 w-6 items-center justify-center rounded-full border border-teal-950/30 text-sm" aria-hidden>◉</span>
-              {status === "connecting" ? "正在连接…" : status === "ended" ? "重新开始这次对话" : "开始语音对话"}
+              {status === "connecting"
+                ? t("live.connecting")
+                : status === "ended"
+                  ? t("live.restart")
+                  : t("live.start")}
             </button>
           </>
         )}

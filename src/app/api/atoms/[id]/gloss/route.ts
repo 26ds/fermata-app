@@ -5,6 +5,7 @@ import { getLangPrefs } from "@/lib/settings";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow } from "@/lib/types";
+import { getT } from "@/lib/ui-lang";
 
 // M3.10 手动选词 —— 给用户**自己划下来**的那一段补一句解释（D45 片 d）。
 //
@@ -16,7 +17,8 @@ import type { SourceRow } from "@/lib/types";
 // **代码永远不许自己重试**，它花钱。取不到就如实留白，让人自己决定要不要再点。
 
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  if (!supabaseConfigured) return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  const t = await getT();
+  if (!supabaseConfigured) return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
 
   // Next 16：params 是 Promise，必须 await
   const { id } = await params;
@@ -25,7 +27,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
 
   const { data: atom } = await supabase
     .from("atoms")
@@ -33,7 +35,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     .eq("id", id)
     .eq("user_id", user.id)
     .maybeSingle();
-  if (!atom) return NextResponse.json({ error: "找不到这条词" }, { status: 404 });
+  if (!atom) return NextResponse.json({ error: t("err.noAtom") }, { status: 404 });
 
   // 已经有解释了就原样奉还。**同一条词绝不付第二次钱** ——
   // 「再试一次」是个按钮，手抖点两下是很正常的事
@@ -73,8 +75,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       e instanceof PhraseError
         ? e.message
         : e instanceof Error && e.name === "TimeoutError"
-          ? "取解释超时了（20 秒没回来）。"
-          : "取解释时出错了。";
+          ? t("err.glossTimeout")
+          : t("err.glossFailed");
     return NextResponse.json({ error: message }, { status: 502 });
   }
 

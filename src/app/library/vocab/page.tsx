@@ -4,6 +4,8 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/setup-notice";
 import { SettingsLink } from "@/components/settings-link";
+import { LangToggle } from "@/components/lang-toggle";
+import { getT } from "@/lib/ui-lang";
 import { VocabList, type VocabItem } from "@/components/vocab-list";
 
 // M3.7 —— 全部词库（D40）。**跨视频**：背词是跨视频的事，
@@ -12,16 +14,9 @@ import { VocabList, type VocabItem } from "@/components/vocab-list";
 // 点一条 = 回观看页跳到它出现的那一秒（`from=vocab`，返回箭头退回这一页，D43）。
 
 // D42：文案集中在这里，M3.9 抽语言表时只动这一处
-const COPY = {
-  eyebrow: "vocabulary",
-  title: "你收下的词与概念。",
-  lede: "每一条都记得它出现在哪、那句话原本怎么说 —— 点一下就回到那一秒。",
-  back: "返回历史与知识库",
-  count: (n: number) => `${n} 条`,
-};
-
 export default async function VocabPage() {
   if (!supabaseConfigured) return <SetupNotice />;
+  const t = await getT();
 
   const supabase = await createClient();
   const {
@@ -62,24 +57,26 @@ export default async function VocabPage() {
         {/* D43：新页面照样得有走得出去的路 */}
         <Link
           href="/library"
-          aria-label={COPY.back}
+          aria-label={t("back.library")}
           className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
         >
           <span aria-hidden>←</span>
         </Link>
-        <p className="eyebrow flex-1 text-teal-300">{COPY.eyebrow}</p>
+        <p className="eyebrow flex-1 text-teal-300">vocabulary</p>
         <span className="shrink-0 rounded-full border border-ink-500/50 px-2.5 py-1 text-xs tabular-nums text-ink-300">
-          {COPY.count(items.length)}
+          {t("vocab.count", items.length)}
         </span>
+        {/* 创始人 2026-09-09：语言开关每个界面都要有 */}
+        <LangToggle />
         <SettingsLink from="vocab" />
       </header>
 
       <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
         <section className="pt-2">
           <h1 className="display-serif text-2xl leading-tight tracking-[-0.03em] text-ink-100">
-            {COPY.title}
+            {t("vocab.title")}
           </h1>
-          <p className="mt-2 max-w-md text-sm leading-6 text-ink-300">{COPY.lede}</p>
+          <p className="mt-2 max-w-md text-sm leading-6 text-ink-300">{t("vocab.lede")}</p>
         </section>
 
         <VocabList items={items} from="vocab" showSource emptyAll />

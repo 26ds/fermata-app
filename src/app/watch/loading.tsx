@@ -1,6 +1,9 @@
+import { getT } from "@/lib/ui-lang";
+
 // 跳转时立刻显示的骨架。有它，点链接是"马上换页"，没它是"卡一秒再换页"。
 // 骨架的块要和真实页面对得上，否则数据到位时会跳一下。
-export default function WatchLoading() {
+export default async function WatchLoading() {
+  const t = await getT();
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-64 opacity-60" />
@@ -11,7 +14,7 @@ export default function WatchLoading() {
         </div>
         <div className="text-right">
           <p className="eyebrow text-teal-300">watch</p>
-          <p className="mt-1 text-xs text-ink-500">观看</p>
+          <p className="mt-1 text-xs text-ink-500">{t("watch.name")}</p>
         </div>
       </header>
 
@@ -27,7 +30,7 @@ export default function WatchLoading() {
         </div>
         <div className="mt-8">
           <div className="flex items-center justify-between border-b border-ink-500/30 pb-3">
-            <p className="text-sm font-semibold text-ink-100">最近导入</p>
+            <p className="text-sm font-semibold text-ink-100">{t("skeleton.recent")}</p>
           </div>
           {[0, 1, 2].map((i) => (
             <div key={i} className="flex min-h-14 items-center gap-3 border-b border-ink-700/80 py-3">

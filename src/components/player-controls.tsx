@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatRate, RATES, SKIP_STEPS } from "@/lib/play-prefs";
+import { useCopy } from "@/components/copy-provider";
 
 // 共用播放控制条（视频 + 播客同一套壳，创始人 2026-08-01 要的「倍速 + ±10」）。
 //
@@ -12,18 +13,10 @@ import { formatRate, RATES, SKIP_STEPS } from "@/lib/play-prefs";
 //     倍速同理。两个选择盘同一时刻只开一个，且是**就地摊开**不是浮层 ——
 //     手机上浮层会被磨砂层、面板、悬浮球轮流盖住，就地长出来的东西不会。
 
-const COPY = {
-  back: (n: number) => `后退 ${n} 秒`,
-  forward: (n: number) => `前进 ${n} 秒`,
-  stepChip: (n: number) => `跳 ${n} 秒`,
-  stepMenu: "改成一跳几秒",
-  rateMenu: "改播放倍速",
-  stepHint: "按一下箭头跳多少秒",
-  rateHint: "播放速度（听不清就慢下来）",
-  // 还没播过就跳，YouTube 会把封面掀掉又放不出来，只剩一块黑的（2026-08-02 复现）。
-  // 所以这时候两颗箭头是灰的 —— 但**必须写清楚为什么**，灰着不说话就是另一种静默失败（D44）
-  notStarted: "先点播放，这两颗才跳得动",
-};
+// 文案全在 `src/lib/copy/`（M3.9 片 c）。
+// ⚠️ `play.notStarted` 那条别删：还没播过就跳，YouTube 会把封面掀掉又放不出来、
+// 只剩一块黑的（2026-08-02 复现）。两颗箭头这时是灰的，**必须写清楚为什么** ——
+// 灰着不说话就是另一种静默失败（D44）。
 
 /**
  * 环形箭头 + 中间的秒数 —— 手机播放器上通用的那个「跳一段」记号，一眼不会读成"重播"。
@@ -93,6 +86,7 @@ export function PlayerControls({
    */
   trailing?: React.ReactNode;
 }) {
+  const t = useCopy();
   const skipBtn = `flex h-11 w-11 shrink-0 items-center justify-center rounded-full border transition-colors ${
     canSeek
       ? "border-ink-700 text-ink-300 hover:border-teal-400 hover:text-teal-300 active:bg-ink-700/50"
@@ -115,7 +109,7 @@ export function PlayerControls({
           type="button"
           onClick={() => onSeekBy(-step)}
           disabled={!canSeek}
-          aria-label={COPY.back(step)}
+          aria-label={t("play.back", step)}
           className={skipBtn}
         >
           <SkipGlyph seconds={step} />
@@ -124,7 +118,7 @@ export function PlayerControls({
           type="button"
           onClick={() => onSeekBy(step)}
           disabled={!canSeek}
-          aria-label={COPY.forward(step)}
+          aria-label={t("play.forward", step)}
           className={skipBtn}
         >
           <SkipGlyph seconds={step} forward />
@@ -137,7 +131,7 @@ export function PlayerControls({
         <button
           type="button"
           onClick={() => toggle("rate")}
-          aria-label={COPY.rateMenu}
+          aria-label={t("play.rateMenu")}
           aria-expanded={open === "rate"}
           className={`ui-mono min-h-9 shrink-0 rounded-full px-3 text-[0.78rem] font-semibold transition-colors ${
             open === "rate"
@@ -152,7 +146,7 @@ export function PlayerControls({
         <button
           type="button"
           onClick={() => toggle("step")}
-          aria-label={COPY.stepMenu}
+          aria-label={t("play.stepMenu")}
           aria-expanded={open === "step"}
           className={`min-h-9 shrink-0 rounded-full px-3 text-[0.78rem] transition-colors ${
             open === "step"
@@ -160,11 +154,11 @@ export function PlayerControls({
               : "border border-ink-700 text-ink-300"
           }`}
         >
-          {COPY.stepChip(step)}
+          {t("play.stepChip", step)}
         </button>
 
         {!canSeek && (
-          <span className="min-w-0 text-[0.68rem] leading-4 text-ink-500">{COPY.notStarted}</span>
+          <span className="min-w-0 text-[0.68rem] leading-4 text-ink-500">{t("play.notStarted")}</span>
         )}
 
         {/* 右端：折叠开关（宽屏才有，它自己带 `hidden lg:inline-flex`）。
@@ -176,7 +170,7 @@ export function PlayerControls({
         <div className="mt-2">
           {/* 说明单独一行：和五个数挤在一行会把 30 挤到第二行去（375px 上量过） */}
           <p className="mb-1.5 text-[0.68rem] text-ink-500">
-            {open === "rate" ? COPY.rateHint : COPY.stepHint}
+            {open === "rate" ? t("play.rateHint") : t("play.stepHint")}
           </p>
           <div className="flex flex-wrap items-center gap-1.5">
           {open === "rate"

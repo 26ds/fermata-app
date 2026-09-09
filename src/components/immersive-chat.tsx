@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { putSettings } from "@/lib/settings-client";
+import { useCopy } from "@/components/copy-provider";
 
 // M3 Phase-2 长问答沉浸聊天层（design/long-qa-immersive-chat.md）。
 //
@@ -20,12 +21,17 @@ interface Turn {
 }
 
 /** 流光配色预设（每套 4 色，薄荷/青/紫/粉族）。默认与 CSS :root 一致 */
-const GLOW_PRESETS: { id: string; name: string; colors: [string, string, string, string] }[] = [
-  { id: "aurora", name: "极光", colors: ["#5dcaa5", "#3bc4d6", "#8b7cf0", "#f0a6c8"] },
-  { id: "bamboo", name: "青竹", colors: ["#9fe1cb", "#5dcaa5", "#1d9e75", "#0f6e56"] },
-  { id: "dusk", name: "暮霞", colors: ["#f0a6c8", "#f7b28c", "#f0d98c", "#c88cf0"] },
-  { id: "nebula", name: "星云", colors: ["#8b7cf0", "#6d8bf0", "#3bc4d6", "#b58cf0"] },
-  { id: "ink", name: "素墨", colors: ["#b4b2a9", "#9fe1cb", "#f1efe8", "#888780"] },
+const GLOW_PRESETS: {
+  id: string;
+  /** 配色的名字走文案表（`chat.glow*`）—— 色值不翻，名字要翻 */
+  nameKey: "chat.glowAurora" | "chat.glowBamboo" | "chat.glowDusk" | "chat.glowNebula" | "chat.glowInk";
+  colors: [string, string, string, string];
+}[] = [
+  { id: "aurora", nameKey: "chat.glowAurora", colors: ["#5dcaa5", "#3bc4d6", "#8b7cf0", "#f0a6c8"] },
+  { id: "bamboo", nameKey: "chat.glowBamboo", colors: ["#9fe1cb", "#5dcaa5", "#1d9e75", "#0f6e56"] },
+  { id: "dusk", nameKey: "chat.glowDusk", colors: ["#f0a6c8", "#f7b28c", "#f0d98c", "#c88cf0"] },
+  { id: "nebula", nameKey: "chat.glowNebula", colors: ["#8b7cf0", "#6d8bf0", "#3bc4d6", "#b58cf0"] },
+  { id: "ink", nameKey: "chat.glowInk", colors: ["#b4b2a9", "#9fe1cb", "#f1efe8", "#888780"] },
 ];
 const DEFAULT_GLOW = GLOW_PRESETS[0].colors;
 
@@ -34,19 +40,12 @@ const DEFAULT_GLOW = GLOW_PRESETS[0].colors;
  * AI 用它，提问用它的 0.84 倍，两者的比例是设计定死的，不给两个滑块让人自己去配。
  */
 const CHAT_FONTS = [
-  { px: 20, name: "小" },
-  { px: 24, name: "中" },
-  { px: 28, name: "大" },
-  { px: 32, name: "特大" },
+  { px: 20, nameKey: "chat.fsS" },
+  { px: 24, nameKey: "chat.fsM" },
+  { px: 28, nameKey: "chat.fsL" },
+  { px: 32, nameKey: "chat.fsXL" },
 ] as const;
 const DEFAULT_CHAT_FONT = 24;
-
-/** 新加的界面文案集中放这儿（D42：以后 i18n 抽表就从这些常量抽） */
-const COPY = {
-  paletteLabel: "更换流光配色",
-  fontLabel: "调字号",
-  fontHint: "字号",
-};
 
 /** 剥掉 markdown 记号，像人聊天一样纯文字（引擎已被提示词禁 markdown，这是兜底；
  *  且流式半截收到 `**` 也不会闪出星号 —— 全局去掉 * 和行首 #/项目符号/序号）。 */
@@ -95,6 +94,7 @@ export function ImmersiveChat({
   pauseVideo,
   onExit,
 }: ImmersiveChatProps) {
+  const t = useCopy();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [input, setInput] = useState("");
@@ -346,7 +346,7 @@ export function ImmersiveChat({
         });
         if (!res.ok || !res.body) {
           const b = await res.json().catch(() => ({}));
-          throw new Error(b.error ?? "没答出来，稍后再试");
+          throw new Error(b.error ?? t("chat.answerFailed"));
         }
 
         // NDJSON：chunk 累进 fullTextRef（不直接上屏，交给打字机）、done 校正、error 报错
@@ -373,7 +373,7 @@ export function ImmersiveChat({
             } else if (ev.type === "done") {
               if (typeof ev.answer === "string") fullTextRef.current = ev.answer;
             } else if (ev.type === "error") {
-              streamErr = ev.message ?? "没答出来，稍后再试";
+              streamErr = ev.message ?? t("chat.answerFailed");
             }
           }
         }
@@ -391,11 +391,11 @@ export function ImmersiveChat({
       } catch (e) {
         stopReveal();
         setSending(false);
-        setError(e instanceof Error ? e.message : "没答出来，稍后再试");
+        setError(e instanceof Error ? e.message : t("chat.answerFailed"));
         dropEmptyTail();
       }
     },
-    [sending, sourceId, getCurrentTime, pauseVideo],
+    [sending, sourceId, getCurrentTime, pauseVideo, t],
   );
 
   const n = turns.length;
@@ -426,7 +426,7 @@ export function ImmersiveChat({
         className="chat-frost fixed inset-x-0 bottom-0 z-40 flex flex-col"
         style={{ ...glowVars, top: stageBottom }}
         role="dialog"
-        aria-label="长问答沉浸聊天"
+        aria-label={t("chat.aria")}
       >
         {/* 右上角两颗克制的入口：字号 + 配色。同一时刻只摊开一个 */}
         <div className="absolute right-3 top-2 z-10 flex flex-col items-end gap-2">
@@ -437,7 +437,7 @@ export function ImmersiveChat({
                 setShowFont((v) => !v);
                 setShowPalette(false);
               }}
-              aria-label={COPY.fontLabel}
+              aria-label={t("chat.fontLabel")}
               aria-expanded={showFont}
               className="glass flex h-7 w-7 items-center justify-center rounded-full text-[13px] font-semibold leading-none text-ink-100"
             >
@@ -449,7 +449,7 @@ export function ImmersiveChat({
                 setShowPalette((v) => !v);
                 setShowFont(false);
               }}
-              aria-label={COPY.paletteLabel}
+              aria-label={t("chat.paletteLabel")}
               aria-expanded={showPalette}
               className="h-7 w-7 rounded-full border border-ink-100/20"
               style={{
@@ -459,20 +459,20 @@ export function ImmersiveChat({
           </div>
           {showFont && (
             <div className="glass flex items-center gap-1.5 rounded-2xl px-2.5 py-2">
-              <span className="mr-0.5 text-[0.68rem] text-ink-100/50">{COPY.fontHint}</span>
+              <span className="mr-0.5 text-[0.68rem] text-ink-100/50">{t("chat.fontHint")}</span>
               {CHAT_FONTS.map((o) => (
                 <button
                   key={o.px}
                   type="button"
                   onClick={() => pickFont(o.px)}
-                  aria-label={`${COPY.fontHint}：${o.name}`}
+                  aria-label={`${t("chat.fontHint")}：${t(o.nameKey)}`}
                   className={`min-h-8 rounded-full px-2.5 text-xs font-semibold transition-colors ${
                     o.px === fontPx
                       ? "bg-teal-400 text-teal-950"
                       : "border border-ink-100/20 text-ink-100/80"
                   }`}
                 >
-                  {o.name}
+                  {t(o.nameKey)}
                 </button>
               ))}
             </div>
@@ -484,8 +484,8 @@ export function ImmersiveChat({
                   key={p.id}
                   type="button"
                   onClick={() => pickGlow(p.colors)}
-                  aria-label={`配色：${p.name}`}
-                  title={p.name}
+                  aria-label={t("chat.paletteAria", t(p.nameKey))}
+                  title={t(p.nameKey)}
                   className="h-6 w-6 rounded-full border border-ink-100/20"
                   style={{
                     background: `conic-gradient(from 210deg, ${p.colors[0]}, ${p.colors[1]}, ${p.colors[2]}, ${p.colors[3]}, ${p.colors[0]})`,
@@ -512,13 +512,14 @@ export function ImmersiveChat({
                 className="pt-6 leading-snug text-ink-100/45"
                 style={{ fontSize: "calc(var(--chat-fs) * 0.92)" }}
               >
-                有什么想问的？扣着当前进度，接着聊。
+                {t("chat.empty")}
               </p>
             )}
-            {turns.map((t, i) => {
+            {/* 形参叫 `turn` 不叫 `t` —— `t` 是翻译函数，同名会把它遮住 */}
+            {turns.map((turn, i) => {
               const fromEnd = n - 1 - i;
               const isLast = fromEnd === 0;
-              const isUser = t.role === "user";
+              const isUser = turn.role === "user";
               // 最新最亮；越旧越融进背景。用户略低于 AI（design §1）
               const opacity = isUser
                 ? isLast
@@ -528,7 +529,7 @@ export function ImmersiveChat({
                   ? 1
                   : Math.max(0.34, 0.72 - fromEnd * 0.11);
               const streaming = isLast && !isUser && sending;
-              const segs = toSegments(t.text);
+              const segs = toSegments(turn.text);
               // 用户 = 靠右 + 窄一档 + 上方大间距；AI = 靠左满宽最亮，紧贴它回答的那句问题。
               // 首条不留上边距。
               const blockCls = isUser
@@ -541,7 +542,7 @@ export function ImmersiveChat({
                 <div key={i} className={blockCls} style={{ opacity }}>
                   {segs.length === 0 && streaming ? (
                     <p className="leading-[1.32] text-ink-100" style={lineStyle}>
-                      <span className="animate-pulse text-teal-300">正在想…</span>
+                      <span className="animate-pulse text-teal-300">{t("chat.thinking")}</span>
                     </p>
                   ) : (
                     segs.map((s, j) => (
@@ -571,7 +572,7 @@ export function ImmersiveChat({
             onClick={backToLatest}
             className="glass absolute left-1/2 bottom-[224px] -translate-x-1/2 rounded-full px-4 py-1.5 text-xs font-semibold text-ink-100"
           >
-            回到最新 ↓
+            {t("chat.toLatest")}
           </button>
         )}
 
@@ -588,7 +589,7 @@ export function ImmersiveChat({
                 }
               }}
               rows={1}
-              placeholder="接着问一句…"
+              placeholder={t("chat.placeholder")}
               className="max-h-28 min-h-11 flex-1 resize-none bg-transparent px-2 py-2 text-[15px] leading-6 text-ink-100 placeholder:text-ink-500 focus:outline-none"
             />
             <button
@@ -597,7 +598,7 @@ export function ImmersiveChat({
               onClick={() => void send(input)}
               className="min-h-11 shrink-0 rounded-2xl bg-teal-400/90 px-4 text-sm font-semibold text-ink-900 transition-colors hover:bg-teal-300 disabled:opacity-40"
             >
-              {sending ? "…" : "发送"}
+              {sending ? "…" : t("chat.send")}
             </button>
           </div>
         </div>
@@ -607,7 +608,7 @@ export function ImmersiveChat({
           className="pointer-events-none absolute inset-x-0 text-center text-xs text-ink-100/45"
           style={{ bottom: 134 }}
         >
-          长按悬浮球退出
+          {t("chat.exitHint")}
         </p>
       </div>
     </>

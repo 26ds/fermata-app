@@ -72,7 +72,23 @@ export interface ResolvedMeta {
  * resolve 失败且**原因该讲给用户听**时抛这个（→ 400 + 中文原文）。
  * 其余异常一律当成"网络抽风"，走 502。
  */
-export class SourceResolveError extends Error {}
+/**
+ * 说得清原因的导入失败（不是 feed、里面没音频…）。
+ *
+ * M3.9 片 c：**多带一个文案 key**。这一层是纯服务端库，拿不到"这个人用什么语言
+ * 看界面"；API 路由那边拿得到，所以由它翻（`tMaybeKey`）。
+ * `message` 仍然写着中文原话 —— 那是日志和兜底用的，`copyKey` 才是给人看的那条。
+ */
+export class SourceResolveError extends Error {
+  readonly copyKey?: string;
+  readonly copyArgs: readonly unknown[];
+
+  constructor(message: string, copyKey?: string, ...copyArgs: unknown[]) {
+    super(message);
+    this.copyKey = copyKey;
+    this.copyArgs = copyArgs;
+  }
+}
 
 export interface SourceAdapter {
   kind: SourceKind;
