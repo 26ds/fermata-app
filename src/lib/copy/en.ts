@@ -412,4 +412,22 @@ export const en = {
   "cap.trNoResponse": "The translation service didn't respond",
   "cap.trSameLang": "This content is already in that language.",
   "cap.trFailed": "Translation didn't go through. Try again shortly.",
+
+  // ── Watch stage ────────────────────────────────────────────────────────
+  "stage.noPlayer": (kind: string) => `There's no player for this kind of content (${kind}) yet.`,
+  "stage.playing": "Playing",
+  "stage.paused": "Paused",
+  "stage.capReady": "Subtitles ready",
+  "stage.capRunning": "Making subtitles",
+  "stage.capFailed": "Subtitles didn't come through",
+  "stage.capPartial": "Subtitles half done",
+  "stage.capPending": "Subtitles not made yet",
+  "stage.positionAria": "Playback position",
+  "stage.splitterAria": "Drag to resize video and study area; double-click to reset",
+  "stage.captureFailed": "That wasn't saved. Please try again.",
+  "stage.captureLost": "This moment wasn't saved — ask again in a second",
+  "stage.answerFailed": "No answer came back. Try again shortly.",
+  "stage.transcribeFailed": "Subtitles didn't come through. Try again shortly.",
+  "stage.transcribeFailedShort": "Subtitles didn't come through",
+  "stage.deleteFailed": "Couldn't delete it. Please try again.",
 } as const satisfies CopyDict;

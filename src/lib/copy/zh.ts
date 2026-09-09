@@ -421,4 +421,23 @@ export const zh = {
   "cap.trNoResponse": "翻译服务没响应",
   "cap.trSameLang": "这条内容的原文就是这个语言。",
   "cap.trFailed": "翻译没成，稍后再试。",
+
+  // ── 观看页舞台（watch-stage）────────────────────────────────────────────
+  "stage.noPlayer": (kind: string) => `这类内容（${kind}）的播放器还没做。`,
+  "stage.playing": "播放中",
+  "stage.paused": "已暂停",
+  "stage.capReady": "字幕就绪",
+  "stage.capRunning": "字幕生成中",
+  "stage.capFailed": "字幕没生成出来",
+  "stage.capPartial": "字幕生成了一半",
+  "stage.capPending": "字幕待生成",
+  "stage.positionAria": "播放位置",
+  "stage.splitterAria": "拖动调整视频与学习区的宽度，双击复位",
+  // 各种失败（D44：每条对应一个真起因，别压成一句"出错了"）
+  "stage.captureFailed": "没记下来，请重试",
+  "stage.captureLost": "没记下这一刻，稍后再问一次",
+  "stage.answerFailed": "没答出来，稍后再试",
+  "stage.transcribeFailed": "字幕没生成出来，稍后再试",
+  "stage.transcribeFailedShort": "字幕没生成出来",
+  "stage.deleteFailed": "没删掉，请重试",
 } as const;
