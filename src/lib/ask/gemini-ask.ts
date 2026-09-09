@@ -40,7 +40,7 @@ export interface AskContext {
   /** 卡在第几秒（只用来告诉模型「他卡在 MM:SS」） */
   tS: number;
   title: string | null;
-  /** D42：用户母语 —— 显式指定答案用哪门语言，不靠模型从问句猜。空 = 还不知道 */
+  /** D42 修订③：用户母语 —— 现在只是**兜底**（问句看不出语言时才用）。空 = 还不知道 */
   nativeLang?: string | null;
   /** 逐块回调：流式把答案吐给上层 */
   onChunk: (text: string) => void | Promise<void>;
@@ -62,18 +62,46 @@ export function windowText(segments: TranscriptSegment[], startS: number, endS: 
 }
 
 /**
- * D42 —— **显式告诉模型用哪门语言回答**，别再靠它从问句里猜。
+ * **答案语言 = 他这次提问所用的语言。**（D42 修订③，2026-09-09 创始人拍板）
  *
- * 原来写的是「用他提问的语言回答」：他要是用英文问一句 "what does XX mean"，
- * 模型就整段用英文答 —— 而他可能只是懒得切输入法，母语是别的。
- * 母语是我们知道的事实（浏览器报的 / 他自己设的），没有理由让模型去猜。
+ * ⚠️ 这是**掉头**，不是补丁 —— D42 原来（⑶）特意把答案语言钉死在母语上，
+ * 理由是：他用英文问一句 "what does XX mean"，可能只是懒得切输入法，
+ * 母语是我们知道的事实，没理由让模型猜。**那条理由现在被更强的场景压过去了**：
+ * 产品要给外国人用，对方用英文问就必须英文答，不能因为设置里母语还写着中文
+ * 就整段中文回过去 —— 那一刻「母语」根本不是他的母语。
  *
- * 母语真的还不知道时才退回"用他提问的语言" —— 那是兜底，不是默认。
+ * 母语没有作废，**退居兜底**：问句短到看不出语言时（只有一个术语、一串符号、
+ * 一个链接）才用它。这样「懒得切输入法」那个老场景里最脆弱的一类（单个英文词）
+ * 依然走母语，而整句英文提问走英文。
+ *
+ * 🚩 **界面语言（`uiLang`）一个字都不许进这里**，D42 红线原封不动。
+ * 中/EN 那颗按钮换的是界面，不是 AI 的嘴。快捷问按钮是唯一的间接影响：
+ * 它发出去的那句话本身就是界面语言写的，所以答案跟着它走 —— 这是对的，
+ * 因为那句话确实是"用户问出去的问题"。
  */
 export function answerLanguageRule(nativeLang: string | null | undefined): string {
   const code = normalizeLang(nativeLang);
-  if (!code) return "用他提问的语言回答。";
-  return `一律用${langNameEn(code)}（${code}）回答 —— 哪怕内容原文和他的提问是别的语言。`;
+  const fallback = code
+    ? `问句短到看不出是什么语言时（只有一个词、一串符号、一个链接），用${langNameEn(code)}（${code}）。`
+    : "";
+  return (
+    "用**他这次提问所用的那种语言**回答：他用中文问就整段中文，用英文问就整段英文，" +
+    "其他语言同理；多轮对话看他最新那条。判断只看问句本身主要用的是哪种语言 —— " +
+    `问句里引用的外语词、以及内容原文是什么语言，都不作数。${fallback}`
+  );
+}
+
+/**
+ * 备忘（compact）用的语言规则 —— **和上面那条故意不同**。
+ *
+ * 备忘不是"回答"，是塞回下一轮 systemInstruction 的内部笔记，用户看不到。
+ * 它必须**跨轮稳定**：跟着"最新那条问句"走的话，用户中英夹着问几句，
+ * 备忘就会一段中文一段英文地长下去。所以这里保留 D42 原来的做法 —— 钉死母语。
+ */
+export function memoLanguageRule(nativeLang: string | null | undefined): string {
+  const code = normalizeLang(nativeLang);
+  if (!code) return "";
+  return `备忘正文用${langNameEn(code)}（${code}）写。`;
 }
 
 /** 全文作背景，超预算掐尾。沉浸聊天也复用 */

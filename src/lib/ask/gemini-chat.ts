@@ -2,7 +2,14 @@ import "server-only";
 import { explainGeminiError } from "@/lib/transcript/gemini-youtube";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
-import { AskError, answerLanguageRule, backgroundText, clientFor, windowText } from "./gemini-ask";
+import {
+  AskError,
+  answerLanguageRule,
+  backgroundText,
+  clientFor,
+  memoLanguageRule,
+  windowText,
+} from "./gemini-ask";
 
 // M3 Phase-2 长问答沉浸聊天引擎。
 //
@@ -38,7 +45,7 @@ export interface AskChatContext {
   priorSummary: string | null;
   /** 本次会话到目前为止的逐轮（不含正在问的这句） */
   liveTurns: ChatTurn[];
-  /** D42：用户母语 —— 显式指定答案用哪门语言，不靠模型从问句猜。空 = 还不知道 */
+  /** D42 修订③：用户母语 —— 现在只是**兜底**（问句看不出语言时才用）。空 = 还不知道 */
   nativeLang?: string | null;
   onChunk: (text: string) => void | Promise<void>;
 }
@@ -105,14 +112,16 @@ export interface CompactChatContext {
   /** 这次要折进备忘的新逐轮 */
   turns: ChatTurn[];
   title: string | null;
-  /** D42：备忘也要用母语写 —— 它会被塞回下一次的 systemInstruction，语言乱了下一轮就跟着乱 */
+  /** D42：备忘**仍然**钉死母语 —— 它会被塞回下一次的 systemInstruction，
+   *  跟着「最新那句问话」走的话，用户中英夹着问几句，备忘就会一段中文一段英文。
+   *  答案语言已改成跟问句走（见 `answerLanguageRule`），备忘这条**故意没跟着改**。 */
   nativeLang?: string | null;
 }
 
 const compactPrompt = (nativeLang: string | null | undefined) =>
   `把下面「用户看视频时和 AI 的对话」浓缩成一份学习备忘，之后接着聊时给 AI 当背景。
 只保留重点，**以用户问了什么、以及他明显没搞懂/混淆/反复追问的地方为主**；AI 的回答只在为了说清用户的卡点时才带一句。
-用第三人称，尽量短。${answerLanguageRule(nativeLang)}若已有旧备忘，把新内容并进去、别丢旧的关键点。
+用第三人称，尽量短。${memoLanguageRule(nativeLang)}若已有旧备忘，把新内容并进去、别丢旧的关键点。
 只输出更新后的备忘正文，别加标题、别加客套。`;
 
 /**
