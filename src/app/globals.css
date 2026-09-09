@@ -178,9 +178,27 @@ select:focus-visible {
   animation: fermata-breathe 1.6s ease-in-out infinite;
 }
 
+/* ── M3.15 片 b：AI 在想的时候，是**一个 fermata** ──
+   计划 §B.3 写死了「三个点来回忽浅忽深。**不是转圈，不是骨架屏**」。
+   这不是审美偏好：fermata（延长记号）就是这个产品的名字，**停顿是主角**。
+   转圈是"系统在忙，你等着"；三个来回呼吸的点是"它在想"——后者才是这里发生的事。
+
+   和 `.skeleton` 共用 `fermata-breathe` 是**故意**的（同一种呼吸，节律不同），
+   三颗点靠 `animation-delay` 错开成一道来回的波。 */
+.fermata-dots > span {
+  animation: fermata-breathe 1.3s ease-in-out infinite;
+}
+.fermata-dots > span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.fermata-dots > span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .page-enter,
-  .skeleton {
+  .skeleton,
+  .fermata-dots > span {
     animation: none;
   }
 }

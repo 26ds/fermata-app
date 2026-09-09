@@ -56,11 +56,15 @@ export default async function WatchDetailPage({
   const origin = sourceOriginUrl(row);
 
   // 点点条首屏就该有历史点，所以顺手一起取（RLS 保证只查得到自己的）。
-  // question / ai_answer 这一页其实用不上（回看列表已搬去 /library/[id]），
-  // 但打断面板问完一轮后会就地更新这份 state，形状保持一致更省心。
+  // question / ai_answer 从 M3.15 片 b 起这一页**真的要用**：宽屏右栏那条问答线
+  // 就是这批行（D62：每一轮问答就是一个捕获点），退出重进历史还在靠的正是它。
+  //
+  // ⚠️ `*` 而不是列清单，理由和回看页那句一样：**迁移 0011 跑没跑都不会炸**。
+  // 列清单里写一个还不存在的列（`parent_id`），整页会当场 500 ——
+  // 而这一页是产品的主界面，不该被一条还没跑的迁移拽下水。
   const { data: interruptRows } = await supabase
     .from("interrupts")
-    .select("id, t_s, question_mode, question, ai_answer")
+    .select("*")
     .eq("source_id", id)
     .order("t_s", { ascending: true });
   const interrupts = (interruptRows ?? []) as PausePoint[];

@@ -53,13 +53,36 @@ export const en = {
   "watch.rail.tab.questions": "Questions",
   "watch.rail.tab.takeaway": "Takeaway",
   "watch.rail.empty.chat":
-    "Pausing no longer pops open the ask panel on wide screens — ask right here instead. The input and answers land in the next slice (not built yet).",
+    "Pausing no longer pops open the ask panel on wide screens — ask in the box below instead. Every question you send leaves a dot on the timeline.",
   "watch.rail.empty.questions":
     "Questions you asked about this piece will be listed here in time order, follow-ups indented (not built yet). For now, the dots below are the map.",
   "watch.rail.empty.takeaway":
     "Key points from each answer show up here; tick one to add it to your notes. Generated only when you open this tab, so ignoring it costs nothing (not built yet).",
   "watch.rail.capture": "Just mark this moment",
   "watch.rail.capturing": "Marking…",
+
+  // ── Watch page · the Ask rail itself (M3.15 slice b, D61/D62) ──────────
+  "watch.qa.placeholder": "Ask about this moment…",
+  "watch.qa.send": "Send",
+  "watch.qa.thinking": "Thinking…",
+  "watch.qa.jumpTo": (at: string) => `Jump to ${at}`,
+  "watch.qa.followUpAria": "Follow-up",
+  "watch.qa.jumpNote": (from: string, to: string) => `Jumped from ${from} to ${to}`,
+  "watch.qa.backTo": (at: string) => `Back to ${at}`,
+  "watch.qa.backDismiss": "No need to go back",
+  "watch.qa.toLatest": "Back to latest",
+  "watch.qa.retry": "Try again",
+  "watch.qa.why": "Why is that",
+  "watch.qa.whyQ": "Why is that?",
+  "watch.qa.relation": "How does it relate",
+  "watch.qa.relationQ": "How does this relate to the part he just covered?",
+  "watch.qa.shorter": "Say it shorter",
+  "watch.qa.shorterGoing": "Shortening…",
+  "watch.qa.shorterBack": "Show the long one",
+  "watch.qa.shorterTag": "Short",
+  "watch.qa.shorterFailed": "The short version didn't come through — tap to try again",
+  "watch.qa.oldTitle": "From your earlier immersive chats",
+  "watch.qa.oldHint": "Read-only — these predate this rail, so you can't follow up on them here.",
   // ── 中 / EN toggle (founder, 2026-09-09) ───────────────────────────────
   "lang.toggle.aria": "Interface language",
   "lang.toggle.toZh": "Switch to Simplified Chinese",

@@ -21,6 +21,15 @@ export const maxDuration = 300;
 const bodySchema = z.object({
   interruptId: z.string().uuid(),
   question: z.string().trim().min(1, "err.needQuestion").max(2000),
+  /**
+   * D56「说短一点」（M3.15 片 b）：**同一个问题、同一份 context，重答一版更短的**。
+   *
+   * 和普通一趟只差一件事，但那件事是这条决策的命根子：**这一趟不写库**。
+   * 原答案必须原地不动 —— 用户要能来回切回去看长的那版。
+   * 短版活在浏览器里，刷新就没（0011 没给它留列，也不该为它加一列：
+   * 它是"再看一眼"的临时视图，不是这一轮问答的事实）。
+   */
+  brief: z.boolean().optional(),
 });
 
 const NDJSON_HEADERS = {
@@ -54,7 +63,7 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const { interruptId, question } = parsed.data;
+  const { interruptId, question, brief } = parsed.data;
 
   // 这条打断点（RLS + user_id 双保险，别人的点问不了）—— 窗口就从这行拿
   const { data: interrupt } = await supabase
@@ -111,20 +120,27 @@ export async function POST(request: Request) {
           tS: Number(interrupt.t_s),
           title: source.title,
           nativeLang: prefs.nativeLang,
+          brief,
           onChunk: async (text) => push({ type: "chunk", text }),
         });
 
         // 答完整才落库：写回这条打断点的问题与答案，复习时要用（WORKORDER 283）。
         // question_mode 之前空着的话，标成 free（自由提问）。
-        await supabase
-          .from("interrupts")
-          .update({
-            question,
-            ai_answer: answer,
-            question_mode: interrupt.question_mode ?? "free",
-          })
-          .eq("id", interruptId)
-          .eq("user_id", user.id);
+        //
+        // ⚠️ **「说短一点」这一趟一个字都不写**（D56）：它是同一轮问答的另一种看法，
+        // 不是新的事实。写进去就把原答案盖掉了 —— 那正是这条决策明确不许的
+        // （「原答案不覆盖、可来回切」）。
+        if (!brief) {
+          await supabase
+            .from("interrupts")
+            .update({
+              question,
+              ai_answer: answer,
+              question_mode: interrupt.question_mode ?? "free",
+            })
+            .eq("id", interruptId)
+            .eq("user_id", user.id);
+        }
 
         push({ type: "done", answer });
       } catch (e) {
