@@ -11,6 +11,7 @@ import { getCachedTranscript, putCachedTranscript } from "@/lib/transcript/cache
 import { TranscribeError, type TranscriptProgress } from "@/lib/transcript/types";
 import { MAX_SEGMENTS } from "@/lib/captions";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
+import { getT } from "@/lib/ui-lang";
 
 // M2a — 字幕生成的唯一入口。WORKORDER §4 的 Provider 链在这里被驱动。
 //
@@ -56,8 +57,9 @@ function ndjsonOnce(payloads: unknown[]): Response {
 }
 
 export async function POST(request: Request) {
+  const t = await getT();
   if (!supabaseConfigured) {
-    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+    return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   }
 
   const supabase = await createClient();
@@ -65,12 +67,12 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
   }
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
+    return NextResponse.json({ error: t("err.badRequest") }, { status: 400 });
   }
 
   const { data: row } = await supabase
@@ -81,7 +83,7 @@ export async function POST(request: Request) {
     .maybeSingle();
 
   if (!row) {
-    return NextResponse.json({ error: "找不到这条内容" }, { status: 404 });
+    return NextResponse.json({ error: t("err.noSource") }, { status: 404 });
   }
 
   const source = row as SourceRow;
@@ -92,7 +94,7 @@ export async function POST(request: Request) {
   const chain = providersFor(source.kind);
   if (chain.length === 0) {
     return NextResponse.json(
-      { error: `这类内容（${source.kind}）的字幕还没接上` },
+      { error: t("err.noTranscriberFor", source.kind) },
       { status: 400 },
     );
   }
@@ -110,7 +112,7 @@ export async function POST(request: Request) {
 
   if (durationS && durationS > MAX_CONTENT_S) {
     return NextResponse.json(
-      { error: "这条内容超过 4 小时，暂时不自动转写 —— 可以手动粘贴字幕。" },
+      { error: t("err.tooLong") },
       { status: 400 },
     );
   }
@@ -214,12 +216,12 @@ export async function POST(request: Request) {
             controller.close();
             return;
           }
-          push({ type: "note", message: `${provider.name} 没成，换下一个` });
+          push({ type: "note", message: t("err.providerFellBack", provider.name) });
         }
       }
 
       await save(existing, "failed");
-      push({ type: "error", message: "所有字幕来源都没成。可以手动粘贴字幕，或稍后重试。" });
+      push({ type: "error", message: t("err.allTranscriptSourcesFailed") });
       controller.close();
     },
   });

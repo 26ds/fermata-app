@@ -21,22 +21,13 @@ import { putSettings } from "@/lib/settings-client";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
 import { TARGET_LANGS } from "@/lib/translate/langs";
+import { useCopy } from "@/components/copy-provider";
 
 // M1d — 字幕层（D4）：开关 + 字号 14–28px（存 localStorage）+ 行宽自适应（.caption-copy）
 // + 跟着播放走的高亮。点某一句 = 跳到那一句，跟点点条同一个手感。
 //
 // M1 阶段字幕靠手贴（.srt / .vtt），目的是**先把渲染与同步验对**；
 // M2 的自动转写写同一个字段、同一个形状，这个组件届时一个字都不用改。
-
-/**
- * D42：新加的文案集中放这儿，M3.9 抽语言表时只动这一处。
- * （这个文件里还有大量早于 D42 的散装中文，那是 M3.9 片 c「只搬家」要处理的，不在本片。）
- */
-const COPY = {
-  // 创始人 2026-08-04 指名要加「收进词库才能查看意思」——
-  // 悬浮在没收过的词上是没反应的，不说出口就像功能坏了
-  pickHint: "点词收进词库（收进后悬浮或长按可查意思）· 点行首时间戳跳到那一句",
-};
 
 /**
  * YouTube 自家「显示转录」的三步点击路径。
@@ -46,11 +37,24 @@ const COPY = {
  * 一份文案，别让两处慢慢长歪。
  */
 function YoutubeCopySteps() {
+  const t = useCopy();
+
   return (
     <ol className="ml-4 list-decimal space-y-0.5">
-      <li>电脑浏览器打开这个视频 → 视频下方「<span className="text-ink-300">...更多</span>」→「<span className="text-ink-300">显示转录 / Show transcript</span>」</li>
-      <li>在弹出的转录里 <span className="text-ink-300">全选、复制</span></li>
-      <li>回到这里，整段 <span className="text-ink-300">粘</span> 进「粘贴字幕」的框</li>
+      <li>
+        {t("cap.ytStep1a")}
+        <span className="text-ink-300">{t("cap.ytStep1More")}</span>
+        {t("cap.ytStep1b")}
+        <span className="text-ink-300">{t("cap.ytStep1Show")}</span>
+        {t("cap.ytStep1c")}
+      </li>
+      <li>
+        {t("cap.ytStep2a")} <span className="text-ink-300">{t("cap.ytStep2Copy")}</span>
+      </li>
+      <li>
+        {t("cap.ytStep3a")} <span className="text-ink-300">{t("cap.ytStep3Paste")}</span>{" "}
+        {t("cap.ytStep3b")}
+      </li>
     </ol>
   );
 }
@@ -167,6 +171,7 @@ export function CaptionLayer({
   onToggleAutoScan,
   scanning = false,
 }: CaptionLayerProps) {
+  const t = useCopy();
   // YouTube 视频自己带 CC，用户粘贴过来免费又快；只有没 CC 的才值得花钱走 Gemini。
   // 所以 YouTube 默认引导粘贴，把"自动生成"降为次选。
   const youtube = kind === "youtube";
@@ -305,7 +310,7 @@ export function CaptionLayer({
         });
         if (!res.ok || !res.body) {
           const body = await res.json().catch(() => ({}));
-          throw new Error(body.error ?? "翻译服务没响应");
+          throw new Error(body.error ?? t("cap.trNoResponse"));
         }
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -333,7 +338,7 @@ export function CaptionLayer({
             } else if (ev.type === "partial" || ev.type === "done") {
               if (ev.translations) {
                 const next = new Map<number, string>();
-                for (const t of ev.translations) next.set(t.i, t.text);
+                for (const item of ev.translations) next.set(item.i, item.text);
                 setTr(next);
                 setTrDone(ev.done ?? ev.translations.length);
               }
@@ -341,17 +346,17 @@ export function CaptionLayer({
             } else if (ev.type === "same-language") {
               setTr(new Map()); // 原文就是这个语言，不显示译文
               // 服务端能说得更具体就用它的（中文→中文那条走 D50，理由不一样）
-              setTrNote(ev.note || "这条内容的原文就是这个语言。");
+              setTrNote(ev.note || t("cap.trSameLang"));
               // 选择器上给这一项标「（原文）」——**下次他还没点就知道点了不会翻**
               if (ev.sourceLang) setConfirmed({ sourceId, lang: ev.sourceLang });
             } else if (ev.type === "error") {
-              setTrNote(ev.message ?? "翻译没成，稍后再试。");
+              setTrNote(ev.message ?? t("cap.trFailed"));
             }
           }
         }
       } catch (e) {
         if (!ctrl.signal.aborted) {
-          setTrNote(e instanceof Error ? e.message : "翻译没成，稍后再试。");
+          setTrNote(e instanceof Error ? e.message : t("cap.trFailed"));
         }
       } finally {
         if (!ctrl.signal.aborted) setTrRunning(false);
@@ -360,6 +365,13 @@ export function CaptionLayer({
 
     return () => ctrl.abort();
     // 只在语言 / 内容切换时重来。segments.length 进依赖：字幕从无到有后能自动补翻。
+    //
+    // ⚠️ **`t` 故意不进依赖**（M3.9 片 c）：这个 effect 会起一趟**要花钱**的翻译流。
+    // 把 `t` 加进来，等于"用户点了一下中/EN，整片字幕重翻一遍"——
+    // D44 的规矩是花钱的动作只由人点，界面语言不是那个开关。
+    // 代价：切语言的那一刻若正好挂着一句翻译失败的提示，那句话会停在旧语言里。
+    // 它是一条**已经发生过的事件**的记录，不是界面标签，停在原语言反而更诚实。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang, sourceId, segments.length]);
 
   // 每 250ms 问一次时间，但**只有跨句时才 setState** ——
@@ -428,7 +440,7 @@ export function CaptionLayer({
     const parsed = parseTranscript(draft);
     if (parsed.length === 0) {
       setError(
-        "没认出任何一条字幕。可以是 YouTube「显示转录」复制的内容（时间戳+文字），也可以是 .srt / .vtt 文件内容。",
+        t("cap.parseFailed"),
       );
       return;
     }
@@ -441,7 +453,7 @@ export function CaptionLayer({
         body: JSON.stringify({ transcript: parsed }),
       });
       const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error ?? "没存上，请重试");
+      if (!res.ok) throw new Error(body.error ?? t("cap.saveFailed"));
       // D50：存进库的是他贴进来的原样（那是这条内容的底本），**显示的那份由服务端按他的
       // 字形转好一起回来** —— 词库在服务端，客户端不自己转
       setSegments(Array.isArray(body.transcript) ? body.transcript : parsed);
@@ -449,7 +461,7 @@ export function CaptionLayer({
       setDraft("");
       router.refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "没存上，请重试");
+      setError(e instanceof Error ? e.message : t("cap.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -513,11 +525,11 @@ export function CaptionLayer({
     >
       {generation.error
         ? deadEnd
-          ? "仍要重试"
-          : "重试"
+          ? t("cap.retryAnyway")
+          : t("cap.retry")
         : generation.resumable
-          ? "继续生成"
-          : "生成字幕"}
+          ? t("cap.resume")
+          : t("cap.generate")}
     </button>
   ) : null;
 
@@ -528,7 +540,7 @@ export function CaptionLayer({
       onClick={() => setPasting(true)}
       className={deadEnd ? PRIMARY_BTN : SECONDARY_BTN}
     >
-      {youtube ? "粘贴字幕" : "手动粘贴"}
+      {youtube ? t("cap.pasteYt") : t("cap.pasteManual")}
     </button>
   );
 
@@ -544,14 +556,14 @@ export function CaptionLayer({
     >
       <div className="flex items-center justify-between px-1">
         <p id="captions-title" className="eyebrow">
-          captions / 字幕
+          {t("cap.title")}
         </p>
         {hasCaptions && (
           <div className="flex items-center gap-1">
             {/* 字幕已经在长了，但还没长完 —— 让用户知道后面还有，别以为就这么点 */}
             {generation?.running && (
               <span className="ui-mono mr-1 text-[0.62rem] text-teal-300/80">
-                生成中{percent != null ? ` ${percent}%` : "…"}
+                {t("cap.generating", percent != null ? ` ${percent}%` : "…")}
               </span>
             )}
             <button
@@ -562,7 +574,7 @@ export function CaptionLayer({
                 follow ? "text-teal-300" : "text-ink-500 hover:text-ink-300"
               }`}
             >
-              {follow ? "跟随中" : "不跟随"}
+              {follow ? t("cap.follow") : t("cap.noFollow")}
             </button>
             <button
               type="button"
@@ -570,7 +582,7 @@ export function CaptionLayer({
               aria-pressed={on}
               className="h-8 rounded-lg px-2 text-[0.68rem] text-ink-300 hover:text-teal-300"
             >
-              {on ? "隐藏" : "显示"}
+              {on ? t("cap.hide") : t("cap.show")}
             </button>
           </div>
         )}
@@ -581,15 +593,15 @@ export function CaptionLayer({
           <div className="mt-2 flex flex-col gap-2 rounded-2xl border border-ink-700 p-3">
             {youtube ? (
               <div className="text-xs leading-5 text-ink-500">
-                <p className="mb-1 text-ink-300">有字幕(CC)的话，粘过来免费（手机上没有「显示转录」入口，这条要在电脑上做）：</p>
+                <p className="mb-1 text-ink-300">{t("cap.pasteYtLead")}</p>
                 <YoutubeCopySteps />
-                <p className="mt-1">认 YouTube 那种「时间戳+文字」，也认 .srt / .vtt。手机上直接用「生成字幕」就行。</p>
+                <p className="mt-1">{t("cap.pasteYtTail")}</p>
               </div>
             ) : (
               <label htmlFor="caption-draft" className="text-xs leading-5 text-ink-500">
-                把 .srt 或 .vtt 的内容整段贴进来（要带{" "}
-                <span className="ui-mono">00:00:12,340 --&gt; 00:00:15,000</span> 这样的时间轴）。
-                自动转写不灵的时候，这里永远是最后一条路。
+                {t("cap.pasteManualLeadA")}{" "}
+                <span className="ui-mono">00:00:12,340 --&gt; 00:00:15,000</span>
+                {t("cap.pasteManualLeadB")}
               </label>
             )}
             <textarea
@@ -598,7 +610,7 @@ export function CaptionLayer({
               onChange={(e) => setDraft(e.target.value)}
               rows={6}
               className="w-full rounded-xl border border-ink-500/70 bg-ink-900 p-3 text-xs leading-5 text-ink-100 outline-none focus:border-teal-400"
-              placeholder={youtube ? "0:00\n第一句话\n0:04\n第二句话" : "1\n00:00:00,000 --> 00:00:03,200\n第一句话"}
+              placeholder={youtube ? t("cap.pastePlaceholderYt") : t("cap.pastePlaceholderSrt")}
             />
             <div className="flex gap-2">
               <button
@@ -607,7 +619,7 @@ export function CaptionLayer({
                 onClick={submitDraft}
                 className="min-h-11 flex-1 rounded-xl bg-teal-400 text-sm font-semibold text-teal-950 disabled:opacity-50"
               >
-                {busy ? "正在存…" : "存下这份字幕"}
+                {busy ? t("cap.saving") : t("cap.save")}
               </button>
               <button
                 type="button"
@@ -618,7 +630,7 @@ export function CaptionLayer({
                 }}
                 className="min-h-11 rounded-xl border border-ink-700 px-4 text-sm text-ink-300"
               >
-                取消
+                {t("cap.cancel")}
               </button>
             </div>
             {error && (
@@ -632,7 +644,7 @@ export function CaptionLayer({
             {generation?.running ? (
               <p className="flex items-center gap-2 text-xs leading-5 text-teal-300">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-teal-400" aria-hidden />
-                正在生成字幕{percent != null ? `（${percent}%）` : "…"}第一段大约二十秒后出来。
+                {t("cap.generatingLong", percent != null ? `（${percent}%）` : "…")}
               </p>
             ) : generation?.error ? (
               <>
@@ -644,7 +656,7 @@ export function CaptionLayer({
                 {deadEnd && youtube && (
                   <div className="text-xs leading-5 text-ink-500">
                     <p className="mb-1 text-ink-300">
-                      但你能打开这支视频，就说明字幕就在那儿 —— 自己搬过来，一样用（手机上没有「显示转录」入口，这条要在电脑上做）：
+                      {t("cap.deadEndLead")}
                     </p>
                     <YoutubeCopySteps />
                   </div>
@@ -652,10 +664,12 @@ export function CaptionLayer({
               </>
             ) : youtube ? (
               <p className="text-xs leading-5 text-ink-500">
-                点<span className="text-ink-300">「生成字幕」</span>一键自动生成（约二十秒）。在电脑上打开、这视频有 CC 的话，也可以「粘贴字幕」免费拿。
+                {t("cap.hintGenerateA")}
+                <span className="text-ink-300">{t("cap.hintGenerateBtn")}</span>
+                {t("cap.hintGenerateB")}
               </p>
             ) : (
-              <p className="text-xs leading-5 text-ink-500">还没有字幕。</p>
+              <p className="text-xs leading-5 text-ink-500">{t("cap.none")}</p>
             )}
 
             {!generation?.running && (
@@ -680,23 +694,23 @@ export function CaptionLayer({
                 id="autoscan-toggle"
                 on={autoScan}
                 onChange={onToggleAutoScan}
-                label={autoScan ? "关掉 AI 自动标词" : "打开 AI 自动标词，并马上扫这一片"}
+                label={autoScan ? t("cap.scanOff") : t("cap.scanOn")}
               />
               <label htmlFor="autoscan-toggle" className="min-w-0 text-[0.68rem] leading-4">
-                <span className="text-ink-300">AI 标词</span>
+                <span className="text-ink-300">{t("cap.scanLabel")}</span>
                 <span className="ml-1.5 text-ink-500">
                   {scanning
-                    ? "正在扫这一片…"
+                    ? t("cap.scanRunning")
                     : autoScan
-                      ? "开着，会把值得收的词标出来"
-                      : "关着（开了要花钱，每片只扫一次）"}
+                      ? t("cap.scanIsOn")
+                      : t("cap.scanIsOff")}
                 </span>
               </label>
             </div>
           )}
 
           <div className="mt-2 flex items-center gap-3 px-1">
-            <span className="text-[0.68rem] text-ink-500">字号</span>
+            <span className="text-[0.68rem] text-ink-500">{t("cap.size")}</span>
             <input
               ref={attachSlider}
               type="range"
@@ -704,7 +718,7 @@ export function CaptionLayer({
               max={SIZE_MAX}
               step={1}
               defaultValue={SIZE_DEFAULT}
-              aria-label="字幕字号"
+              aria-label={t("cap.sizeAria")}
               onChange={(e) => {
                 const next = Number(e.target.value);
                 applySize(next);
@@ -723,18 +737,18 @@ export function CaptionLayer({
 
           {/* M2.9 双语字幕：选语言（默认关闭）+ flip 对调大小 + 只当前行 + 进度 */}
           <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-[0.68rem]">
-            <span className="text-ink-500">译文</span>
+            <span className="text-ink-500">{t("cap.translation")}</span>
             <select
               value={lang}
               onChange={(e) => pickLang(e.target.value)}
-              aria-label="译文语言"
+              aria-label={t("cap.translationAria")}
               className="h-8 rounded-lg border border-ink-700 bg-ink-900 px-2 text-ink-100 outline-none focus:border-teal-400"
             >
-              <option value="">关闭</option>
+              <option value="">{t("cap.translationOff")}</option>
               {TARGET_LANGS.map((l) => (
                 <option key={l.code} value={l.code}>
                   {l.label}
-                  {isOriginalLang(l.code) ? "（原文，不用翻）" : ""}
+                  {isOriginalLang(l.code) ? t("cap.sameLangSuffix") : ""}
                 </option>
               ))}
             </select>
@@ -743,10 +757,10 @@ export function CaptionLayer({
                 <button
                   type="button"
                   onClick={toggleFlip}
-                  aria-label="对调原文与译文的大小"
+                  aria-label={t("cap.flipAria")}
                   className="h-8 rounded-lg px-2 text-ink-300 hover:text-teal-300"
                 >
-                  {flip ? "译文大 ⇅" : "原文大 ⇅"}
+                  {flip ? t("cap.flipToTr") : t("cap.flipToOrig")}
                 </button>
                 <button
                   type="button"
@@ -756,11 +770,11 @@ export function CaptionLayer({
                     trOnlyCurrent ? "text-teal-300" : "text-ink-500 hover:text-ink-300"
                   }`}
                 >
-                  {trOnlyCurrent ? "只当前行" : "每行译文"}
+                  {trOnlyCurrent ? t("cap.trOnlyCurrent") : t("cap.trEveryLine")}
                 </button>
                 {trRunning && (
                   <span className="ui-mono text-teal-300/80">
-                    翻译中{trPercent != null ? ` ${trPercent}%` : "…"}
+                    {t("cap.translating", trPercent != null ? ` ${trPercent}%` : "…")}
                   </span>
                 )}
               </>
@@ -773,7 +787,7 @@ export function CaptionLayer({
               「我好像没看到重新扫描在哪里」），所以这行小字必须在 */}
           {onToggleTerm && (
             <p className="mt-2 text-[0.68rem] leading-4 text-ink-500">
-              {COPY.pickHint}
+              {t("cap.pickHint")}
             </p>
           )}
           {/* `lg:` 那三个类：宽屏下这个框自己长满剩下的高度（`min-h-0` 不写它就不肯
@@ -841,7 +855,7 @@ export function CaptionLayer({
                     <button
                       type="button"
                       onClick={() => onSeek(seg.start)}
-                      aria-label={`跳到 ${mmss(seg.start)}`}
+                      aria-label={t("cap.jumpAria", mmss(seg.start))}
                       className={`absolute inset-0 rounded-xl transition-colors ${
                         isActive ? "bg-ink-700/60" : "hover:bg-ink-700/30"
                       }`}
@@ -861,7 +875,7 @@ export function CaptionLayer({
                           e.stopPropagation();
                           onSeek(seg.start);
                         }}
-                        aria-label={`跳到 ${mmss(seg.start)}`}
+                        aria-label={t("cap.jumpAria", mmss(seg.start))}
                         className="ui-mono pointer-events-auto relative z-10 -mt-0.5 shrink-0 rounded-lg px-1 py-1 text-[0.68rem] text-ink-500 transition-colors hover:bg-ink-900 hover:text-teal-300"
                       >
                         {mmss(seg.start)}
@@ -893,14 +907,14 @@ export function CaptionLayer({
       {hasCaptions && generation && !generation.running && (generation.resumable || generation.error) && (
         <div className="mt-2 flex items-center gap-2 rounded-xl border border-ink-700 px-3 py-2">
           <p className="flex-1 text-[0.68rem] leading-4 text-ink-500">
-            {generation.error || "后面还有没转完的部分。"}
+            {generation.error || t("cap.tailNote")}
           </p>
           <button
             type="button"
             onClick={generation.onRun}
             className="min-h-9 shrink-0 rounded-lg border border-teal-400/50 px-3 text-xs text-teal-300"
           >
-            {generation.error ? "重试" : "继续生成"}
+            {generation.error ? t("cap.retry") : t("cap.resume")}
           </button>
         </div>
       )}

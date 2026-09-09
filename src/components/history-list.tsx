@@ -4,6 +4,7 @@ import { useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { thumbUrlFor } from "@/lib/thumb";
 import { hms, mmss } from "@/lib/time";
+import { useCopy } from "@/components/copy-provider";
 
 // M3.6 历史与知识库 —— 一条内容一行：缩略图 + 标题 + 什么时候看的（D38）。
 //
@@ -15,24 +16,15 @@ import { hms, mmss } from "@/lib/time";
 // **重看不另开一行**（创始人 2026-07-30 拍板）：同一支永远只占一行，
 // 标「看过 N 次」+ 卡片叠影，按最近一次观看排最前。
 
-// D42：文案集中在这里，M3.9 抽语言表时只动这一处
-const COPY = {
-  empty: "还没有看过的东西。去「观看」贴一条链接，看几分钟，这里就有了。",
-  emptyFolders: "智能分类还没做好。等它上线，这里会自动把看过的东西归成几个文件夹。",
-  watchedTo: "看到",
-  timesPrefix: "看过",
-  timesSuffix: "次",
-  pausesSuffix: "个暂停点",
-  buckets: {
-    today: "今天看的",
-    yesterday: "昨天看的",
-    week: "本周看的",
-    older: "更早看过",
-    unknown: "时间不详",
-  },
-  unknownNote: "这些是加迁移 0007 之前看的 —— 那会儿还没有字段记「什么时候看的」。再看一遍就归位了。",
-  untitled: "未命名内容",
-};
+// M3.9 片 c：文案全走 `t()`。分组名从嵌套对象改成扁平 key（`history.bucketToday` …）——
+// 文案表是扁平的，嵌套一层就得再写一层类型
+const BUCKET_KEYS = {
+  today: "history.bucketToday",
+  yesterday: "history.bucketYesterday",
+  week: "history.bucketWeek",
+  older: "history.bucketOlder",
+  unknown: "history.bucketUnknown",
+} as const;
 
 export interface HistoryItem {
   id: string;
@@ -50,7 +42,7 @@ export interface HistoryItem {
   pause_count: number;
 }
 
-type BucketKey = keyof typeof COPY.buckets;
+type BucketKey = keyof typeof BUCKET_KEYS;
 
 /**
  * 按**观看日期**落桶。M3.5 那版只能按导入日期（库里根本没有观看时间），
@@ -126,6 +118,7 @@ export function HistoryList({
   /** 迁移 0007 跑过了吗。没跑就全落「时间不详」，页面照常能用 */
   historyEnabled: boolean;
 }) {
+  const t = useCopy();
   const todayStart = useSyncExternalStore(
     subscribeNothing,
     readTodayStart,
@@ -143,13 +136,14 @@ export function HistoryList({
       const key = bucketOf(it.last_watched_at, todayStart);
       const last = out[out.length - 1];
       if (last && last.key === key) last.rows.push(it);
-      else out.push({ key, label: COPY.buckets[key], rows: [it] });
+      else out.push({ key, label: t(BUCKET_KEYS[key]), rows: [it] });
     }
     return out;
-  }, [items, todayStart]);
+    // `t` 进依赖：换了界面语言，分组标题也得跟着重算
+  }, [items, todayStart, t]);
 
   if (items.length === 0) {
-    return <p className="py-10 text-center text-sm leading-6 text-ink-500">{COPY.empty}</p>;
+    return <p className="py-10 text-center text-sm leading-6 text-ink-500">{t("history.empty")}</p>;
   }
 
   return (
@@ -163,7 +157,7 @@ export function HistoryList({
           )}
           {/* 「时间不详」那一组解释一句为什么，别让用户以为数据坏了 */}
           {g.key === "unknown" && historyEnabled && (
-            <p className="px-1 pb-2 text-[0.7rem] leading-5 text-ink-500">{COPY.unknownNote}</p>
+            <p className="px-1 pb-2 text-[0.7rem] leading-5 text-ink-500">{t("history.unknownNote")}</p>
           )}
           <ul className="flex flex-col gap-1">
             {g.rows.map((s) => {
@@ -177,26 +171,26 @@ export function HistoryList({
                     <Thumb item={s} />
                     <span className="min-w-0 flex-1">
                       <span className="line-clamp-2 text-sm leading-6 text-ink-100">
-                        {s.title ?? s.url ?? COPY.untitled}
+                        {s.title ?? s.url ?? t("common.untitled")}
                       </span>
                       <span className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
                         <span>{s.kind}</span>
                         {s.duration_s ? <span>{hms(s.duration_s)}</span> : null}
                         {s.last_position_s && s.last_position_s > 5 ? (
                           <span className="ui-mono text-teal-300">
-                            {COPY.watchedTo} {mmss(s.last_position_s)}
+                            {t("history.watchedTo", mmss(s.last_position_s))}
                           </span>
                         ) : null}
                       </span>
                       <span className="mt-0.5 flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
                         {times > 1 && (
                           <span className="text-ink-300">
-                            {COPY.timesPrefix} {times} {COPY.timesSuffix}
+                            {t("history.times", times)}
                           </span>
                         )}
                         {s.pause_count > 0 && (
                           <span>
-                            {s.pause_count} {COPY.pausesSuffix}
+                            {t("history.pauses", s.pause_count)}
                           </span>
                         )}
                       </span>
@@ -217,12 +211,14 @@ export function HistoryList({
 
 /** ② 智能分类：本片只占位，真功能在 M3.8（D41） */
 export function FoldersPlaceholder() {
+  const t = useCopy();
+
   return (
     <div className="mt-6 rounded-2xl border border-dashed border-ink-700 px-5 py-10 text-center">
       <span className="text-2xl text-ink-500" aria-hidden>
         ◫
       </span>
-      <p className="mt-3 text-sm leading-6 text-ink-500">{COPY.emptyFolders}</p>
+      <p className="mt-3 text-sm leading-6 text-ink-500">{t("history.emptyFolders")}</p>
     </div>
   );
 }

@@ -65,12 +65,14 @@ function NavArrow({
   direction: 1 | -1;
   onClick(): void;
 }) {
+  const t = useCopy();
+
   return (
     <button
       ref={ref}
       type="button"
       onClick={onClick}
-      aria-label={direction === 1 ? "跳到下一个捕获点" : "跳到上一个捕获点"}
+      aria-label={direction === 1 ? t("dots.next") : t("dots.prev")}
       // disabled 与 opacity 刻意都不写进 JSX —— 由 effect 直接改 DOM，见 DotBar 里的说明。
       // 写进来 React 就会在每次重渲染时把它覆盖回去。
       className="relative z-10 flex h-11 w-8 shrink-0 items-center justify-center text-ink-500 transition-opacity hover:text-teal-300 active:text-teal-200 disabled:pointer-events-none"
@@ -161,9 +163,9 @@ export function DotBar({
   onDelete,
   trailing,
 }: DotBarProps) {
+  const t = useCopy();
   // 记住"用户点开的是哪个点"而不是"哪个簇" —— 簇是算出来的，
   // 删掉一个点整个簇的构成就变了，记簇会让展开层莫名其妙地关掉。
-  const t = useCopy();
   const [anchorId, setAnchorId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -246,7 +248,7 @@ export function DotBar({
         setAnchorId(survivor?.id ?? null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "没删掉，请重试");
+      setError(e instanceof Error ? e.message : t("dots.deleteFailed"));
     } finally {
       setBusyId(null);
     }
@@ -271,14 +273,14 @@ export function DotBar({
         <>
           {trailingRow}
           <p className="mt-2 rounded-2xl border border-dashed border-ink-700 px-4 py-3 text-xs leading-5 text-ink-500">
-            播到卡住的地方，点一下悬浮球 —— 这里会留下一个点，随时点回去。
+            {t("dots.empty")}
           </p>
         </>
       ) : !ready ? (
         <>
           {trailingRow}
           <p className="mt-2 rounded-2xl border border-dashed border-ink-700 px-4 py-3 text-xs leading-5 text-ink-500">
-            读取时长中，马上就能显示这 {sorted.length} 个点。
+            {t("dots.loading", sorted.length)}
           </p>
         </>
       ) : (
@@ -310,8 +312,8 @@ export function DotBar({
                     aria-expanded={isOpen}
                     aria-label={
                       many
-                        ? `${mmss(c.tS)} 附近的 ${c.points.length} 个捕获点，展开选择`
-                        : `跳回 ${mmss(c.tS)}`
+                        ? t("dots.clusterAria", mmss(c.tS), c.points.length)
+                        : t("dots.jumpAria", mmss(c.tS))
                     }
                     className="group absolute top-1/2 flex h-11 w-11 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
                     style={{
@@ -344,7 +346,7 @@ export function DotBar({
             <div className="mt-1 rounded-2xl border border-ink-700 bg-ink-900/40 p-2">
               {open.points.length > 1 && (
                 <p className="px-2 pb-1 pt-0.5 text-[0.68rem] text-ink-500">
-                  这里挤了 {open.points.length} 个点，挑一个：
+                  {t("dots.crowded", open.points.length)}
                 </p>
               )}
               <ul className="flex flex-col gap-1">
@@ -359,13 +361,13 @@ export function DotBar({
                         ↩
                       </span>
                       <span className="ui-mono text-sm text-ink-100">{mmss(p.t_s)}</span>
-                      <span className="text-xs text-ink-500">跳回这里</span>
+                      <span className="text-xs text-ink-500">{t("dots.jumpHere")}</span>
                     </button>
                     <button
                       type="button"
                       disabled={busyId === p.id}
                       onClick={() => remove(p.id)}
-                      aria-label={`删除 ${mmss(p.t_s)} 这个点`}
+                      aria-label={t("dots.deleteAria", mmss(p.t_s))}
                       className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-ink-700 text-ink-500 transition-colors hover:border-red-400/60 hover:text-red-300 disabled:opacity-40"
                     >
                       {busyId === p.id ? "…" : "✕"}

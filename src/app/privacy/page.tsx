@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { getUiLang } from "@/lib/ui-lang";
 import { LegalDoc } from "@/components/legal-doc";
 
 export const metadata: Metadata = {
@@ -15,11 +14,9 @@ export const metadata: Metadata = {
 // **改了行为就要回来改这一页** —— 一份说谎的隐私政策比没有更糟。
 
 export default async function PrivacyPage() {
-  const uiLang = await getUiLang();
 
   return (
     <LegalDoc
-      initial={uiLang.toLowerCase().startsWith("en") ? "en" : "zh"}
       zhTitle="隐私政策"
       enTitle="Privacy Policy"
       updated="2026-09-08"

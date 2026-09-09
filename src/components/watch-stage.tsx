@@ -618,7 +618,9 @@ export function WatchStage({
   }
 
   // 删除失败要回滚到"删之前"，但 handleDelete 得保持稳定身份（点点条按 props 记回调），
-  // 所以快照走 ref 而不是把 points 塞进依赖数组
+  // 所以快照走 ref 而不是把 points 塞进依赖数组。
+  // （M3.9 片 c 给它加了 `t` 依赖 —— 那个只在**切界面语言**时才变，
+  //   而那一刻整页本来就要重渲染；要防的是 `points` 那种每记一个点就变一次的东西。）
   const pointsRef = useRef(points);
   useEffect(() => {
     pointsRef.current = points;
@@ -931,10 +933,10 @@ export function WatchStage({
         body: JSON.stringify({ sourceId: source.id, tS, questionMode: mode }),
       });
       const body = await res.json();
-      if (!res.ok) throw new Error(body.error ?? "没记下来，请重试");
+      if (!res.ok) throw new Error(body.error ?? t("stage.captureFailed"));
       return body as PausePoint;
     },
-    [source.id],
+    [source.id, t],
   );
 
   // ── 打断面板的开关 ──
@@ -1037,7 +1039,7 @@ export function WatchStage({
           panelIdRef.current = idPromise;
         }
         const id = await idPromise;
-        if (!id) throw new Error("没记下这一刻，稍后再问一次");
+        if (!id) throw new Error(t("stage.captureLost"));
 
         const res = await fetch("/api/ask", {
           method: "POST",
@@ -1046,7 +1048,7 @@ export function WatchStage({
         });
         if (!res.ok || !res.body) {
           const b = await res.json().catch(() => ({}));
-          throw new Error(b.error ?? "没答出来，稍后再试");
+          throw new Error(b.error ?? t("stage.answerFailed"));
         }
 
         // NDJSON：chunk 逐块拼、done 收尾、error 报错
@@ -1080,7 +1082,7 @@ export function WatchStage({
               if (full) fullAnswer = full;
               setAsk((a) => ({ asking: false, answer: full ?? a.answer, error: "" }));
             } else if (ev.type === "error") {
-              streamErr = ev.message ?? "没答出来，稍后再试";
+              streamErr = ev.message ?? t("stage.answerFailed");
             }
           }
         }
@@ -1108,11 +1110,11 @@ export function WatchStage({
         setAsk({
           asking: false,
           answer: "",
-          error: e instanceof Error ? e.message : "没答出来，稍后再试",
+          error: e instanceof Error ? e.message : t("stage.answerFailed"),
         });
       }
     },
-    [postInterrupt],
+    [postInterrupt, t],
   );
 
   /** 不问，只把这一刻记下来（暂停触发、还没落库时的入口） */
@@ -1201,7 +1203,7 @@ export function WatchStage({
       });
       if (!res.ok || !res.body) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "字幕没生成出来，稍后再试");
+        throw new Error(body.error ?? t("stage.transcribeFailed"));
       }
 
       const reader = res.body.getReader();
@@ -1249,7 +1251,7 @@ export function WatchStage({
           } else if (event.type === "error") {
             setStatus("failed");
             permanent = event.permanent === true;
-            throw new Error(event.message ?? "字幕没生成出来");
+            throw new Error(event.message ?? t("stage.transcribeFailedShort"));
           }
           // event.type === "miss"：缓存没命中。什么都不做 —— 状态留 pending，
           // 让 YouTube 的「生成字幕」按钮候着，等用户真要花钱时再点。
@@ -1262,7 +1264,7 @@ export function WatchStage({
         setGen({
           running: false,
           coveredS: null,
-          error: e instanceof Error ? e.message : "字幕没生成出来，稍后再试",
+          error: e instanceof Error ? e.message : t("stage.transcribeFailed"),
           // 网络/解析那类异常没走到服务端的分类，一律当"还能再试"
           permanent,
         });
@@ -1271,6 +1273,12 @@ export function WatchStage({
       runningRef.current = false;
     }
     return complete;
+    // ⚠️ **`t` 故意不进依赖**（M3.9 片 c）。这个回调进了下面那个 effect 的依赖，
+    // 而那个 effect 会**自动开转写**（播客那条、YouTube 续转那条都要花钱）。
+    // `t` 一进来，用户点一下中/EN 就会让回调换个身份 → effect 重跑 → 白烧一次额度。
+    // D44：花钱的动作只由人点。代价只是"转写失败提示停在旧语言"，那是一条已经
+    // 发生过的事件记录，不是界面标签。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source.id]);
 
   useEffect(() => {
@@ -1324,13 +1332,13 @@ export function WatchStage({
       const res = await fetch(`/api/interrupts/${id}`, { method: "DELETE" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? "没删掉，请重试");
+        throw new Error(body.error ?? t("stage.deleteFailed"));
       }
     } catch (e) {
       setPoints(snapshot); // 回滚到删之前，别让点凭空消失
       throw e;
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     // 每 250ms 读一次位置。刻意写进 ref + 直改 DOM，不走 setState ——
@@ -1437,7 +1445,7 @@ export function WatchStage({
   if (!shell) {
     return (
       <div className="rounded-2xl border border-ink-700 p-5 text-sm text-ink-300">
-        这类内容（{source.kind}）的播放器还没做。
+        {t("stage.noPlayer", source.kind)}
       </div>
     );
   }
@@ -1539,21 +1547,21 @@ export function WatchStage({
               className={`h-2 w-2 rounded-full ${playing ? "bg-teal-400" : "bg-ink-500"}`}
               aria-hidden
             />
-            <span className="text-sm text-ink-300">{playing ? "播放中" : "已暂停"}</span>
+            <span className="text-sm text-ink-300">{playing ? t("stage.playing") : t("stage.paused")}</span>
             <span className="text-xs text-ink-500">
               ·{" "}
               {status === "ready"
-                ? "字幕就绪"
+                ? t("stage.capReady")
                 : gen.running
-                  ? "字幕生成中"
+                  ? t("stage.capRunning")
                   : status === "failed"
-                    ? "字幕没生成出来"
+                    ? t("stage.capFailed")
                     : status === "partial"
-                      ? "字幕生成了一半"
-                      : "字幕待生成"}
+                      ? t("stage.capPartial")
+                      : t("stage.capPending")}
             </span>
           </div>
-          <p className="ui-mono text-sm text-ink-100" aria-label="播放位置">
+          <p className="ui-mono text-sm text-ink-100" aria-label={t("stage.positionAria")}>
             <span ref={clockRef}>{source.last_position_s ? mmss(source.last_position_s) : "00:00"}</span>
             <span className="text-ink-500"> / </span>
             <span ref={totalRef} className="text-ink-500">
@@ -1602,7 +1610,7 @@ export function WatchStage({
         ref={handleElRef}
         role="separator"
         aria-orientation="vertical"
-        aria-label="拖动调整视频与学习区的宽度，双击复位"
+        aria-label={t("stage.splitterAria")}
         aria-valuemin={SPLIT_MIN}
         aria-valuemax={SPLIT_MAX}
         aria-valuenow={Math.round(defaultSplit)}

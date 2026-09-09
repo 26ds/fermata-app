@@ -5,6 +5,7 @@ import { getLangPrefs } from "@/lib/settings";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow } from "@/lib/types";
+import { getT } from "@/lib/ui-lang";
 
 // M3.7 词库 —— 打勾收藏一个词组（D40）。
 //
@@ -24,17 +25,18 @@ const schema = z.object({
 });
 
 export async function POST(request: Request) {
-  if (!supabaseConfigured) return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  const t = await getT();
+  if (!supabaseConfigured) return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
 
   const parsed = schema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: t("err.badRequest") }, { status: 400 });
   const { sourceId, term, gloss, contextQuote, tS } = parsed.data;
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
 
   const { data: srcRow } = await supabase
     .from("sources")
@@ -42,7 +44,7 @@ export async function POST(request: Request) {
     .eq("id", sourceId)
     .eq("user_id", user.id)
     .maybeSingle();
-  if (!srcRow) return NextResponse.json({ error: "找不到这条内容" }, { status: 404 });
+  if (!srcRow) return NextResponse.json({ error: t("err.noSource") }, { status: 404 });
   const source = srcRow as SourceRow;
 
   // 同一条内容里同一个词组只收一次 —— 面板勾一次、往回翻字幕又勾一次是很自然的动作，
@@ -81,7 +83,7 @@ export async function POST(request: Request) {
     ({ data: atom, error } = await supabase.from("atoms").insert(row).select("*").single());
   }
   if (error || !atom) {
-    return NextResponse.json({ error: error?.message ?? "没收进词库，请重试" }, { status: 500 });
+    return NextResponse.json({ error: error?.message ?? t("err.atomSaveFailed") }, { status: 500 });
   }
 
   return NextResponse.json({ atom });

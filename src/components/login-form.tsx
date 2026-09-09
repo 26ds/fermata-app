@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useCopy } from "@/components/copy-provider";
+import type { Translate } from "@/lib/copy";
 
 type Status = "idle" | "sending" | "sent" | "verifying" | "google";
 
@@ -12,34 +14,36 @@ type Status = "idle" | "sending" | "sent" | "verifying" | "google";
  * ⚠️ 这里**不许写发信服务商的名字或配置**：这段字是给注册的人看的，
  * 而发信怎么配是后台的事（换一次服务商这句话就成了假话，2026-09-08 已经发生过一次）。
  */
-function friendlyError(raw: string): string {
+function friendlyError(raw: string, t: Translate): string {
   const msg = raw || "";
   if (msg.includes("For security purposes")) {
     const s = msg.match(/(\d+) seconds/)?.[1];
-    return `发送太频繁：安全限制要求两次发送之间间隔 60 秒${s ? `（还需等约 ${s} 秒）` : ""}。`;
+    // 秒数拿不到就说不出"还要等多久" —— 那时用不带数字的那一条，
+    // 别硬拼出一个「（还需等约  秒）」的空括号
+    return s ? t("login.errTooFrequentWait", s) : t("login.errTooFrequent");
   }
   if (/rate limit/i.test(msg)) {
-    return "这一小时的邮件发送额度用完了，过一会儿再试。";
+    return t("login.errRateLimit");
   }
   // Google 那颗按钮平时只在后台开着时才渲染；万一在「打开页面」和「点下去」之间被关掉，
   // 走到这里。**必须排在下面那条 not enabled 前面**，否则会被误报成"注册关闭了"
   if (/unsupported provider|provider is not enabled/i.test(msg)) {
-    return "Google 登录暂时不可用，请用下面的邮箱登录。";
+    return t("login.errGoogleOff");
   }
   // 后台关掉了「允许新用户注册」时，老用户照发、新邮箱走到这里
   if (/signups? not allowed|not enabled/i.test(msg)) {
-    return "这个邮箱还没法注册：新用户注册暂时是关着的。";
+    return t("login.errSignupsOff");
   }
   // 邮箱本身写错（"Unable to validate email address: invalid format"）——
   // 必须排在下面那条 expired|invalid 前面，否则会被误报成"验证码过期"
   if (/validate email|invalid format|email address.*invalid/i.test(msg)) {
-    return "这个邮箱地址填得不对，检查一下有没有漏字符。";
+    return t("login.errBadEmail");
   }
   if (/expired|invalid/i.test(msg)) {
-    return "验证码不对或已过期，重新发送一封再试。";
+    return t("login.errBadCode");
   }
   if (/error sending|recipient/i.test(msg) || msg.trim() === "{}" || msg.trim() === "") {
-    return "邮件没能发出去 —— 是发信这一侧的故障，不是你的邮箱填错了。稍后再试一次；一直这样的话把这句话截图给我们。";
+    return t("login.errSendFailed");
   }
   return msg;
 }
@@ -64,6 +68,7 @@ export function LoginForm({
   /** 后台真的开了 Google 登录才给 true（`enabledProviders()` 现查的，不是环境变量） */
   showGoogle?: boolean;
 }) {
+  const t = useCopy();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [status, setStatus] = useState<Status>("idle");
@@ -84,13 +89,13 @@ export function LoginForm({
       });
       if (error) {
         setStatus("idle");
-        setError(friendlyError(error.message));
+        setError(friendlyError(error.message, t));
       }
     } catch (e) {
       // 抛出来的（断网、配置缺失）跟 return error 的是两种失败，都得接住 ——
       // 漏掉这个 catch，status 会永远卡在 "google"，两颗按钮一起变灰，只能刷新页面
       setStatus("idle");
-      setError(friendlyError(e instanceof Error ? e.message : String(e)));
+      setError(friendlyError(e instanceof Error ? e.message : String(e), t));
     }
   }
 
@@ -105,7 +110,7 @@ export function LoginForm({
     });
     if (error) {
       setStatus("idle");
-      setError(friendlyError(error.message));
+      setError(friendlyError(error.message, t));
     } else {
       setStatus("sent");
     }
@@ -123,7 +128,7 @@ export function LoginForm({
     });
     if (error) {
       setStatus("sent");
-      setError(friendlyError(error.message));
+      setError(friendlyError(error.message, t));
     } else {
       window.location.href = "/";
     }
@@ -138,14 +143,17 @@ export function LoginForm({
               ✓
             </span>
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-teal-100">确认邮件已出发</p>
+              <p className="text-sm font-semibold text-teal-100">{t("login.sentTitle")}</p>
               <p className="mt-1 break-all text-sm text-teal-300">{email}</p>
             </div>
           </div>
+          {/* 原文是一整句、中间夹着两个 `<span>` 强调「这台设备 / 别的设备」。
+              夹在句子中间的强调片段翻不了 —— 英文语序会把它们冲到别的位置，
+              拆成五个碎片 key 更糟。改成两句各自完整、强调落在句首，意思一字未改 */}
           <p className="mt-4 text-sm leading-6 text-teal-300">
-            在<span className="text-ink-100">这台设备</span>上点邮件里的登录按钮；
-            如果邮件是在<span className="text-ink-100">别的设备</span>上打开的，
-            把邮件里的数字验证码填到下面。
+            <span className="text-ink-100">{t("login.sentSameDevice")}</span>
+            <br />
+            {t("login.sentOtherDevice")}
           </p>
         </div>
         <form onSubmit={verifyCode} className="flex flex-col gap-3">
@@ -154,7 +162,7 @@ export function LoginForm({
             pattern="[0-9]*"
             maxLength={10}
             required
-            placeholder="邮件里的验证码"
+            placeholder={t("login.codePlaceholder")}
             value={code}
             onChange={(e) => setCode(e.target.value)}
             className="h-14 rounded-xl border border-ink-500/70 bg-ink-900 px-4 text-center text-lg tracking-[0.4em] text-ink-100 placeholder:tracking-normal placeholder:text-ink-500 outline-none focus:border-teal-400"
@@ -164,7 +172,7 @@ export function LoginForm({
             disabled={status === "verifying" || code.trim().length < 6}
             className="flex h-14 items-center justify-center gap-2 rounded-xl bg-teal-400 px-4 font-semibold text-teal-950 disabled:opacity-50"
           >
-            {status === "verifying" ? "确认中…" : "用验证码登录"}
+            {status === "verifying" ? t("login.verifying") : t("login.verifySubmit")}
             {status !== "verifying" && <span aria-hidden>→</span>}
           </button>
         </form>
@@ -182,7 +190,7 @@ export function LoginForm({
           }}
           className="min-h-11 text-sm text-ink-500 underline-offset-4 hover:text-ink-100 hover:underline"
         >
-          换个邮箱 / 重新发送
+          {t("login.changeEmail")}
         </button>
       </div>
     );
@@ -202,18 +210,18 @@ export function LoginForm({
             className="flex h-14 items-center justify-center gap-3 rounded-xl bg-ink-100 px-4 font-semibold text-ink-900 disabled:opacity-50"
           >
             <GoogleMark />
-            {status === "google" ? "正在跳转 Google…" : "用 Google 登录"}
+            {status === "google" ? t("login.googleGoing") : t("login.googleBtn")}
           </button>
           <div className="flex items-center gap-3">
             <span className="h-px flex-1 bg-ink-500/40" aria-hidden />
-            <span className="text-xs text-ink-500">或者用邮箱</span>
+            <span className="text-xs text-ink-500">{t("login.orEmail")}</span>
             <span className="h-px flex-1 bg-ink-500/40" aria-hidden />
           </div>
         </>
       )}
       <form onSubmit={sendLink} className="flex flex-col gap-3">
         <label htmlFor="email" className="text-xs font-semibold tracking-wide text-ink-300">
-          你的邮箱
+          {t("login.emailLabel")}
         </label>
         <input
           id="email"
@@ -230,7 +238,7 @@ export function LoginForm({
           disabled={busy}
           className="mt-1 flex h-14 items-center justify-center gap-2 rounded-xl bg-teal-400 px-4 font-semibold text-teal-950 disabled:opacity-50"
         >
-          {status === "sending" ? "正在发送…" : "发送登录邮件"}
+          {status === "sending" ? t("login.sending") : t("login.sendBtn")}
           {status !== "sending" && <span aria-hidden>→</span>}
         </button>
       </form>

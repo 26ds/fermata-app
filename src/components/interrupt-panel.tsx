@@ -7,6 +7,7 @@ import { langLabel } from "@/lib/lang";
 import type { PhraseItem, ScanDrift } from "@/lib/phrases/types";
 import type { TermSpan } from "@/lib/segment";
 import { mmss } from "@/lib/time";
+import { useCopy } from "@/components/copy-provider";
 
 // M3 打断问答 —— 面板从「只记类型的壳」变成「当场问、AI 扣着字幕答」。
 //
@@ -23,52 +24,32 @@ import { mmss } from "@/lib/time";
 //   关闭 —— 细条上的 ×、展开态的「取消」、Esc
 // ⚠️ 行为变更：横杠原来是"关闭"，现在是"收起"。
 
-/** D42：文案集中在顶部，M3.9 抽语言表时只动这一处 */
-const COPY = {
-  stuckAt: "卡在",
-  askHint: "问一句，我扣着这段字幕答你。",
-  lastTwoSeconds: "刚才这两秒",
-  // M3.10 / D45：手动选词是主路径，所以入口得说出口 —— 一个没人知道存在的手势等于没做
-  // 创始人 2026-08-04 指名要加的那句：**只有收进词库的词才查得了意思**，
-  // 不说清楚的话，悬浮在普通词上没反应，看着就像功能坏了
-  pickHint: "点词收进词库 · 收进后才能查意思",
-  noCaptionHere: "这一刻附近没有字幕。",
-  collapse: "点我收起，去看字幕",
-  expand: "展开",
-  expandLabel: "展开面板",
-  close: "关闭",
-  askShort: "问一句",
-  addWord: "＋词",
-  chat: "沉浸聊天",
-  rescan: "再扫一次",
-  // 扫描的几种结局，每一种都得说人话 —— 说不清楚的失败等于没做
-  scanStates: {
-    // D45：开关本身搬去「字幕」那一块了（创始人 2026-08-02 指名的位置），
-    // 所以这里只剩一句"为什么这片没有高亮"，并把人指过去 —— 面板本来就挤（D18），
-    // 同一颗开关不该在两个地方各摆一份（上一轮撤掉重复入口时定的规矩）
-    off: "AI 标词关着 —— 开关在下面「字幕」那一行。",
-    scanning: "正在把这条内容里值得收的表达标出来…",
-    ready: (n: number) => `全片标出 ${n} 个，下面的字幕里也都标了`,
-    empty: "整片扫完了，一个都没标出来。",
-    "not-ready": "字幕还太少，等它多转出一段再来扫。",
-    running: "上一次扫描还没结束（或卡住了）。",
-    failed: "这次没扫成。",
-  },
-  // M3.9：这一份是按**旧的语言设置**扫的。说清楚是哪儿旧了，别只丢一个按钮
-  driftMode: "你改过语言设置了 —— 这一份是按之前那套标的。",
-  driftSupport: "你换了母语 —— 这些解释还是用之前那门语言写的。",
-  driftRescan: "按新的重扫",
-  targetTitle: (lang: string) => `这条内容是 ${lang}。`,
-  targetQuestion: "你是想学这门语言，还是只想搞懂内容？",
-  targetLearn: (lang: string) => `我想学 ${lang}`,
-  targetJustContent: "只想搞懂内容",
-};
+// 文案全在 `src/lib/copy/`（`panel.*` / `quick.*`，M3.9 片 c）。
 
-/** 快捷问：一键把常见困惑问出去，不用打字。语音提问是 Phase-2（长按球接 Live），这里先留个说明 */
-const QUICK: { label: string; hint: string; question: string }[] = [
-  { label: "解释这段", hint: "整段没跟上", question: "把刚才这段内容讲清楚一点，我没跟上。" },
-  { label: "有个词没听懂", hint: "卡在某个词", question: "刚才这段里有没有比较难懂的词或术语？挑出来解释一下。" },
-];
+/** 扫描结局 → 文案 key。`ready` 那条要带数字，单独在 JSX 里处理 */
+const SCAN_KEYS = {
+  off: "panel.scanOff",
+  scanning: "panel.scanScanning",
+  empty: "panel.scanEmpty",
+  "not-ready": "panel.scanNotReady",
+  running: "panel.scanRunning",
+  failed: "panel.scanFailed",
+} as const;
+
+/**
+ * 快捷问：一键把常见困惑问出去，不用打字。
+ * 语音提问是 Phase-2（长按球接 Live），这里先留个说明。
+ *
+ * ⚠️ **`question` 也跟着界面语言走**（M3.9 片 c）。它看着像"提示词"，其实不是 ——
+ * D42 红线禁的是「拿 `uiLang` 去拼提示词模板、去指定 AI 该说哪门语言」；
+ * 这一句是**替用户打的那句话**，聊天流里会原样显示成「你问：…」。
+ * 一个用英文界面的人按下去，冒出来一句中文的"我问的问题"，是荒谬的。
+ * 创始人 2026-09-09 也明说了 AI 的输出语言该跟着**用户的输入语言**走。
+ */
+const QUICK = [
+  { label: "quick.explainLabel", hint: "quick.explainHint", question: "quick.explainQ" },
+  { label: "quick.wordLabel", hint: "quick.wordHint", question: "quick.wordQ" },
+] as const;
 
 /** 面板里那两秒的一行字幕 */
 export interface PanelLine {
@@ -170,6 +151,7 @@ export function InterruptPanel({
   needTargetLang = "",
   onAnswerTarget,
 }: InterruptPanelProps) {
+  const t = useCopy();
   /**
    * 扫成功了、但语言设置后来变了 —— 这一份已经不是他要的那一版。
    * **只在 `ready` 上判**：还在扫的时候提"过期了"只会让人以为出错了。
@@ -239,7 +221,7 @@ export function InterruptPanel({
       await onJustCapture();
       // 成功后由父组件关闭面板
     } catch (e) {
-      setError(e instanceof Error ? e.message : "没记下来，请重试");
+      setError(e instanceof Error ? e.message : t("panel.saveFailed"));
       setBusy(false);
     }
   }
@@ -250,12 +232,12 @@ export function InterruptPanel({
   if (collapsed) {
     return (
       <div className="fixed inset-x-0 bottom-0 z-[60] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <div role="dialog" aria-label="打断面板（已收起）" className="glass flex items-center gap-1.5 rounded-2xl px-2.5 py-2">
+        <div role="dialog" aria-label={t("panel.collapsedAria")} className="glass flex items-center gap-1.5 rounded-2xl px-2.5 py-2">
           {/* 带字的胶囊，不是一根光秃秃的横线 —— 一条没标注的细线没人知道它能点 */}
           <button
             type="button"
             onClick={() => setCollapsed(false)}
-            aria-label={COPY.expandLabel}
+            aria-label={t("panel.expandLabel")}
             className="flex min-h-9 shrink-0 items-center gap-1 rounded-xl border border-ink-500/60 px-2.5 text-xs text-ink-100 transition-colors hover:border-teal-400 hover:text-teal-300"
           >
             <span aria-hidden>▲</span>
@@ -271,22 +253,22 @@ export function InterruptPanel({
             }}
             className="min-h-9 shrink-0 rounded-xl border border-ink-500/60 px-2.5 text-xs text-ink-100 hover:border-teal-400 hover:text-teal-300"
           >
-            {COPY.askShort}
+            {t("panel.askShort")}
           </button>
           <button
             type="button"
             onClick={() => setCollapsed(false)}
-            aria-label="回到暂停那两秒挑词"
+            aria-label={t("panel.backToPick")}
             className="min-h-9 shrink-0 rounded-xl border border-ink-500/60 px-2.5 text-xs text-ink-100 hover:border-teal-400 hover:text-teal-300"
           >
-            {COPY.addWord}
+            {t("panel.addWord")}
           </button>
           {/* 创始人真机反馈：细条上得能直接进沉浸聊天。
               收起状态下悬浮球可能正被这条挡着，而"长按球"本来就是个不好发现的动作 */}
           <button
             type="button"
             onClick={onEnterImmersive}
-            aria-label={COPY.chat}
+            aria-label={t("panel.chat")}
             className="siri-orb flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm text-teal-950"
           >
             <span aria-hidden>◉</span>
@@ -294,7 +276,7 @@ export function InterruptPanel({
           <button
             type="button"
             onClick={onClose}
-            aria-label={COPY.close}
+            aria-label={t("panel.close")}
             className="flex h-9 w-7 shrink-0 items-center justify-center rounded-xl text-base text-ink-500 hover:text-teal-300"
           >
             ×
@@ -331,7 +313,7 @@ export function InterruptPanel({
           className="mx-auto mb-3 flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border border-ink-500/50 bg-ink-700/60 px-3.5 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
         >
           <span aria-hidden>▽</span>
-          {COPY.collapse}
+          {t("panel.collapse")}
         </button>
 
         {/* 横杠改成"收起"之后，关掉面板本来要滑到最底下按「取消」——
@@ -340,14 +322,14 @@ export function InterruptPanel({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p id="interrupt-title" className="text-base font-semibold text-ink-100">
-              {COPY.stuckAt} <span className="ui-mono text-teal-300">{mmss(tS)}</span>
+              {t("panel.stuckAt")} <span className="ui-mono text-teal-300">{mmss(tS)}</span>
             </p>
-            <p className="mt-1 text-xs leading-5 text-ink-500">{COPY.askHint}</p>
+            <p className="mt-1 text-xs leading-5 text-ink-500">{t("panel.askHint")}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label={COPY.close}
+            aria-label={t("panel.close")}
             className="-mr-1 -mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-base text-ink-500 transition-colors hover:text-teal-300"
           >
             ×
@@ -358,9 +340,9 @@ export function InterruptPanel({
         {needTargetLang && onAnswerTarget && (
           <div className="mt-3 shrink-0 rounded-2xl border border-teal-400/40 bg-ink-700/70 px-4 py-3">
             <p className="text-sm leading-6 text-ink-100">
-              {COPY.targetTitle(langLabel(needTargetLang))}
+              {t("panel.targetTitle", langLabel(needTargetLang))}
               <br />
-              {COPY.targetQuestion}
+              {t("panel.targetQuestion")}
             </p>
             <div className="mt-3 flex gap-2">
               <button
@@ -368,14 +350,14 @@ export function InterruptPanel({
                 onClick={() => onAnswerTarget(true)}
                 className="min-h-11 flex-1 rounded-xl bg-teal-400 px-3 text-sm font-semibold text-teal-950 hover:bg-teal-300"
               >
-                {COPY.targetLearn(langLabel(needTargetLang))}
+                {t("panel.targetLearn", langLabel(needTargetLang))}
               </button>
               <button
                 type="button"
                 onClick={() => onAnswerTarget(false)}
                 className="min-h-11 flex-1 rounded-xl border border-ink-500/60 px-3 text-sm text-ink-100 hover:border-teal-400 hover:text-teal-300"
               >
-                {COPY.targetJustContent}
+                {t("panel.targetJustContent")}
               </button>
             </div>
           </div>
@@ -386,13 +368,13 @@ export function InterruptPanel({
         {!needTargetLang && !showAnswer && (
           <div className="mt-3 shrink-0 rounded-2xl border border-ink-500/50 bg-ink-900/50 px-3 py-2.5">
             <div className="flex items-baseline justify-between gap-2">
-              <p className="eyebrow">{COPY.lastTwoSeconds}</p>
+              <p className="eyebrow">{t("panel.lastTwoSeconds")}</p>
               {lines.length > 0 && onToggleTerm && (
-                <p className="shrink-0 text-[0.68rem] leading-4 text-ink-500">{COPY.pickHint}</p>
+                <p className="shrink-0 text-[0.68rem] leading-4 text-ink-500">{t("panel.pickHint")}</p>
               )}
             </div>
             {lines.length === 0 ? (
-              <p className="mt-1.5 text-xs leading-5 text-ink-500">{COPY.noCaptionHere}</p>
+              <p className="mt-1.5 text-xs leading-5 text-ink-500">{t("panel.noCaptionHere")}</p>
             ) : (
               <ul className="mt-1.5 flex flex-col gap-1.5">
                 {lines.map((l) => (
@@ -435,14 +417,14 @@ export function InterruptPanel({
               <div className="mt-2 flex items-center gap-2 border-t border-ink-500/30 pt-2">
                 <p className="min-w-0 flex-1 text-[0.68rem] leading-4 text-ink-500">
                   {scan.status === "ready"
-                    ? COPY.scanStates.ready(scan.count)
-                    : COPY.scanStates[scan.status]}
+                    ? t("panel.scanReady", scan.count)
+                    : t(SCAN_KEYS[scan.status])}
                   {/* M3.9：扫成功了但语言设置后来变了 —— 这一份已经不是他要的那一版了。
                       不说这一句的后果 2026-08-02 真机验证过：他改完母语，**根本找不到重扫的入口**，
                       因为按钮只在"扫失败"时出现 */}
                   {stale && (
                     <span className="mt-0.5 block text-teal-300/80">
-                      {drift === "support" ? COPY.driftSupport : COPY.driftMode}
+                      {drift === "support" ? t("panel.driftSupport") : t("panel.driftMode")}
                     </span>
                   )}
                 </p>
@@ -459,7 +441,7 @@ export function InterruptPanel({
                       onClick={onRescan}
                       className="min-h-8 shrink-0 rounded-lg border border-teal-400/50 px-2.5 text-[0.68rem] text-teal-300"
                     >
-                      {stale ? COPY.driftRescan : COPY.rescan}
+                      {stale ? t("panel.driftRescan") : t("panel.rescan")}
                     </button>
                   )}
 
@@ -483,7 +465,7 @@ export function InterruptPanel({
             }}
             disabled={asking}
             rows={2}
-            placeholder="这里在讲什么？这个词什么意思？"
+            placeholder={t("panel.placeholder")}
             className="w-full resize-none rounded-2xl border border-ink-500/60 bg-ink-700/60 px-4 py-3 text-sm text-ink-100 placeholder:text-ink-500 focus:border-teal-400 focus:outline-none disabled:opacity-50"
           />
           <button
@@ -492,7 +474,7 @@ export function InterruptPanel({
             onClick={() => submit(input)}
             className="mt-2 min-h-12 w-full shrink-0 rounded-2xl bg-teal-400/90 text-sm font-semibold text-ink-900 transition-colors hover:bg-teal-300 disabled:opacity-40"
           >
-            {asking ? "思考中…" : "发送"}
+            {asking ? t("panel.thinking") : t("panel.send")}
           </button>
         </div>
 
@@ -504,11 +486,11 @@ export function InterruptPanel({
                 key={q.label}
                 type="button"
                 disabled={asking}
-                onClick={() => submit(q.question)}
+                onClick={() => submit(t(q.question))}
                 className="flex-1 rounded-2xl border border-ink-500/60 px-3 py-2.5 text-left transition-colors hover:border-teal-400 disabled:opacity-50"
               >
-                <span className="block text-sm font-semibold text-ink-100">{q.label}</span>
-                <span className="block text-xs text-ink-500">{q.hint}</span>
+                <span className="block text-sm font-semibold text-ink-100">{t(q.label)}</span>
+                <span className="block text-xs text-ink-500">{t(q.hint)}</span>
               </button>
             ))}
           </div>
@@ -527,8 +509,8 @@ export function InterruptPanel({
               ◉
             </span>
             <span className="min-w-0">
-              <span className="block text-sm font-semibold text-ink-100">长问答沉浸聊天</span>
-              <span className="block text-xs leading-4 text-ink-500">有诸多疑惑？进来接着问，我扣着当前进度答。</span>
+              <span className="block text-sm font-semibold text-ink-100">{t("panel.immersiveTitle")}</span>
+              <span className="block text-xs leading-4 text-ink-500">{t("panel.immersiveHint")}</span>
             </span>
           </button>
         )}
@@ -551,7 +533,7 @@ export function InterruptPanel({
                 {answer ? (
                   <span className="whitespace-pre-wrap break-words">{answer}</span>
                 ) : (
-                  <span className="text-ink-500">思考中…</span>
+                  <span className="text-ink-500">{t("panel.thinking")}</span>
                 )}
                 {asking && answer && <span className="ml-0.5 animate-pulse text-teal-300">▍</span>}
               </div>
@@ -566,7 +548,7 @@ export function InterruptPanel({
             onClick={justCapture}
             className="mt-2 min-h-12 w-full shrink-0 rounded-2xl border border-dashed border-ink-500/60 text-sm text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
           >
-            只记下这一刻，先不问
+            {t("panel.justCapture")}
           </button>
         )}
 
@@ -584,7 +566,7 @@ export function InterruptPanel({
           onClick={onClose}
           className="mt-3 min-h-12 w-full shrink-0 rounded-2xl border border-ink-500/60 text-sm font-semibold text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
         >
-          {showAnswer ? "完成" : "取消"}
+          {showAnswer ? t("panel.done") : t("panel.cancel")}
         </button>
       </div>
     </div>

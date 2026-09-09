@@ -6,6 +6,7 @@ import { getLangPrefs } from "@/lib/settings";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow } from "@/lib/types";
+import { getT } from "@/lib/ui-lang";
 
 // M3 Phase-2 —— 把「本次会话新增的逐轮」浓缩进 summary（给 AI 当往期背景，不喂逐字）。
 // 前端在**退出**沉浸聊天时调；**进入**时也调一次兜底（万一上次强退没跑成）。
@@ -23,15 +24,16 @@ type ChatRow = {
 };
 
 export async function POST(request: Request) {
-  if (!supabaseConfigured) return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  const t = await getT();
+  if (!supabaseConfigured) return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
 
   const parsed = schema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: t("err.badRequest") }, { status: 400 });
   const { sourceId } = parsed.data;
 
   const { data } = await supabase
@@ -70,7 +72,7 @@ export async function POST(request: Request) {
       nativeLang: prefs.nativeLang,
     });
   } catch (e) {
-    const message = e instanceof AskError ? e.message : "浓缩这次对话时出错了，稍后再试。";
+    const message = e instanceof AskError ? e.message : t("err.compactFailed");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import { useCopy } from "@/components/copy-provider";
 
 // M1 1b：悬浮捕获球。拖到任意边缘（落库 localStorage），轻点 = 记这一刻（打断面板）。
 // M3 Phase-2：长按 = 进/出「长问答沉浸聊天」。进入时球从当前停靠位平滑滑到底部正中
@@ -62,6 +63,7 @@ function dockToXY(dock: Dock): { x: number; y: number } {
 }
 
 export function CaptureOrb({ state, onTap, onLongPress, immersive }: CaptureOrbProps) {
+  const t = useCopy();
   const outerRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
 
@@ -237,10 +239,10 @@ export function CaptureOrb({ state, onTap, onLongPress, immersive }: CaptureOrbP
 
   const isReady = state === "ready";
   const label = immersive
-    ? "沉浸聊天：长按收起"
+    ? t("orb.immersive")
     : isReady
-      ? "捕获球：轻点记这一刻，长按进入沉浸聊天"
-      : "捕获球：字幕准备中，长按进入沉浸聊天";
+      ? t("orb.ready")
+      : t("orb.pending");
 
   return (
     // invisible 只管到挂载那一刻：effect 量好位置后写行内 visibility 盖掉它。

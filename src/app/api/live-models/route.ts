@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { envLiveModel } from "@/lib/live/models";
+import { getT } from "@/lib/ui-lang";
 
 // M0.5 — 列出当前 GEMINI_API_KEY 能用的 Live（双向实时语音）对话模型，
 // 供实验页下拉框选择。两层过滤：
@@ -18,20 +19,21 @@ const ALLOW = [
 const DENY = [/translate|tts/];
 
 export async function GET() {
+  const t = await getT();
   if (!supabaseConfigured) {
-    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+    return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   }
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
   }
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "服务器还没配置 GEMINI_API_KEY" },
+      { error: t("err.noGeminiKey") },
       { status: 500 },
     );
   }

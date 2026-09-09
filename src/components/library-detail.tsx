@@ -6,6 +6,8 @@ import { PauseList, type PausePoint } from "@/components/pause-list";
 import { VocabList, type VocabItem } from "@/components/vocab-list";
 import { withFrom } from "@/lib/nav";
 import type { TranscriptSegment } from "@/lib/types";
+import { useCopy, useUiLang } from "@/components/copy-provider";
+import type { Translate } from "@/lib/copy";
 
 // M3.6 —— `/library/[id]` 的两个 tab（D38）。**这一页没有播放器。**
 //
@@ -15,20 +17,6 @@ import type { TranscriptSegment } from "@/lib/types";
 //
 // 和观看页的关键差别：点一行是**真跳页**（这里没有播放器可 seek），
 // 跳 `/watch/[id]?t=<秒>`，观看页认这个参数并把播放头放过去。
-
-// D42：文案集中在这里，M3.9 抽语言表时只动这一处
-const COPY = {
-  tabPauses: "暂停点与聊天",
-  tabVocab: "词库",
-  chatRow: (n: number) => `和这条内容聊过 ${n} 轮`,
-  chatOpen: "打开 →",
-  daySuffix: " · 那次看的",
-  dayToday: "今天",
-  dayYesterday: "昨天",
-  dayUnknown: "时间不详",
-  emptyPauses: "这条内容你还没停过。回观看页看的时候点右下角悬浮球，停下的每一刻都会记在这里。",
-  deleteFailed: "没删掉，请重试",
-};
 
 /** 比观看页那份多一个 created_at —— 分堆靠它 */
 export interface DatedPausePoint extends PausePoint {
@@ -42,14 +30,19 @@ function dayKeyOf(iso: string | null): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-function dayLabelOf(iso: string | null, todayStart: number): string {
-  if (!iso) return COPY.dayUnknown + COPY.daySuffix;
+// M3.9 片 c：日期本身交给 `Intl.DateTimeFormat` 按界面语言排版
+// —— 原来写死的 `${月} 月 ${日} 日` 在英文界面上会变成「9 月 8 日」。
+// 「· 那次看的」那个后缀不再拼串：英文里语序会散，四种情形各写完整一条。
+function dayLabelOf(iso: string | null, todayStart: number, t: Translate, uiLang: string): string {
+  if (!iso) return t("detail.dayUnknown");
   const day = new Date(iso).setHours(0, 0, 0, 0);
   const days = Math.round((todayStart - day) / 86_400_000);
-  if (days <= 0) return COPY.dayToday + COPY.daySuffix;
-  if (days === 1) return COPY.dayYesterday + COPY.daySuffix;
-  const d = new Date(iso);
-  return `${d.getMonth() + 1} 月 ${d.getDate()} 日${COPY.daySuffix}`;
+  if (days <= 0) return t("detail.dayToday");
+  if (days === 1) return t("detail.dayYesterday");
+  const date = new Intl.DateTimeFormat(uiLang, { month: "long", day: "numeric" }).format(
+    new Date(iso),
+  );
+  return t("detail.dayOn", date);
 }
 
 /**
@@ -76,6 +69,8 @@ export function LibraryDetail({
   /** M3.7：本片词库（tab2）。跨视频的那份在 `/library/vocab` */
   vocab?: VocabItem[];
 }) {
+  const t = useCopy();
+  const uiLang = useUiLang();
   const router = useRouter();
   const [tab, setTab] = useState<"pauses" | "vocab">("pauses");
   const [rows, setRows] = useState(points);
@@ -110,14 +105,15 @@ export function LibraryDetail({
         g.rows.push(p);
         g.at = Math.max(g.at, at);
       } else {
-        map.set(key, { label: dayLabelOf(p.created_at, todayStart), at, rows: [p] });
+        map.set(key, { label: dayLabelOf(p.created_at, todayStart, t, uiLang), at, rows: [p] });
       }
     }
     // 最近看的那次排最前（组内的排序交给 PauseList，它按秒数升序）
     return [...map.entries()]
       .map(([key, g]) => ({ key, ...g }))
       .sort((a, b) => b.at - a.at);
-  }, [rows, todayStart]);
+    // `t` / `uiLang` 进依赖：换了界面语言，按天分堆的标题要跟着重排
+  }, [rows, todayStart, t, uiLang]);
 
   const handleDelete = useCallback(async (id: string) => {
     const snapshot = rowsRef.current;
@@ -126,13 +122,14 @@ export function LibraryDetail({
       const res = await fetch(`/api/interrupts/${id}`, { method: "DELETE" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? COPY.deleteFailed);
+        throw new Error(body.error ?? t("pause.deleteFailed"));
       }
     } catch (e) {
       setRows(snapshot); // 回滚，别让点凭空消失
       throw e;
     }
-  }, []);
+    // `t` 进依赖：报错那句话要跟着界面语言走
+  }, [t]);
 
   // 这一页没有播放器 —— 点一行是真跳页。观看页认 ?t= 并把播放头放过去。
   // 带上 from=library：观看页的返回箭头要退回**这一页**，而不是内容列表（创始人 2026-07-31）
@@ -154,8 +151,8 @@ export function LibraryDetail({
       <div className="mt-6 flex items-center gap-1 border-b border-ink-500/30 pb-3">
         {(
           [
-            ["pauses", COPY.tabPauses],
-            ["vocab", COPY.tabVocab],
+            ["pauses", t("detail.tabPauses")],
+            ["vocab", t("detail.tabVocab")],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -189,15 +186,15 @@ export function LibraryDetail({
                 ◎
               </span>
               <span className="min-w-0 flex-1 truncate text-sm text-ink-100">
-                {COPY.chatRow(chatRounds)}
+                {t("pause.chatRow", chatRounds)}
               </span>
-              <span className="shrink-0 text-xs text-ink-500">{COPY.chatOpen}</span>
+              <span className="shrink-0 text-xs text-ink-500">{t("pause.chatOpen")}</span>
             </button>
           )}
 
           {rows.length === 0 ? (
             <p className="rounded-2xl border border-ink-700 px-4 py-6 text-center text-sm leading-6 text-ink-500">
-              {COPY.emptyPauses}
+              {t("detail.emptyPauses")}
             </p>
           ) : groups == null ? (
             // 水合前：一张平铺的列表（必须和服务端渲染出来的一模一样）

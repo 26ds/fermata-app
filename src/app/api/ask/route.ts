@@ -7,6 +7,8 @@ import { captionScriptFor } from "@/lib/zh-script";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
+import { getT } from "@/lib/ui-lang";
+import { tMaybeKey } from "@/lib/copy";
 
 // M3 打断问答 —— 用户在某个打断点上打字问一句，Gemini Flash 扣着当前字幕流式作答。
 //
@@ -18,7 +20,7 @@ export const maxDuration = 300;
 
 const bodySchema = z.object({
   interruptId: z.string().uuid(),
-  question: z.string().trim().min(1, "先写一句想问的").max(2000),
+  question: z.string().trim().min(1, "err.needQuestion").max(2000),
 });
 
 const NDJSON_HEADERS = {
@@ -32,8 +34,9 @@ function line(payload: unknown): Uint8Array {
 }
 
 export async function POST(request: Request) {
+  const t = await getT();
   if (!supabaseConfigured) {
-    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+    return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   }
 
   const supabase = await createClient();
@@ -41,13 +44,13 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
   }
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error?.issues[0]?.message ?? "请求参数不合法" },
+      { error: tMaybeKey(t, parsed.error?.issues[0]?.message, "err.badRequest") },
       { status: 400 },
     );
   }
@@ -61,7 +64,7 @@ export async function POST(request: Request) {
     .eq("user_id", user.id)
     .maybeSingle();
   if (!interrupt) {
-    return NextResponse.json({ error: "找不到这个打断点" }, { status: 404 });
+    return NextResponse.json({ error: t("err.noInterruptPoint") }, { status: 404 });
   }
 
   // 内容的字幕
@@ -72,13 +75,13 @@ export async function POST(request: Request) {
     .eq("user_id", user.id)
     .maybeSingle();
   if (!srcRow) {
-    return NextResponse.json({ error: "找不到这条内容" }, { status: 404 });
+    return NextResponse.json({ error: t("err.noSource") }, { status: 404 });
   }
   const source = srcRow as SourceRow;
   const raw: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
   if (raw.length === 0) {
     return NextResponse.json(
-      { error: "这条内容还没有字幕，先生成字幕再问。" },
+      { error: t("err.noCaptionsAsk") },
       { status: 400 },
     );
   }
@@ -128,7 +131,7 @@ export async function POST(request: Request) {
         const message =
           e instanceof AskError
             ? e.message
-            : `回答时出错了：${e instanceof Error ? e.message.slice(0, 120) : String(e)}`;
+            : t("err.answerFailed", e instanceof Error ? e.message.slice(0, 120) : String(e));
         push({ type: "error", message });
       }
       controller.close();

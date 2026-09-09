@@ -4,6 +4,7 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 
 import { envLiveModel } from "@/lib/live/models";
+import { getT } from "@/lib/ui-lang";
 
 // M0.5 — 给浏览器发 Live API 的临时通行证（ephemeral token）。
 // D13 密钥纪律：真正的 GEMINI_API_KEY 只存在服务端环境变量，
@@ -11,8 +12,9 @@ import { envLiveModel } from "@/lib/live/models";
 // 请求体可带 { model } 指定模型（实验页下拉框），否则用 GEMINI_LIVE_MODEL / 默认值。
 
 export async function POST(request: Request) {
+  const t = await getT();
   if (!supabaseConfigured) {
-    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+    return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   }
 
   // 只给登录用户发票，防止别人白嫖额度
@@ -21,13 +23,13 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
   }
 
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "服务器还没配置 GEMINI_API_KEY（Vercel → Settings → Environment Variables）" },
+      { error: t("err.noGeminiKeyHint") },
       { status: 500 },
     );
   }
@@ -59,7 +61,7 @@ export async function POST(request: Request) {
     });
     if (!token.name) {
       return NextResponse.json(
-        { error: "Gemini 返回了空 token，请稍后重试" },
+        { error: t("err.emptyToken") },
         { status: 502 },
       );
     }
@@ -67,9 +69,9 @@ export async function POST(request: Request) {
   } catch (e) {
     const raw = e instanceof Error ? e.message : String(e);
     const friendly = /API key not valid|API_KEY_INVALID/i.test(raw)
-      ? "GEMINI_API_KEY 无效：去 aistudio.google.com 重新复制一遍，注意别带空格"
+      ? t("err.badGeminiKey")
       : /quota|RESOURCE_EXHAUSTED|rate/i.test(raw)
-        ? "Gemini 免费额度暂时用完了，等几分钟再试"
+        ? t("err.geminiQuota")
         : raw;
     return NextResponse.json({ error: friendly }, { status: 502 });
   }

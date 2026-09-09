@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { BackFrom } from "@/lib/nav";
+import { getT } from "@/lib/ui-lang";
 
 // M3.9 —— 右上角那个齿轮（创始人 2026-08-02：「设置应该占最底下的 tab，或者在右上角」）。
 //
@@ -9,14 +10,17 @@ import type { BackFrom } from "@/lib/nav";
 //
 // 带 `?from=` 是 D43 的规矩：从哪儿进去的，返回箭头就退回哪儿。
 
-const LABEL = "设置";
+// M3.9 片 c：改成 `async` server component 取文案 —— 它只是一个 `<Link>`，
+// 为了一句 aria 文字把它变成客户端组件、往每个页面多塞一份 JS 是不划算的。
+export async function SettingsLink({ from, sid }: { from: BackFrom; sid?: string }) {
+  const t = await getT();
+  const label = t("common.settings");
 
-export function SettingsLink({ from, sid }: { from: BackFrom; sid?: string }) {
   return (
     <Link
       href={sid ? `/settings?from=${from}&sid=${sid}` : `/settings?from=${from}`}
-      aria-label={LABEL}
-      title={LABEL}
+      aria-label={label}
+      title={label}
       className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
     >
       <svg viewBox="0 0 24 24" className="h-[19px] w-[19px]" aria-hidden focusable="false">

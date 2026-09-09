@@ -8,6 +8,8 @@ import { captionScriptFor } from "@/lib/zh-script";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
+import { getT } from "@/lib/ui-lang";
+import { tMaybeKey } from "@/lib/copy";
 
 // M3 Phase-2 长问答沉浸聊天 —— 每个(用户×视频)一条延续对话。
 //
@@ -37,21 +39,22 @@ function line(payload: unknown): Uint8Array {
 
 const postSchema = z.object({
   sourceId: z.string().uuid(),
-  question: z.string().trim().min(1, "先写一句想问的").max(4000),
+  question: z.string().trim().min(1, "err.needQuestion").max(4000),
   atS: z.number().min(0).max(24 * 3600),
 });
 
 // ── GET：进入时取历史 ──
 export async function GET(request: Request) {
-  if (!supabaseConfigured) return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  const t = await getT();
+  if (!supabaseConfigured) return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
 
   const sourceId = new URL(request.url).searchParams.get("sourceId");
-  if (!sourceId) return NextResponse.json({ error: "缺少 sourceId" }, { status: 400 });
+  if (!sourceId) return NextResponse.json({ error: t("err.missingSourceId") }, { status: 400 });
 
   const { data } = await supabase
     .from("chats")
@@ -70,17 +73,18 @@ export async function GET(request: Request) {
 
 // ── POST：问一轮 ──
 export async function POST(request: Request) {
-  if (!supabaseConfigured) return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  const t = await getT();
+  if (!supabaseConfigured) return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
 
   const parsed = postSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
-      { error: parsed.error?.issues[0]?.message ?? "请求参数不合法" },
+      { error: tMaybeKey(t, parsed.error?.issues[0]?.message, "err.badRequest") },
       { status: 400 },
     );
   }
@@ -93,11 +97,11 @@ export async function POST(request: Request) {
     .eq("id", sourceId)
     .eq("user_id", user.id)
     .maybeSingle();
-  if (!srcRow) return NextResponse.json({ error: "找不到这条内容" }, { status: 404 });
+  if (!srcRow) return NextResponse.json({ error: t("err.noSource") }, { status: 404 });
   const source = srcRow as SourceRow;
   const raw: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
   if (raw.length === 0) {
-    return NextResponse.json({ error: "这条内容还没有字幕，先生成字幕再聊。" }, { status: 400 });
+    return NextResponse.json({ error: t("err.noCaptionsChat") }, { status: 400 });
   }
 
   // 取/建这条视频的 chat 行
@@ -130,7 +134,7 @@ export async function POST(request: Request) {
       chat = data as ChatRow;
     }
   }
-  if (!chat) return NextResponse.json({ error: "建立对话失败，请重试" }, { status: 500 });
+  if (!chat) return NextResponse.json({ error: t("err.chatCreateFailed") }, { status: 500 });
 
   const chatRow = chat;
   const existing: ChatTurn[] = Array.isArray(chatRow.messages) ? chatRow.messages : [];
@@ -182,7 +186,7 @@ export async function POST(request: Request) {
         const message =
           e instanceof AskError
             ? e.message
-            : `回答时出错了：${e instanceof Error ? e.message.slice(0, 120) : String(e)}`;
+            : t("err.answerFailed", e instanceof Error ? e.message.slice(0, 120) : String(e));
         push({ type: "error", message });
       }
       controller.close();

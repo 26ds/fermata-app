@@ -1,6 +1,7 @@
 "use client";
 
 import { splitByPhrase, type PhraseItem } from "@/lib/phrases/types";
+import { useCopy } from "@/components/copy-provider";
 
 // M3.7 —— 「一行字幕里高亮一个词组 + 一个打勾」的公共零件（D39 + D40）。
 //
@@ -8,13 +9,6 @@ import { splitByPhrase, type PhraseItem } from "@/lib/phrases/types";
 // 各写一份必然走样（一处能勾一处不能、颜色对不上），所以抽出来。
 //
 // D42：这里不出现任何面向语言的文案 —— 它只管画，说什么由调用方给。
-
-const COPY = {
-  save: "收进词库",
-  unsave: "从词库去掉",
-  saveLine: "收下这一行标出来的",
-  saved: "已在词库里",
-};
 
 /**
  * 一行字幕的正文：高亮那一段做成可点的按钮（点 = 只收这一个，D40 的细粒度）。
@@ -35,6 +29,7 @@ export function PhraseText({
   className?: string;
   style?: React.CSSProperties;
 }) {
+  const t = useCopy();
   const { before, hit, after } = splitByPhrase(text, phrase);
   if (!phrase || !hit) {
     return (
@@ -57,7 +52,7 @@ export function PhraseText({
             : undefined
         }
         aria-pressed={saved}
-        aria-label={`${saved ? COPY.unsave : COPY.save}：${phrase.text}`}
+        aria-label={`${saved ? t("phrase.unsave") : t("phrase.save")}：${phrase.text}`}
         title={phrase.gloss}
         // pointer-events-auto：字幕行整行是"点了跳到这一句"，那层覆盖按钮在底下；
         // 词组和 ✓ 必须自己接住点击，别把"我想收这个词"变成"跳走了"
@@ -87,6 +82,7 @@ export function PhraseCheck({
   saved: boolean;
   onToggle?: (phrase: PhraseItem) => void;
 }) {
+  const t = useCopy();
   if (!phrase) return null;
   return (
     <button
@@ -100,7 +96,7 @@ export function PhraseCheck({
           : undefined
       }
       aria-pressed={saved}
-      aria-label={saved ? COPY.saved : COPY.saveLine}
+      aria-label={saved ? t("phrase.saved") : t("phrase.saveLine")}
       className={`pointer-events-auto relative z-10 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border text-xs transition-colors ${
         saved
           ? "border-teal-400 bg-teal-400 text-teal-950"

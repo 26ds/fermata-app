@@ -4,6 +4,8 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { BottomNav } from "@/components/bottom-nav";
 import { SettingsLink } from "@/components/settings-link";
+import { LangToggle } from "@/components/lang-toggle";
+import { getT } from "@/lib/ui-lang";
 import { SetupNotice } from "@/components/setup-notice";
 import { FoldersPlaceholder, HistoryList, type HistoryItem } from "@/components/history-list";
 
@@ -14,18 +16,8 @@ import { FoldersPlaceholder, HistoryList, type HistoryItem } from "@/components/
 // 两页各管各的组织方式，互相污染只会让人搞不清自己在看哪张表。
 
 // D42：文案集中在这里，M3.9 抽语言表时只动这一处
-const COPY = {
-  eyebrow: "history / library",
-  title: "你看过的，都在这儿。",
-  lede: "停下来想过的每一刻、存下来的每一个词，都跟着它那条内容。",
-  atomsTitle: "知识原子",
-  atomsHint: "看的时候存下来的词和概念，会长在这里",
-  tabByDate: "按日期",
-  tabFolders: "智能分类",
-  migrationNotice: "「什么时候看的」还没启用：去 Supabase → SQL Editor 跑一次",
-  migrationFile: "0007_watch_history.sql",
-  migrationTail: "。跑之前，下面这些会全落在「时间不详」一组，其余功能不受影响。",
-};
+// 迁移文件名不是文案，是一个要照抄进 SQL Editor 的字符串 —— 不进文案表
+const MIGRATION_FILE = "0007_watch_history.sql";
 
 // 迁移 0007 之前就有的列 —— 两条降级路径都带得上
 const BASE_COLUMNS =
@@ -37,6 +29,7 @@ export default async function LibraryPage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   if (!supabaseConfigured) return <SetupNotice />;
+  const t = await getT();
 
   // Next 16：searchParams 是 Promise，必须 await
   const { tab } = await searchParams;
@@ -110,15 +103,17 @@ export default async function LibraryPage({
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-64 opacity-60" />
       <header className="relative flex items-center justify-between px-5 pb-4 pt-[max(1.25rem,env(safe-area-inset-top))] sm:px-8">
-        <Link href="/" className="group flex min-h-11 items-center gap-2.5 text-sm text-ink-300 hover:text-ink-100" aria-label="Fermata 首页">
+        <Link href="/" className="group flex min-h-11 items-center gap-2.5 text-sm text-ink-300 hover:text-ink-100" aria-label={t("common.home")}>
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-teal-400 text-lg leading-none text-teal-950" aria-hidden>𝄐</span>
           <span className="text-sm font-semibold tracking-[0.12em]">FERMATA</span>
         </Link>
         <div className="flex items-center gap-3">
           <div className="text-right">
-            <p className="eyebrow text-teal-300">{COPY.eyebrow}</p>
-            <p className="mt-1 text-xs text-ink-500">历史与知识库</p>
+            <p className="eyebrow text-teal-300">history / library</p>
+            <p className="mt-1 text-xs text-ink-500">{t("library.name")}</p>
           </div>
+          {/* 创始人 2026-09-09：语言开关每个界面都要有 */}
+          <LangToggle />
           <SettingsLink from="library" />
         </div>
       </header>
@@ -126,9 +121,9 @@ export default async function LibraryPage({
       <main className="page-enter pb-nav relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 sm:px-8">
         <section className="pt-4">
           <h1 className="display-serif text-[2rem] leading-tight tracking-[-0.04em] text-ink-100">
-            {COPY.title}
+            {t("library.title")}
           </h1>
-          <p className="mt-3 max-w-md text-sm leading-7 text-ink-300">{COPY.lede}</p>
+          <p className="mt-3 max-w-md text-sm leading-7 text-ink-300">{t("library.lede")}</p>
         </section>
 
         {/* 从首页搬过来的「知识原子」（D37）。攒下来的东西该和"看过什么"待在一起。
@@ -138,11 +133,11 @@ export default async function LibraryPage({
         <Link
           href="/library/vocab"
           className="mt-6 flex items-center justify-between gap-3 rounded-2xl border border-ink-500/50 bg-ink-700 px-4 py-3 transition-colors hover:border-teal-400/60"
-          aria-label={`${COPY.atomsTitle}：${atomCount} 条`}
+          aria-label={t("library.atomsAria", atomCount)}
         >
           <span className="min-w-0">
-            <span className="block text-sm font-semibold text-ink-100">{COPY.atomsTitle}</span>
-            <span className="mt-0.5 block truncate text-xs text-ink-500">{COPY.atomsHint}</span>
+            <span className="block text-sm font-semibold text-ink-100">{t("library.atomsTitle")}</span>
+            <span className="mt-0.5 block truncate text-xs text-ink-500">{t("library.atomsHint")}</span>
           </span>
           <span className="flex shrink-0 items-center gap-2">
             <span className="rounded-full border border-ink-500/50 px-2.5 py-1 text-xs tabular-nums text-ink-300">
@@ -164,7 +159,7 @@ export default async function LibraryPage({
                   showFolders ? "text-ink-500 hover:text-ink-100" : "bg-ink-700 text-teal-300"
                 }`}
               >
-                {COPY.tabByDate}
+                {t("library.tabByDate")}
               </Link>
               <Link
                 href="/library?tab=folders"
@@ -173,7 +168,7 @@ export default async function LibraryPage({
                   showFolders ? "bg-ink-700 text-teal-300" : "text-ink-500 hover:text-ink-100"
                 }`}
               >
-                {COPY.tabFolders}
+                {t("library.tabFolders")}
               </Link>
             </div>
             <span className="rounded-full border border-ink-500/50 px-2.5 py-1 text-xs tabular-nums text-ink-300">
@@ -183,9 +178,9 @@ export default async function LibraryPage({
 
           {!historyEnabled && (
             <p className="mt-3 rounded-xl border border-ink-500/50 px-3 py-2 text-xs leading-5 text-ink-300">
-              {COPY.migrationNotice}
-              <code className="text-ink-100"> {COPY.migrationFile}</code>
-              {COPY.migrationTail}
+              {t("library.migrationNotice")}
+              <code className="text-ink-100"> {MIGRATION_FILE}</code>
+              {t("library.migrationTail")}
             </p>
           )}
 

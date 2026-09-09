@@ -6,6 +6,7 @@ import { putCachedTranscript } from "@/lib/transcript/cache";
 import { getLangPrefs } from "@/lib/settings";
 import { conformSegments } from "@/lib/zh-convert";
 import { captionScriptFor } from "@/lib/zh-script";
+import { getT } from "@/lib/ui-lang";
 
 // M1a — 单条内容源的更新与删除。
 // PATCH：回写真实时长（oEmbed 给不了，只有播放器就绪后才知道）与"看到第几秒"。
@@ -33,7 +34,7 @@ const patchSchema = z
     countsAsNewWatch: z.boolean().optional(),
   })
   .refine((v) => Object.values(v).some((x) => x !== undefined), {
-    message: "没有要更新的字段",
+    message: "err.nothingToUpdate",
   });
 
 async function requireUser() {
@@ -48,8 +49,9 @@ export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const t = await getT();
   if (!supabaseConfigured) {
-    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+    return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   }
 
   // Next 16：params 是 Promise，必须 await（同步访问已被彻底移除）
@@ -57,7 +59,7 @@ export async function PATCH(
 
   const { supabase, user } = await requireUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
   }
 
   let patch: {
@@ -73,7 +75,7 @@ export async function PATCH(
   try {
     const result = patchSchema.safeParse(await request.json());
     if (!result.success) {
-      return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
+      return NextResponse.json({ error: t("err.badRequest") }, { status: 400 });
     }
     patch = {};
     watched = result.data.watched === true;
@@ -98,7 +100,7 @@ export async function PATCH(
       patch.transcript_status = "ready";
     }
   } catch {
-    return NextResponse.json({ error: "请求格式不对" }, { status: 400 });
+    return NextResponse.json({ error: t("err.badFormat") }, { status: 400 });
   }
 
   // RLS 已经把范围锁死在本人行上，这里再显式带 user_id 是双保险
@@ -169,15 +171,16 @@ export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const t = await getT();
   if (!supabaseConfigured) {
-    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+    return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   }
 
   const { id } = await params;
 
   const { supabase, user } = await requireUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
   }
 
   // 外键顺序不能乱，而且有一条原则：删内容不能连累知识。

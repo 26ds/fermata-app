@@ -76,7 +76,7 @@ function parseNumbered(raw: string, valid: Set<number>): Map<number, string> {
 
 function clientFor(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new TranslateError("服务器还没配置 GEMINI_API_KEY，翻译暂时不可用。");
+  if (!apiKey) throw new TranslateError("err.noGeminiKeyTranslate");
   return new GoogleGenAI({ apiKey });
 }
 
@@ -154,7 +154,7 @@ export async function translateSegments({
   const name = langName(targetLang);
   const all: TranslatedSegment[] = segments.map((s, i) => ({ i, start: s.start, text: s.text }));
   const total = all.length;
-  if (total === 0) throw new TranslateError("这条内容还没有字幕，先生成字幕再翻译。");
+  if (total === 0) throw new TranslateError("err.noCaptionsTranslate");
 
   const have = new Set(existing.map((e) => e.i));
   const results: TranslatedSegment[] = existing.filter((e) => e.i < total);

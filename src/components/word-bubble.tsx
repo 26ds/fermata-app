@@ -3,6 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Lookup } from "@/lib/senses/types";
+import { useCopy } from "@/components/copy-provider";
 
 // M3.11 悬浮词卡 —— 从那个词上"长出来"的玻璃对话框（创始人 2026-08-04 指定的形状）。
 //
@@ -14,16 +15,6 @@ import type { Lookup } from "@/lib/senses/types";
 // 用 `absolute` 会被它裁掉半个气泡。fixed + `getBoundingClientRect()` 才跑得出容器。
 //
 // D18：气泡只在字幕/面板那一带弹，**绝不许盖住上方的视频画面**（下面有硬夹取）。
-
-/** D42：文案集中在顶部，M3.9 抽语言表时只动这一处 */
-const COPY = {
-  loading: "查这个词…",
-  failed: "没查到",
-  retry: "再试一次",
-  otherSenses: "其他常用意思",
-  noOther: "没有别的常用意思",
-  close: "关掉",
-};
 
 /** 气泡离屏幕左右边至少留这么多，375px 上才不会贴边 */
 const EDGE = 8;
@@ -59,6 +50,7 @@ export function WordBubble({
   onPointerEnter?: () => void;
   onPointerLeave?: () => void;
 }) {
+  const t = useCopy();
   const boxRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; below: boolean; tail: number } | null>(
     null,
@@ -172,17 +164,17 @@ export function WordBubble({
         </p>
 
         {loading && !data ? (
-          <p className="mt-1 text-xs leading-5 text-ink-500">{COPY.loading}</p>
+          <p className="mt-1 text-xs leading-5 text-ink-500">{t("bubble.loading")}</p>
         ) : error && !data ? (
           <p className="mt-1 flex items-center gap-2 text-xs leading-5 text-ink-500">
-            <span>{error || COPY.failed}</span>
+            <span>{error || t("bubble.failed")}</span>
             {onRetry && (
               <button
                 type="button"
                 onClick={onRetry}
                 className="min-h-7 shrink-0 rounded-lg border border-teal-400/50 px-2 text-[0.66rem] text-teal-300"
               >
-                {COPY.retry}
+                {t("bubble.retry")}
               </button>
             )}
           </p>
@@ -195,7 +187,7 @@ export function WordBubble({
 
             <div className="mt-2 border-t border-teal-400/20 pt-1.5">
               <p className="text-[0.6rem] uppercase tracking-wider text-teal-400/70">
-                {COPY.otherSenses}
+                {t("bubble.otherSenses")}
               </p>
               {senses.length > 0 ? (
                 <ul className="mt-1 flex flex-col gap-1">
@@ -213,10 +205,10 @@ export function WordBubble({
                 <p className="mt-1 flex items-center gap-2 text-[0.68rem] leading-4 text-ink-500">
                   <span>
                     {loading
-                      ? COPY.loading
+                      ? t("bubble.loading")
                       : data?.sensesStatus === "failed"
-                        ? error || COPY.failed
-                        : COPY.noOther}
+                        ? error || t("bubble.failed")
+                        : t("bubble.noOther")}
                   </span>
                   {data?.sensesStatus === "failed" && onRetry && (
                     <button
@@ -224,7 +216,7 @@ export function WordBubble({
                       onClick={onRetry}
                       className="min-h-6 shrink-0 rounded-lg border border-teal-400/50 px-1.5 text-[0.62rem] text-teal-300"
                     >
-                      {COPY.retry}
+                      {t("bubble.retry")}
                     </button>
                   )}
                 </p>
@@ -237,7 +229,7 @@ export function WordBubble({
         <button
           type="button"
           onClick={onClose}
-          aria-label={COPY.close}
+          aria-label={t("bubble.close")}
           className="absolute -right-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full text-xs text-ink-500 transition-colors hover:text-teal-300"
         >
           ×
