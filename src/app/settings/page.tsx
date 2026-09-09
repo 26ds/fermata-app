@@ -1,11 +1,13 @@
 import { redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
+import { AccountSettings } from "@/components/account-settings";
 import { LangSettings } from "@/components/lang-settings";
 import { SettingsBack } from "@/components/settings-back";
 import { SetupNotice } from "@/components/setup-notice";
 import { getLangPrefs } from "@/lib/settings";
 import { settingsBackTarget } from "@/lib/nav";
+import { enabledProviders } from "@/lib/supabase/providers";
 import { LangToggle } from "@/components/lang-toggle";
 import { getT } from "@/lib/ui-lang";
 
@@ -15,7 +17,8 @@ import { getT } from "@/lib/ui-lang";
 // 塞在 `/library/vocab` 顶上（M3.7 的权宜之计），谁也想不到去词库页改母语。
 // 母语被自动猜错这件事之所以能一路瞒到 2026-08-01 才被发现，这是原因之一。
 //
-// 现在只有「语言」一块。别急着往里堆东西 —— 设置页最容易长成一个杂物间。
+// 两块：「语言」和「账号」（账号是 2026-09-09 加的，创始人要「切换账号 / Google 登录」）。
+// 别急着往里堆第三块 —— 设置页最容易长成一个杂物间。
 
 export default async function SettingsPage({
   searchParams,
@@ -36,6 +39,9 @@ export default async function SettingsPage({
   if (!user) redirect("/login");
 
   const prefs = await getLangPrefs(supabase, user.id);
+  // 后台开了 Google 才渲染那颗按钮（现查 GoTrue，不靠环境变量、不用重新部署）——
+  // 和登录页同一个判据，**两处必须一致**：登录页有、设置页没有会让人以为坏了
+  const { google } = await enabledProviders();
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
@@ -58,8 +64,12 @@ export default async function SettingsPage({
           <p className="mt-2 max-w-md text-sm leading-6 text-ink-300">{t("settings.lede")}</p>
         </section>
 
-        <div className="mt-5">
+        <div className="mt-5 flex flex-col gap-4">
           <LangSettings prefs={prefs} />
+          {/* 创始人 2026-09-09：「在右上角设置里面添加切换账号 / Google 登录功能」。
+              排在语言下面，因为上面那句 lede 说的是语言 —— 页面的第一段话
+              和第一块内容要对得上 */}
+          <AccountSettings email={user.email ?? ""} showGoogle={google} />
         </div>
       </main>
     </div>
