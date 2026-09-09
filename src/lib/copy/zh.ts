@@ -36,11 +36,6 @@ export const zh = {
   "settings.lang.uiFallback": (native: string, actual: string) =>
     `界面还没有「${native}」的文案，所以现在显示的是${actual}。`,
   "settings.lang.uiFixed": (label: string) => `固定用${label}，不跟母语变。`,
-  // ⏳ **临时的，M3.9 片 f 做完要连同 en.ts 那条一起删掉。**
-  // 开关现在只改得动两块（这张卡 + 母语提示），其余界面还硬编码着中文。
-  // 片 a 拒绝提前摆这个开关的理由是「选了没反应就是骗人」——
-  // 「选了只有一部分有反应」是同一条线上浅一格，**写出来才不算骗**。
-  "settings.lang.uiPartial": "界面正在逐页搬家 —— 现在只有这一块和母语提示会跟着变。",
 
   // ── 观看页 · 播放控制条的折叠开关（创始人 2026-09-06）──────────────────
   // 只在宽屏出现。折叠之后那张卡（状态 + 时间 + 倍速 + ±N 秒）整个收起来，
@@ -633,4 +628,28 @@ export const zh = {
   "err.tooLong": "这条内容超过 4 小时，暂时不自动转写 —— 可以手动粘贴字幕。",
   "err.providerFellBack": (name: string) => `${name} 没成，换下一个`,
   "err.compactFailed": "浓缩这次对话时出错了，稍后再试。",
+  "skeleton.recent": "最近导入",
+  "skeleton.player": "播放器",
+  "skeleton.preparingPlayer": "正在准备播放器…",
+
+  // ── 站点元信息（浏览器标签 / PWA 安装名）──────────────────────────────
+  "meta.description": "视频时代的主动学习层 — 停留之处即学习之处",
+  "meta.descriptionShort": "视频时代的主动学习层",
+
+  // ── 播客播放器 ──────────────────────────────────────────────────────────
+  "podcast.untitled": "未命名节目",
+  "podcast.play": "播放",
+  "podcast.pause": "暂停",
+  "podcast.progress": "播放进度",
+
+  // ── 导入播客时说得清的那几种失败（`lib/sources/podcast.ts` 抛 key）──────
+  "podcast.errFetch": (code: number) => `这条链接打不开（${code}），检查一下再试`,
+  "podcast.errNotFeed": "这条链接不是播客订阅源（RSS）。在播客 App 里找「复制 RSS 地址」，或直接贴一条 .mp3 链接。",
+  "podcast.errNoAudio": "这个订阅源里没找到可播放的音频（没有 enclosure）",
+  "podcast.errTooOld": "这一期太旧了，苹果的接口翻不到（它只回最近两百期）。贴这档节目的 RSS 地址就能导入。",
+  "podcast.errAppleLookup": "这条 Apple Podcasts 链接查不到内容。确认一下链接是不是完整的，或者贴这档节目的 RSS 地址。",
+  "podcast.errNoEpisode": "这个页面里没找到能播的单集。如果它是节目主页，请打开**某一期**再复制链接；或者贴这档节目的 RSS 地址。",
+
+  // ── 翻译服务 ────────────────────────────────────────────────────────────
+  "err.noGeminiKeyTranslate": "服务器还没配置 GEMINI_API_KEY，翻译暂时不可用。",
 } as const;

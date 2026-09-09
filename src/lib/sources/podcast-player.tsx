@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mmss } from "@/lib/time";
 import type { PlayerProps } from "./types";
+import { useCopy } from "@/components/copy-provider";
 
 // M1d — 播客播放器。一个原生 <audio> 包一层 PlayerHandle，上层完全无感。
 //
@@ -18,6 +19,7 @@ import type { PlayerProps } from "./types";
 const SKIP_S = 15;
 
 export function PodcastPlayer({ source, onReady, onPlayingChange, onPause }: PlayerProps) {
+  const t = useCopy();
   const audioRef = useRef<HTMLAudioElement>(null);
   const seekRef = useRef<HTMLInputElement>(null);
   const clockRef = useRef<HTMLSpanElement>(null);
@@ -136,7 +138,7 @@ export function PodcastPlayer({ source, onReady, onPlayingChange, onPause }: Pla
     if (typeof navigator === "undefined" || !("mediaSession" in navigator)) return;
     const ms = navigator.mediaSession;
     ms.metadata = new MediaMetadata({
-      title: source.title ?? "未命名节目",
+      title: source.title ?? t("podcast.untitled"),
       artist: "Fermata",
     });
     const bindings: [MediaSessionAction, MediaSessionActionHandler][] = [
@@ -158,7 +160,8 @@ export function PodcastPlayer({ source, onReady, onPlayingChange, onPause }: Pla
         } catch {}
       }
     };
-  }, [source.title, seekBy]);
+    // `t` 进依赖：没有标题时锁屏上显示的是「未命名节目」，那句话得跟着界面语言走
+  }, [source.title, seekBy, t]);
 
   if (!audioUrl) {
     return (
@@ -176,7 +179,7 @@ export function PodcastPlayer({ source, onReady, onPlayingChange, onPause }: Pla
         <button
           type="button"
           onClick={toggle}
-          aria-label={playing ? "暂停" : "播放"}
+          aria-label={playing ? t("podcast.pause") : t("podcast.play")}
           className="teal-halo flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-teal-400 text-xl text-teal-950"
         >
           <span aria-hidden>{playing ? "❚❚" : "▶"}</span>
@@ -195,7 +198,7 @@ export function PodcastPlayer({ source, onReady, onPlayingChange, onPause }: Pla
         max={durationS || 0}
         step={1}
         defaultValue={0}
-        aria-label="播放进度"
+        aria-label={t("podcast.progress")}
         disabled={!durationS}
         onPointerDown={() => {
           draggingRef.current = true;

@@ -162,7 +162,11 @@ async function get(url: string, accept: string): Promise<Response> {
     headers: { "user-agent": "Fermata/1.0 (+podcast client)", accept },
   });
   if (!res.ok) {
-    throw new SourceResolveError(`这条链接打不开（${res.status}），检查一下再试`);
+    throw new SourceResolveError(
+      `这条链接打不开（${res.status}），检查一下再试`,
+      "podcast.errFetch",
+      res.status,
+    );
   }
   return res;
 }
@@ -175,13 +179,17 @@ async function episodeFromFeed(feedUrl: string, xml: string): Promise<ResolvedMe
   } catch {
     throw new SourceResolveError(
       "这条链接不是播客订阅源（RSS）。在播客 App 里找「复制 RSS 地址」，或直接贴一条 .mp3 链接。",
+      "podcast.errNotFeed",
     );
   }
 
   const item = feed.items?.[0];
   const audioRaw = item?.enclosure?.url;
   if (!item || !audioRaw) {
-    throw new SourceResolveError("这个订阅源里没找到可播放的音频（没有 enclosure）");
+    throw new SourceResolveError(
+      "这个订阅源里没找到可播放的音频（没有 enclosure）",
+      "podcast.errNoAudio",
+    );
   }
   const audio = upgradeToHttps(audioRaw);
   // guid 缺失就退回音频直链当身份 —— 同一集重复导入仍能被去重
@@ -261,12 +269,14 @@ export const podcastAdapter: SourceAdapter = {
       if (tooOld) {
         throw new SourceResolveError(
           "这一期太旧了，苹果的接口翻不到（它只回最近两百期）。贴这档节目的 RSS 地址就能导入。",
+          "podcast.errTooOld",
         );
       }
       // 贴的是节目主页（链接里没有 ?i=）→ 按老规矩取最新一集
       if (feedUrl) return fetchFeed(feedUrl);
       throw new SourceResolveError(
         "这条 Apple Podcasts 链接查不到内容。确认一下链接是不是完整的，或者贴这档节目的 RSS 地址。",
+        "podcast.errAppleLookup",
       );
     }
 
@@ -303,6 +313,7 @@ export const podcastAdapter: SourceAdapter = {
 
     throw new SourceResolveError(
       "这个页面里没找到能播的单集。如果它是节目主页，请打开**某一期**再复制链接；或者贴这档节目的 RSS 地址。",
+      "podcast.errNoEpisode",
     );
   },
 

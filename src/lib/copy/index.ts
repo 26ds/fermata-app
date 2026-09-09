@@ -131,3 +131,25 @@ export function tMaybeKey(t: Translate, message: string | null | undefined, fall
   if (isCopyKey(message)) return t(message);
   return message?.trim() ? message : t(fallback);
 }
+
+/**
+ * 用一个**运行时才知道**的 key + 一串运行时参数取文案（M3.9 片 c）。
+ *
+ * 正常情况下 `t("a.b", x)` 的参数是**类型推出来的**（见 keys.ts 的 `CopyArgs`），
+ * 那是这张表最值钱的一道闸门，别绕开它。这个函数是给一种绕不开的场合用的：
+ * 服务端库（如 `lib/sources/podcast.ts`）抛错时带一个 key 上来，
+ * 路由拿到的是 `string` + `unknown[]`，**编译期无从对齐**。
+ *
+ * 所以那个 `as` 就集中在这一处、写明白理由，而不是散在每个调用点。
+ * key 不认识就返回 null，由调用方决定兜底 —— **绝不把 `podcast.errFetch`
+ * 这种东西显示给人看**。
+ */
+export function tDynamic(
+  lang: string | null | undefined,
+  key: string | null | undefined,
+  args: readonly unknown[] = [],
+): string | null {
+  if (!isCopyKey(key)) return null;
+  const v = getCopy(lang)[key];
+  return typeof v === "function" ? (v as (...a: unknown[]) => string)(...args) : (v as string);
+}

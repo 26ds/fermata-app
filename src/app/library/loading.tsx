@@ -1,6 +1,9 @@
+import { getT } from "@/lib/ui-lang";
+
 // 历史与知识库的骨架 —— 点底部 tab 是"马上换页"，不是"卡一秒再换页"。
 // 骨架的块要和真实页面对得上（缩略图 + 两行文字），否则数据到位时会跳一下。
-export default function LibraryLoading() {
+export default async function LibraryLoading() {
+  const t = await getT();
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden">
       <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-64 opacity-60" />
@@ -11,7 +14,7 @@ export default function LibraryLoading() {
         </div>
         <div className="text-right">
           <p className="eyebrow text-teal-300">history / library</p>
-          <p className="mt-1 text-xs text-ink-500">历史与知识库</p>
+          <p className="mt-1 text-xs text-ink-500">{t("library.name")}</p>
         </div>
       </header>
 

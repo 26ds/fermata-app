@@ -33,9 +33,6 @@ export const en = {
   "settings.lang.uiFallback": (native: string, actual: string) =>
     `There's no interface copy in ${native} yet, so you're seeing ${actual}.`,
   "settings.lang.uiFixed": (label: string) => `Fixed to ${label}, regardless of your native language.`,
-  // ⏳ 临时的，M3.9 片 f 做完要连同 zh.ts 那条一起删掉
-  "settings.lang.uiPartial":
-    "The interface is still being moved over page by page — for now only this card and the native-language notice follow this setting.",
 
   // ── Watch page · collapsible playback controls (2026-09-06) ────────────
   "watch.controls.label": "Playback controls",
@@ -614,4 +611,32 @@ export const en = {
     "This item is over 4 hours long, so it isn't auto-transcribed for now — you can paste subtitles in by hand.",
   "err.providerFellBack": (name: string) => `${name} didn't work — trying the next one`,
   "err.compactFailed": "Something went wrong condensing this conversation. Try again shortly.",
+  "skeleton.recent": "Recently added",
+  "skeleton.player": "Player",
+  "skeleton.preparingPlayer": "Getting the player ready…",
+
+  // ── Site metadata (browser tab / PWA install name) ─────────────────────
+  "meta.description": "An active learning layer for the age of video — where you pause is where you learn",
+  "meta.descriptionShort": "An active learning layer for the age of video",
+
+  // ── Podcast player ─────────────────────────────────────────────────────
+  "podcast.untitled": "Untitled show",
+  "podcast.play": "Play",
+  "podcast.pause": "Pause",
+  "podcast.progress": "Playback progress",
+
+  // ── Podcast import failures we can actually name ───────────────────────
+  "podcast.errFetch": (code: number) => `That link wouldn't open (${code}). Double-check it and try again.`,
+  "podcast.errNotFeed":
+    "That link isn't a podcast feed (RSS). In your podcast app, look for “Copy RSS address” — or paste a direct .mp3 link.",
+  "podcast.errNoAudio": "No playable audio in that feed (no enclosure)",
+  "podcast.errTooOld":
+    "That episode is too old for Apple's API to reach (it only returns the most recent two hundred). Paste the show's RSS address and it'll import.",
+  "podcast.errAppleLookup":
+    "Nothing came back for that Apple Podcasts link. Check that the link is complete, or paste the show's RSS address.",
+  "podcast.errNoEpisode":
+    "No playable episode on that page. If it's a show's home page, open **one episode** and copy that link instead — or paste the show's RSS address.",
+
+  // ── Translation service ────────────────────────────────────────────────
+  "err.noGeminiKeyTranslate": "The server doesn't have GEMINI_API_KEY configured, so translation is unavailable.",
 } as const satisfies CopyDict;

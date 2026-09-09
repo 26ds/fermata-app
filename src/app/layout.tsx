@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import { CopyProvider } from "@/components/copy-provider";
-import { getUiLang } from "@/lib/ui-lang";
+import { getT, getUiLang } from "@/lib/ui-lang";
 import "./globals.css";
 
 // 字体三件套（next/font 会在构建时把字体文件自包含进来，运行时零外部请求）：
@@ -26,16 +26,22 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  title: "Fermata",
-  description: "视频时代的主动学习层 — 停留之处即学习之处",
-  manifest: "/manifest.webmanifest",
-  appleWebApp: {
-    capable: true,
+// ⚠️ `metadata` 是**模块级常量**，Next 在渲染之前就要它，那时拿不到 cookie ——
+// 所以这里改用 `generateMetadata()`（异步，读得到界面语言）。
+// 浏览器标签和分享卡片上的那句话也该是读得懂的语言。
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getT();
+  return {
     title: "Fermata",
-    statusBarStyle: "black-translucent",
-  },
-};
+    description: t("meta.description"),
+    manifest: "/manifest.webmanifest",
+    appleWebApp: {
+      capable: true,
+      title: "Fermata",
+      statusBarStyle: "black-translucent",
+    },
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: "#2c2c2a",

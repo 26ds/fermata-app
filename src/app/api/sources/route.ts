@@ -4,8 +4,8 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { detectAdapter } from "@/lib/sources/registry";
 import { SourceResolveError } from "@/lib/sources/types";
-import { getT } from "@/lib/ui-lang";
-import { tMaybeKey } from "@/lib/copy";
+import { getT, getUiLang } from "@/lib/ui-lang";
+import { tDynamic, tMaybeKey } from "@/lib/copy";
 
 // M1a — 导入一条内容源。只存指针（kind + external_id + url），永不下载媒体（D3/§10）。
 
@@ -75,7 +75,10 @@ export async function POST(request: Request) {
   } catch (e) {
     // 说得清原因的（不是 feed、里面没音频…）直接把话讲给用户；其余当上游抽风
     if (e instanceof SourceResolveError) {
-      return NextResponse.json({ error: e.message }, { status: 400 });
+      // 这一层带着文案 key 上来（库拿不到用户语言，路由拿得到）。
+      // 没带 key 的老分支就落回它自己的 message —— 不会露出 key
+      const text = tDynamic(await getUiLang(), e.copyKey, e.copyArgs) ?? e.message;
+      return NextResponse.json({ error: text }, { status: 400 });
     }
     return NextResponse.json({ error: t("err.upstreamTimeout") }, { status: 502 });
   }

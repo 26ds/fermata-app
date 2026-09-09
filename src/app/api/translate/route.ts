@@ -13,6 +13,7 @@ import { dominantScript, mightBeSameLang, resolveContentLang } from "@/lib/text-
 import { conformSegments, scriptOfText } from "@/lib/zh-convert";
 import { displayedHanScript, hanScriptOf } from "@/lib/zh-script";
 import { getT } from "@/lib/ui-lang";
+import { tMaybeKey } from "@/lib/copy";
 
 // M2.9 双语字幕 —— 把一条已有字幕翻成目标语言的唯一入口。
 //
@@ -249,7 +250,9 @@ export async function POST(request: Request) {
         // 该讲给用户听的原因（额度/限流/没字幕）→ 原样告诉他；其它异常也说人话
         const message =
           e instanceof TranslateError
-            ? e.message
+            // TranslateError 的 message 挂的是文案 key（那一层是纯服务端库，
+            // 拿不到用户语言）。不是 key 的就原样奉还
+            ? tMaybeKey(t, e.message, "err.translateFailed" as never)
             : t("err.translateFailed", e instanceof Error ? e.message.slice(0, 120) : String(e));
         push({ type: "error", message });
       }
