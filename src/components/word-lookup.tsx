@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { WordBubble, type BubbleAnchor } from "@/components/word-bubble";
 import type { Lookup } from "@/lib/senses/types";
+import { useCopy } from "@/components/copy-provider";
 
 // M3.11 —— 悬浮词卡的那一份状态。**全页只有一份**（性能红线）：
 // 字幕列表每 250ms 就跟着当前行重渲染一次，要是每一行各揣一个气泡 state，
@@ -19,6 +20,7 @@ export function useWordLookup({
   /** 这个词对应哪条 atom（阴影词一定有）。语境意思就存在那条上，白拿 */
   atomIdOf: (term: string) => string | undefined;
 }) {
+  const t = useCopy();
   const [anchor, setAnchor] = useState<BubbleAnchor | null>(null);
   const [data, setData] = useState<Lookup | null>(null);
   const [loading, setLoading] = useState(false);
@@ -65,7 +67,7 @@ export function useWordLookup({
         });
         const body = await res.json().catch(() => ({}));
         if (seq !== reqRef.current) return; // 早换词了，这一包已经过期
-        if (!res.ok) throw new Error(typeof body?.error === "string" ? body.error : "没查到");
+        if (!res.ok) throw new Error(typeof body?.error === "string" ? body.error : t("bubble.failed"));
         const next: Lookup = {
           term,
           context: body.context ?? undefined,
@@ -79,12 +81,13 @@ export function useWordLookup({
         if (next.sensesStatus === "failed" && typeof body.error === "string") setError(body.error);
       } catch (e) {
         if (seq !== reqRef.current) return;
-        setError(e instanceof Error ? e.message : "没查到");
+        setError(e instanceof Error ? e.message : t("bubble.failed"));
       } finally {
         if (seq === reqRef.current) setLoading(false);
       }
     },
-    [sourceId, atomIdOf],
+    // `t` 进依赖：查不到时那句话要跟着界面语言走
+    [sourceId, atomIdOf, t],
   );
 
   /** 悬浮 / 长按到了一个阴影词上 */

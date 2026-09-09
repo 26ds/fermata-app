@@ -258,4 +258,45 @@ export const zh = {
   "vlist.glossRetry": "再试一次",
   "vlist.glossBusy": "取解释中…",
   "vlist.glossFailed": "还是没取到，等会儿再试",
+
+  // ── 播放控制条（倍速、±N 秒）────────────────────────────────────────────
+  "play.back": (n: number) => `后退 ${n} 秒`,
+  "play.forward": (n: number) => `前进 ${n} 秒`,
+  "play.stepChip": (n: number) => `跳 ${n} 秒`,
+  "play.stepMenu": "改成一跳几秒",
+  "play.rateMenu": "改播放倍速",
+  "play.stepHint": "按一下箭头跳多少秒",
+  "play.rateHint": "播放速度（听不清就慢下来）",
+  "play.notStarted": "先点播放，这两颗才跳得动",
+
+  // ── 捕获点那一条（点点条）──────────────────────────────────────────────
+  "dots.next": "跳到下一个捕获点",
+  "dots.prev": "跳到上一个捕获点",
+  "dots.deleteFailed": "没删掉，请重试",
+  "dots.empty": "播到卡住的地方，点一下悬浮球 —— 这里会留下一个点，随时点回去。",
+  "dots.loading": (n: number) => `读取时长中，马上就能显示这 ${n} 个点。`,
+  "dots.clusterAria": (time: string, n: number) => `${time} 附近的 ${n} 个捕获点，展开选择`,
+  "dots.jumpAria": (time: string) => `跳回 ${time}`,
+  "dots.crowded": (n: number) => `这里挤了 ${n} 个点，挑一个：`,
+  "dots.jumpHere": "跳回这里",
+  "dots.deleteAria": (time: string) => `删除 ${time} 这个点`,
+
+  // ── 悬浮捕获球 ──────────────────────────────────────────────────────────
+  "orb.immersive": "沉浸聊天：长按收起",
+  "orb.ready": "捕获球：轻点记这一刻，长按进入沉浸聊天",
+  "orb.pending": "捕获球：字幕准备中，长按进入沉浸聊天",
+
+  // ── 字幕行尾那颗收词按钮 ────────────────────────────────────────────────
+  "phrase.save": "收进词库",
+  "phrase.unsave": "从词库去掉",
+  "phrase.saveLine": "收下这一行标出来的",
+  "phrase.saved": "已在词库里",
+
+  // ── 悬浮词卡（D46）──────────────────────────────────────────────────────
+  "bubble.loading": "查这个词…",
+  "bubble.failed": "没查到",
+  "bubble.retry": "再试一次",
+  "bubble.otherSenses": "其他常用意思",
+  "bubble.noOther": "没有别的常用意思",
+  "bubble.close": "关掉",
 } as const;

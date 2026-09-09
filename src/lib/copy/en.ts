@@ -251,4 +251,47 @@ export const en = {
   "vlist.glossRetry": "Try again",
   "vlist.glossBusy": "Fetching explanation…",
   "vlist.glossFailed": "Still didn't come through — try again in a bit",
+
+  // ── Playback controls (speed, ±N s) ────────────────────────────────────
+  "play.back": (n: number) => `Back ${n}s`,
+  "play.forward": (n: number) => `Forward ${n}s`,
+  "play.stepChip": (n: number) => `${n}s jump`,
+  "play.stepMenu": "Change how far each jump goes",
+  "play.rateMenu": "Change playback speed",
+  "play.stepHint": "How many seconds one arrow tap jumps",
+  "play.rateHint": "Playback speed (slow it down if it's hard to catch)",
+  "play.notStarted": "Hit play first — then these two can jump",
+
+  // ── Capture bar (the dots) ─────────────────────────────────────────────
+  "dots.next": "Jump to the next capture point",
+  "dots.prev": "Jump to the previous capture point",
+  "dots.deleteFailed": "Couldn't delete it. Please try again.",
+  "dots.empty":
+    "When something stops you, tap the floating orb — a dot lands here, and you can come back to it any time.",
+  "dots.loading": (n: number) =>
+    n === 1 ? "Reading the duration — the 1 point shows up in a moment." : `Reading the duration — all ${n} points show up in a moment.`,
+  "dots.clusterAria": (time: string, n: number) => `${n} capture points around ${time} — open to choose`,
+  "dots.jumpAria": (time: string) => `Jump back to ${time}`,
+  "dots.crowded": (n: number) => `${n} points are bunched up here — pick one:`,
+  "dots.jumpHere": "Jump back here",
+  "dots.deleteAria": (time: string) => `Delete the point at ${time}`,
+
+  // ── Floating capture orb ───────────────────────────────────────────────
+  "orb.immersive": "Immersive chat: press and hold to close",
+  "orb.ready": "Capture orb: tap to mark this moment, hold for immersive chat",
+  "orb.pending": "Capture orb: subtitles still loading, hold for immersive chat",
+
+  // ── Save button at the end of a subtitle line ──────────────────────────
+  "phrase.save": "Save to vocabulary",
+  "phrase.unsave": "Remove from vocabulary",
+  "phrase.saveLine": "Save what's marked on this line",
+  "phrase.saved": "Already in your vocabulary",
+
+  // ── Word bubble (D46) ──────────────────────────────────────────────────
+  "bubble.loading": "Looking this up…",
+  "bubble.failed": "Nothing found",
+  "bubble.retry": "Try again",
+  "bubble.otherSenses": "Other common meanings",
+  "bubble.noOther": "No other common meanings",
+  "bubble.close": "Close",
 } as const satisfies CopyDict;
