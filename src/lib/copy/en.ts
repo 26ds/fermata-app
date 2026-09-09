@@ -66,6 +66,7 @@ export const en = {
   "lang.toggle.toEn": "Switch to English",
   "lang.toggle.saveFailed":
     "Switched on this device, but we couldn't save it to your account — another device may still show the old language.",
+  "lang.toggle.switching": "Switching interface language…",
 
   // ── Bottom navigation ──────────────────────────────────────────────────
   "nav.aria": "Main navigation",
@@ -98,6 +99,19 @@ export const en = {
   "settings.title": "Settings",
   "settings.lede":
     "Your native language, and what you're here for. Changes take effect right away — no need to sign in again.",
+
+  // ── Settings · Account ─────────────────────────────────────────
+  "settings.account.title": "Account",
+  "settings.account.signedInAs": "Signed in as",
+  "settings.account.switch": "Switch account",
+  "settings.account.switching": "Signing out…",
+  "settings.account.google": "Use a Google account",
+  "settings.account.googleGoing": "Opening Google…",
+  "settings.account.hint":
+    "“Switch account” signs you out and takes you back to the sign-in page — that is also how you sign out. Your pause points and vocabulary stay with the account you left; sign back in and they are all there.",
+  "settings.account.errSignOut": "Couldn't sign you out — you may be offline. Tap it once more.",
+  "settings.account.errGoogle":
+    "Couldn't reach Google — you may be offline, or Google sign-in was just switched off in the back office. “Switch account” still gets you in by email.",
 
   // ── Supabase not configured (developers only, but still not Chinese-only) ─
   "setup.title": "One step left: connect Supabase",

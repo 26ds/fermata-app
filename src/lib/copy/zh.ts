@@ -83,6 +83,9 @@ export const zh = {
   // D44：说得出是哪一种失败。界面**确实已经切了**（cookie 那层生效了），
   // 没成的只是"记进账号"这一半 —— 别把两件事混成一句笼统的"失败了"
   "lang.toggle.saveFailed": "这台设备已经切好了，但没能存进你的账号 —— 换台设备可能还是原来的语言。",
+  // 切换途中那几秒（`router.refresh()` 的往返）。屏幕上是一颗转圈，
+  // 这一句是**给读屏用户的那颗转圈** —— 他们看不见转圈
+  "lang.toggle.switching": "正在切换界面语言…",
 
   // ── 底部导航（D37 三分）────────────────────────────────────────────────
   "nav.aria": "主要导航",
@@ -112,6 +115,22 @@ export const zh = {
   // ── 设置页外壳 ──────────────────────────────────────────────────────────
   "settings.title": "设置",
   "settings.lede": "母语，和你看这些东西是为了什么。改完立刻生效，不用重新登录。",
+
+  // ── 设置页 · 账号（创始人 2026-09-09：「在右上角设置里面添加切换账号 / Google 登录」）──
+  "settings.account.title": "账号",
+  "settings.account.signedInAs": "当前登录",
+  "settings.account.switch": "切换账号",
+  "settings.account.switching": "正在退出…",
+  "settings.account.google": "换成 Google 账号",
+  "settings.account.googleGoing": "正在跳转 Google…",
+  // 一句小字要顶掉一颗「退出登录」按钮 —— 所以必须把两件事都说清楚：
+  // ① 这一颗**就是**退出登录 ② 东西不会丢
+  "settings.account.hint":
+    "「切换账号」会先退出当前账号、回到登录页 —— 这也就是退出登录。你的暂停点、词库都还留在原来那个账号里，登回来就还在。",
+  // D44：说得出是哪一种失败。这两条各对应一个真实起因
+  "settings.account.errSignOut": "没能退出登录 —— 可能是网络断了。再点一次试试。",
+  "settings.account.errGoogle":
+    "没能跳到 Google —— 可能是网络断了，也可能是后台刚把 Google 登录关掉。用「切换账号」走邮箱那条路一样进得去。",
 
   // ── 没配 Supabase 时的引导（开发者才看得到，但不能因此说中文）──────────
   "setup.title": "还差一步：连接 Supabase",
