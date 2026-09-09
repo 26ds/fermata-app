@@ -341,4 +341,84 @@ export const zh = {
   "sel.glossFailed": "没查到意思",
   "sel.glossRetry": "再试一次",
   "sel.glossDismiss": "收起",
+
+  // ── 字幕层 ──────────────────────────────────────────────────────────────
+  "cap.title": "captions / 字幕",
+  // 创始人 2026-08-04 指名要加「收进词库才能查看意思」——
+  // 悬浮在没收过的词上是没反应的，不说出口就像功能坏了
+  "cap.pickHint": "点词收进词库（收进后悬浮或长按可查意思）· 点行首时间戳跳到那一句",
+  "cap.follow": "跟随中",
+  "cap.noFollow": "不跟随",
+  "cap.hide": "隐藏",
+  "cap.show": "显示",
+  "cap.jumpAria": (time: string) => `跳到 ${time}`,
+
+  // YouTube 自家「显示转录」的三步。**出现在两个地方**（粘贴框里、以及自动转写走进
+  // 死路时），一份文案别让两处慢慢长歪
+  "cap.ytStep1a": "电脑浏览器打开这个视频 → 视频下方「",
+  "cap.ytStep1b": "」→「",
+  "cap.ytStep1More": "...更多",
+  "cap.ytStep1Show": "显示转录 / Show transcript",
+  "cap.ytStep1c": "」",
+  "cap.ytStep2a": "在弹出的转录里",
+  "cap.ytStep2Copy": "全选、复制",
+  "cap.ytStep3a": "回到这里，整段",
+  "cap.ytStep3Paste": "粘",
+  "cap.ytStep3b": "进「粘贴字幕」的框",
+
+  // 生成 / 粘贴那几颗按钮
+  "cap.retryAnyway": "仍要重试",
+  "cap.retry": "重试",
+  "cap.resume": "继续生成",
+  "cap.generate": "生成字幕",
+  "cap.pasteYt": "粘贴字幕",
+  "cap.pasteManual": "手动粘贴",
+  "cap.generating": (pct: string) => `生成中${pct}`,
+  "cap.generatingLong": (pct: string) => `正在生成字幕${pct}第一段大约二十秒后出来。`,
+  "cap.cancel": "取消",
+  "cap.saving": "正在存…",
+  "cap.save": "存下这份字幕",
+  "cap.none": "还没有字幕。",
+  "cap.tailNote": "后面还有没转完的部分。",
+
+  // 粘贴框里的说明
+  "cap.pasteYtLead": "有字幕(CC)的话，粘过来免费（手机上没有「显示转录」入口，这条要在电脑上做）：",
+  "cap.pasteYtTail": "认 YouTube 那种「时间戳+文字」，也认 .srt / .vtt。手机上直接用「生成字幕」就行。",
+  "cap.pasteManualLeadA": "把 .srt 或 .vtt 的内容整段贴进来（要带",
+  "cap.pasteManualLeadB": "这样的时间轴）。自动转写不灵的时候，这里永远是最后一条路。",
+  "cap.pastePlaceholderYt": "0:00\n第一句话\n0:04\n第二句话",
+  "cap.pastePlaceholderSrt": "1\n00:00:00,000 --> 00:00:03,200\n第一句话",
+  "cap.parseFailed":
+    "没认出任何一条字幕。可以是 YouTube「显示转录」复制的内容（时间戳+文字），也可以是 .srt / .vtt 文件内容。",
+  "cap.saveFailed": "没存上，请重试",
+  // 走进死路时那段（点开粘贴框之前就摊开搬运方法 —— 那时候人最需要它，却最看不见）
+  "cap.deadEndLead": "但你能打开这支视频，就说明字幕就在那儿 —— 自己搬过来，一样用（手机上没有「显示转录」入口，这条要在电脑上做）：",
+  "cap.hintGenerateA": "点",
+  "cap.hintGenerateBtn": "「生成字幕」",
+  "cap.hintGenerateB": "一键自动生成（约二十秒）。在电脑上打开、这视频有 CC 的话，也可以「粘贴字幕」免费拿。",
+
+  // AI 自动标词那颗拨动开关（D45，默认关）
+  "cap.scanLabel": "AI 标词",
+  "cap.scanOn": "打开 AI 自动标词，并马上扫这一片",
+  "cap.scanOff": "关掉 AI 自动标词",
+  "cap.scanRunning": "正在扫这一片…",
+  "cap.scanIsOn": "开着，会把值得收的词标出来",
+  "cap.scanIsOff": "关着（开了要花钱，每片只扫一次）",
+
+  // 字号 / 译文那一排
+  "cap.size": "字号",
+  "cap.sizeAria": "字幕字号",
+  "cap.translation": "译文",
+  "cap.translationAria": "译文语言",
+  "cap.translationOff": "关闭",
+  "cap.sameLangSuffix": "（原文，不用翻）",
+  "cap.flipAria": "对调原文与译文的大小",
+  "cap.flipToTr": "译文大 ⇅",
+  "cap.flipToOrig": "原文大 ⇅",
+  "cap.trOnlyCurrent": "只当前行",
+  "cap.trEveryLine": "每行译文",
+  "cap.translating": (pct: string) => `翻译中${pct}`,
+  "cap.trNoResponse": "翻译服务没响应",
+  "cap.trSameLang": "这条内容的原文就是这个语言。",
+  "cap.trFailed": "翻译没成，稍后再试。",
 } as const;
