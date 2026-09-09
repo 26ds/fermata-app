@@ -486,4 +486,27 @@ export const en = {
   "quick.wordHint": "Stuck on one word",
   "quick.wordQ":
     "Were there any difficult words or jargon in what was just said? Pick them out and explain them.",
+
+  // ── Immersive chat ─────────────────────────────────────────────────────
+  "chat.aria": "Long-form immersive chat",
+  "chat.paletteLabel": "Change the glow colors",
+  "chat.paletteAria": (name: string) => `Palette: ${name}`,
+  "chat.fontLabel": "Text size",
+  "chat.fontHint": "Size",
+  "chat.empty": "What's on your mind? I'll pick up from where you are.",
+  "chat.thinking": "Thinking…",
+  "chat.toLatest": "Back to latest ↓",
+  "chat.placeholder": "Ask another…",
+  "chat.send": "Send",
+  "chat.exitHint": "Press and hold the orb to leave",
+  "chat.answerFailed": "No answer came back. Try again shortly.",
+  "chat.glowAurora": "Aurora",
+  "chat.glowBamboo": "Bamboo",
+  "chat.glowDusk": "Dusk",
+  "chat.glowNebula": "Nebula",
+  "chat.glowInk": "Ink",
+  "chat.fsS": "S",
+  "chat.fsM": "M",
+  "chat.fsL": "L",
+  "chat.fsXL": "XL",
 } as const satisfies CopyDict;

@@ -501,4 +501,29 @@ export const zh = {
   "quick.wordLabel": "有个词没听懂",
   "quick.wordHint": "卡在某个词",
   "quick.wordQ": "刚才这段里有没有比较难懂的词或术语？挑出来解释一下。",
+
+  // ── 沉浸聊天 ────────────────────────────────────────────────────────────
+  "chat.aria": "长问答沉浸聊天",
+  "chat.paletteLabel": "更换流光配色",
+  "chat.paletteAria": (name: string) => `配色：${name}`,
+  "chat.fontLabel": "调字号",
+  "chat.fontHint": "字号",
+  "chat.empty": "有什么想问的？扣着当前进度，接着聊。",
+  "chat.thinking": "正在想…",
+  "chat.toLatest": "回到最新 ↓",
+  "chat.placeholder": "接着问一句…",
+  "chat.send": "发送",
+  "chat.exitHint": "长按悬浮球退出",
+  "chat.answerFailed": "没答出来，稍后再试",
+  // 流光配色的名字
+  "chat.glowAurora": "极光",
+  "chat.glowBamboo": "青竹",
+  "chat.glowDusk": "暮霞",
+  "chat.glowNebula": "星云",
+  "chat.glowInk": "素墨",
+  // 字号四档
+  "chat.fsS": "小",
+  "chat.fsM": "中",
+  "chat.fsL": "大",
+  "chat.fsXL": "特大",
 } as const;
