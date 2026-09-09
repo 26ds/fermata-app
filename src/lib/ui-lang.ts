@@ -1,6 +1,7 @@
 import { cookies, headers } from "next/headers";
 import { effectiveUiLang, readLangPrefs } from "@/lib/lang";
-import { matchUiLocale, resolveUiLocale, FALLBACK_UI_LOCALE } from "@/lib/copy";
+import { makeT, matchUiLocale, resolveUiLocale, FALLBACK_UI_LOCALE } from "@/lib/copy";
+import { UI_LANG_COOKIE } from "@/lib/ui-lang-shared";
 
 // M3.9 片 b —— **服务端**决定这一次渲染用哪门界面语言。
 //
@@ -15,11 +16,10 @@ import { matchUiLocale, resolveUiLocale, FALLBACK_UI_LOCALE } from "@/lib/copy";
 // **冲突时数据库赢** —— cookie 只是缓存：`/api/settings` 的 GET 会顺带纠偏，
 // PUT 会当场重写。cookie 被清掉也不会白屏，只是回落链走到底。
 
-/** 语言镜像 cookie。**非 httpOnly** —— 客户端也要读得到（切语言时不等一趟往返） */
-export const UI_LANG_COOKIE = "fermata_ui";
-
-/** 一年。语言不是会话级的东西 */
-export const UI_LANG_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+// cookie 的名字和寿命搬去了 `lib/ui-lang-shared.ts` —— 那边零依赖，
+// 客户端的「中 / EN」按钮要直接写这个 cookie（本文件 import 了 next/headers，进不了浏览器）。
+// 这里再导出一次，既有的 import 路径不用动。
+export { UI_LANG_COOKIE, UI_LANG_COOKIE_MAX_AGE } from "@/lib/ui-lang-shared";
 
 /**
  * 从 `Accept-Language` 里挑第一门**我们真有文案**的语言。
@@ -63,4 +63,14 @@ export async function getUiLang(): Promise<string> {
  */
 export function uiLocaleFromSettings(settings: Record<string, unknown> | null | undefined): string {
   return resolveUiLocale(effectiveUiLang(readLangPrefs(settings ?? {})));
+}
+
+/**
+ * 服务端组件 / 页面里取 `t` 的快捷方式（**不经过 React**，所以 server component 用得了）。
+ *
+ * 每次调用会再读一遍 cookie。那是内存里的一次字符串解析，比把 `t` 从根布局
+ * 一层层往下传（每个 server page 都要多一个 prop）便宜得多，也不会漏传。
+ */
+export async function getT() {
+  return makeT(await getUiLang());
 }

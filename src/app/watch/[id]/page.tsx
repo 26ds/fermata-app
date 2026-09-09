@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { LangBootstrap } from "@/components/lang-bootstrap";
 import { SetupNotice } from "@/components/setup-notice";
 import { SettingsLink } from "@/components/settings-link";
+import { LangToggle } from "@/components/lang-toggle";
+import { getT } from "@/lib/ui-lang";
 import { WatchStage } from "@/components/watch-stage";
 import type { PausePoint } from "@/components/pause-list";
 import type { SourceRow } from "@/lib/types";
@@ -83,6 +85,9 @@ export default async function WatchDetailPage({
     .eq("source_id", id)
     .eq("user_id", user.id);
   const savedAtoms = (atomRows ?? []) as { id: string; term: string }[];
+  // ⚠️ 这一页里翻译函数叫 `tr` 不叫 `t` —— `t` 已经被 `?t=`（深链要跳到第几秒）占了。
+  // 全站其余地方仍是 `t`，只有这儿让一步
+  const tr = await getT();
 
   return (
     // M3.12 片 a：宽屏下**整页不滚**（`lg:h-dvh`），滚的只有右栏 ——
@@ -96,7 +101,7 @@ export default async function WatchDetailPage({
           下方的状态条（WatchStage 里），不再单占位置。 */}
       <header className="relative flex items-center gap-3 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-8">
         {/* 返回退一层，不是回首页 —— 从哪儿来退回哪儿去，规则在 lib/nav.ts */}
-        <Link href={back.href} aria-label={back.label} className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300">
+        <Link href={back.href} aria-label={tr(back.labelKey)} className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300">
           <span aria-hidden>←</span>
         </Link>
         {/* 标题点一下回到原网页（YouTube 观看页 / 小宇宙单集页）。取不到就是纯文字。 */}
@@ -106,16 +111,18 @@ export default async function WatchDetailPage({
               href={origin}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`在原网站打开：${source.title ?? "这条内容"}`}
+              aria-label={tr("common.openOrigin", source.title ?? tr("common.untitled"))}
               className="group inline-flex max-w-full items-center gap-1 hover:text-teal-300"
             >
-              <span className="truncate">{source.title ?? "未命名内容"}</span>
+              <span className="truncate">{source.title ?? tr("common.untitled")}</span>
               <span aria-hidden className="shrink-0 text-ink-400 transition-colors group-hover:text-teal-300">↗</span>
             </a>
           ) : (
-            (source.title ?? "未命名内容")
+            (source.title ?? tr("common.untitled"))
           )}
         </h1>
+        {/* 创始人 2026-09-09：语言开关每个界面都要有 */}
+        <LangToggle />
         <SettingsLink from="player" sid={source.id} />
       </header>
 

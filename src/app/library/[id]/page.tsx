@@ -4,6 +4,8 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/setup-notice";
 import { SettingsLink } from "@/components/settings-link";
+import { LangToggle } from "@/components/lang-toggle";
+import { getT } from "@/lib/ui-lang";
 import { LibraryDetail, type DatedPausePoint } from "@/components/library-detail";
 import type { VocabItem } from "@/components/vocab-list";
 import { thumbUrlFor } from "@/lib/thumb";
@@ -20,18 +22,13 @@ import { captionScriptFor } from "@/lib/zh-script";
 // RLS 保证只能查到自己的 source，查不到就是 404。
 
 // D42：文案集中在这里，M3.9 抽语言表时只动这一处
-const COPY = {
-  eyebrow: "replay",
-  openInWatch: "在观看页打开 →",
-  untitled: "未命名内容",
-};
-
 export default async function LibraryDetailPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   if (!supabaseConfigured) return <SetupNotice />;
+  const t = await getT();
 
   // Next 16：params 是 Promise，必须 await
   const { id } = await params;
@@ -94,12 +91,14 @@ export default async function LibraryDetailPage({
       <header className="relative flex items-center gap-3 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-8">
         <Link
           href="/library"
-          aria-label="返回历史与知识库"
+          aria-label={t("back.library")}
           className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
         >
           <span aria-hidden>←</span>
         </Link>
-        <p className="eyebrow flex-1 text-teal-300">{COPY.eyebrow}</p>
+        <p className="eyebrow flex-1 text-teal-300">replay</p>
+        {/* 创始人 2026-09-09：语言开关每个界面都要有 */}
+        <LangToggle />
         <SettingsLink from="libraryitem" sid={source.id} />
       </header>
 
@@ -118,13 +117,13 @@ export default async function LibraryDetailPage({
           </span>
           <div className="min-w-0 flex-1">
             <h1 className="line-clamp-2 text-sm font-semibold leading-6 text-ink-100">
-              {source.title ?? COPY.untitled}
+              {source.title ?? t("common.untitled")}
             </h1>
             <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-ink-500">
               <span>{source.kind}</span>
               {source.duration_s ? <span>{hms(source.duration_s)}</span> : null}
               {(source.watch_count ?? 0) > 1 ? (
-                <span className="text-ink-300">看过 {source.watch_count} 次</span>
+                <span className="text-ink-300">{t("detail.watchedTimes", source.watch_count ?? 0)}</span>
               ) : null}
             </p>
             {/* 带 from=library：在观看页按返回要退回这一页，不是退回内容列表 */}
@@ -132,7 +131,7 @@ export default async function LibraryDetailPage({
               href={withFrom(`/watch/${source.id}`, "library")}
               className="mt-2 inline-flex min-h-11 items-center text-xs text-teal-300 hover:text-teal-400"
             >
-              {COPY.openInWatch}
+              {t("detail.openInWatch")}
             </Link>
           </div>
         </section>

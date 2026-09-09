@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { LangToggle } from "@/components/lang-toggle";
+import { useCopy, useUiLang } from "@/components/copy-provider";
 
 /**
  * `/privacy` 与 `/terms` 共用的外壳。
@@ -12,17 +13,24 @@ import { useState } from "react";
  *
  * D42 要求界面文案进 `COPY` 表；**这两页是文档不是界面**，整篇塞进类型闸门只会把
  * `en.ts` 变成一部法典 —— 故不进表，双语已经在页面里各写了一份。
+ *
+ * ── M3.9 片 c 改了哪一处（2026-09-09）────────────────────────────────────
+ * 原来这里有一颗**自己的**「中文 / English」按钮，只管这一页、用本地 state。
+ * 创始人要的是「一个按钮切所有界面语言，每个界面都有」——
+ * 于是这一颗换成全站那颗 `<LangToggle />`，正文跟着 `uiLang` 走。
+ *
+ * **两个读者都还照顾得到**：Google 审核那一侧打开时没有 cookie，
+ * `getUiLang()` 会读 `Accept-Language` → 英文；中文用户读到的是中文；
+ * 谁都能用同一颗按钮当场切过去。换来的是**整站只有一种切语言的方式**，
+ * 而不是这一页一颗、别处又一颗。
  */
 export function LegalDoc({
-  initial,
   zhTitle,
   enTitle,
   updated,
   zh,
   en,
 }: {
-  /** 首屏先给哪门语言（跟着界面语言；用户随时能切） */
-  initial: "zh" | "en";
   zhTitle: string;
   enTitle: string;
   /** 最后更新日期，两种语言共用一个 ISO 日期，不翻译 */
@@ -30,7 +38,10 @@ export function LegalDoc({
   zh: React.ReactNode;
   en: React.ReactNode;
 }) {
-  const [lang, setLang] = useState<"zh" | "en">(initial);
+  const t = useCopy();
+  // 正文跟着**全站**界面语言走。`uiLang` 只可能是 `zh-Hans` 或 `en`
+  // （`UI_LOCALES` 就这两套），所以这一行判断是完备的
+  const lang: "zh" | "en" = useUiLang().startsWith("zh") ? "zh" : "en";
 
   return (
     <main className="relative min-h-dvh px-5 py-6 sm:px-8">
@@ -51,21 +62,8 @@ export function LegalDoc({
             FERMATA
           </Link>
 
-          <div className="flex items-center gap-1 rounded-full border border-ink-500/50 p-1" role="group" aria-label="Language">
-            {(["zh", "en"] as const).map((l) => (
-              <button
-                key={l}
-                type="button"
-                onClick={() => setLang(l)}
-                aria-pressed={lang === l}
-                className={`min-h-9 rounded-full px-3 text-xs font-semibold transition ${
-                  lang === l ? "bg-teal-400 text-teal-950" : "text-ink-300 hover:text-ink-100"
-                }`}
-              >
-                {l === "zh" ? "中文" : "English"}
-              </button>
-            ))}
-          </div>
+          {/* 全站同一颗语言开关（创始人 2026-09-09：每个界面都要有） */}
+          <LangToggle />
         </header>
 
         <div className="py-10">
@@ -73,7 +71,7 @@ export function LegalDoc({
             {lang === "zh" ? zhTitle : enTitle}
           </h1>
           <p className="eyebrow mt-3 text-teal-300">
-            {lang === "zh" ? "最后更新" : "Last updated"} · {updated}
+            {t("legal.updated")} · {updated}
           </p>
 
           <article className="legal-prose mt-8">{lang === "zh" ? zh : en}</article>
@@ -81,10 +79,10 @@ export function LegalDoc({
 
         <footer className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-ink-500/30 py-6 pb-[env(safe-area-inset-bottom)] text-xs text-ink-500">
           <Link href="/privacy" className="hover:text-ink-100">
-            {lang === "zh" ? "隐私政策" : "Privacy Policy"}
+            {t("login.privacy")}
           </Link>
           <Link href="/terms" className="hover:text-ink-100">
-            {lang === "zh" ? "服务条款" : "Terms of Service"}
+            {t("login.terms")}
           </Link>
           <a href="mailto:zq20061208@gmail.com" className="hover:text-ink-100">
             zq20061208@gmail.com

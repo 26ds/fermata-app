@@ -6,6 +6,8 @@ import { SettingsBack } from "@/components/settings-back";
 import { SetupNotice } from "@/components/setup-notice";
 import { getLangPrefs } from "@/lib/settings";
 import { settingsBackTarget } from "@/lib/nav";
+import { LangToggle } from "@/components/lang-toggle";
+import { getT } from "@/lib/ui-lang";
 
 // M3.9 片 a —— 设置。
 //
@@ -14,13 +16,6 @@ import { settingsBackTarget } from "@/lib/nav";
 // 母语被自动猜错这件事之所以能一路瞒到 2026-08-01 才被发现，这是原因之一。
 //
 // 现在只有「语言」一块。别急着往里堆东西 —— 设置页最容易长成一个杂物间。
-
-// D42：文案集中在这里，片 d 换 t() 时只动这一处
-const COPY = {
-  eyebrow: "settings",
-  title: "设置",
-  lede: "母语，和你看这些东西是为了什么。改完立刻生效，不用重新登录。",
-};
 
 export default async function SettingsPage({
   searchParams,
@@ -32,6 +27,7 @@ export default async function SettingsPage({
 
   const { from, sid } = await searchParams;
   const back = settingsBackTarget(from, sid);
+  const t = await getT();
 
   const supabase = await createClient();
   const {
@@ -47,16 +43,19 @@ export default async function SettingsPage({
       <header className="relative flex items-center gap-3 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-8">
         {/* D43：进来的是哪条路，退回去就是哪条路。
             退出去之前会先把服务端数据作废（见组件）—— 否则改完设置退回去还是老样子 */}
-        <SettingsBack href={back.href} label={back.label} />
-        <p className="eyebrow flex-1 text-teal-300">{COPY.eyebrow}</p>
+        <SettingsBack href={back.href} label={t(back.labelKey)} />
+        <p className="eyebrow flex-1 text-teal-300">settings</p>
+        {/* 创始人 2026-09-09：语言开关每个界面都要有 —— 设置页尤其该有，
+            这儿正是"改语言"这件事的主场 */}
+        <LangToggle />
       </header>
 
       <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8">
         <section className="pt-2">
           <h1 className="display-serif text-2xl leading-tight tracking-[-0.03em] text-ink-100">
-            {COPY.title}
+            {t("settings.title")}
           </h1>
-          <p className="mt-2 max-w-md text-sm leading-6 text-ink-300">{COPY.lede}</p>
+          <p className="mt-2 max-w-md text-sm leading-6 text-ink-300">{t("settings.lede")}</p>
         </section>
 
         <div className="mt-5">

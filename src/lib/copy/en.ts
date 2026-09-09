@@ -48,4 +48,141 @@ export const en = {
   "watch.captures.help":
     "Pause points and question points. Click one to jump straight to that moment in the video and to the matching place in the chat, and your last playback position is kept as you go. (Still being built.)",
   "watch.captures.count": (n: number) => (n === 1 ? "1 point" : `${n} points`),
+
+  // ── 中 / EN toggle (founder, 2026-09-09) ───────────────────────────────
+  "lang.toggle.aria": "Interface language",
+  "lang.toggle.toZh": "Switch to Simplified Chinese",
+  "lang.toggle.toEn": "Switch to English",
+  "lang.toggle.saveFailed":
+    "Switched on this device, but we couldn't save it to your account — another device may still show the old language.",
+
+  // ── Bottom navigation ──────────────────────────────────────────────────
+  "nav.aria": "Main navigation",
+  "nav.watch": "Watch",
+  "nav.library": "History & knowledge",
+  "nav.live": "Live lab",
+
+  // ── Common ─────────────────────────────────────────────────────────────
+  "common.settings": "Settings",
+  "common.home": "Fermata home",
+  "common.signOut": "Sign out",
+  "common.back": "Back",
+
+  // ── Home ───────────────────────────────────────────────────────────────
+  "home.title": "Knowledge, grown slowly.",
+  "home.lede":
+    "Watch videos, listen to podcasts — every moment you stopped is kept. Look back later and those moments are what you know.",
+  "home.toLive": "Start a conversation",
+  "home.toWatch": "Find something to watch",
+  "home.toLibrary": "See what I've watched →",
+
+  // ── 404 ────────────────────────────────────────────────────────────────
+  "nf.title": "This page isn't here.",
+  "nf.lede":
+    "It was probably deleted, or the link is incomplete. Your pause points and vocabulary are all still safe.",
+  "nf.toHome": "Back to home",
+  "nf.toLibrary": "Go to history & knowledge",
+
+  // ── Settings shell ─────────────────────────────────────────────────────
+  "settings.title": "Settings",
+  "settings.lede":
+    "Your native language, and what you're here for. Changes take effect right away — no need to sign in again.",
+
+  // ── Supabase not configured (developers only, but still not Chinese-only) ─
+  "setup.title": "One step left: connect Supabase",
+  "setup.step1": "Create a project at supabase.com, then open Project Settings → API Keys",
+  "setup.step2a": "Copy",
+  "setup.step2b": "in the project root to",
+  "setup.step2c": ", and fill in the Project URL and anon public key",
+  "setup.step3a": "Run this in the Supabase SQL Editor:",
+  "setup.step4": "Restart npm run dev",
+  "setup.more": "Full instructions are in README.md",
+
+  // ── Back-arrow destinations (lib/nav.ts) ───────────────────────────────
+  "back.libraryItem": "Back to this item's pause points and chats",
+  "back.favorites": "Back to favorites",
+  "back.vocab": "Back to all vocabulary",
+  "back.watchList": "Back to the watch list",
+  "back.lastContent": "Back to what you were watching",
+  "back.watch": "Back to Watch",
+  "back.live": "Back to Live lab",
+  "back.library": "Back to history & knowledge",
+
+  // ── History & knowledge (list page) ────────────────────────────────────
+  "library.name": "History & knowledge",
+  "library.title": "Everything you've watched is here.",
+  "library.lede":
+    "Every moment you stopped to think, every word you saved — each one stays with the thing it came from.",
+  "library.atomsTitle": "Knowledge atoms",
+  "library.atomsHint": "Words and ideas you save while watching collect here",
+  "library.atomsAria": (n: number) => (n === 1 ? "Knowledge atoms: 1 item" : `Knowledge atoms: ${n} items`),
+  "library.tabByDate": "By date",
+  "library.tabFolders": "Auto-sorted",
+  "library.migrationNotice":
+    "“When you watched it” isn't enabled yet. In Supabase → SQL Editor, run",
+  "library.migrationTail":
+    ". Until then everything below lands in one “time unknown” group. Nothing else is affected.",
+
+  // ── Item detail (replay page) ──────────────────────────────────────────
+  "detail.openInWatch": "Open in the player →",
+  "common.untitled": "Untitled",
+  "common.openOrigin": (title: string) => `Open on the original site: ${title}`,
+
+  // ── All vocabulary ─────────────────────────────────────────────────────
+  "vocab.title": "The words and ideas you kept.",
+  "vocab.lede":
+    "Each one remembers where it came up and how the line was said — tap it to go back to that second.",
+  "vocab.count": (n: number) => (n === 1 ? "1 item" : `${n} items`),
+
+  // ── Watch list (/watch) ────────────────────────────────────────────────
+  "watch.name": "Watch",
+  "watch.title": "What are we watching?",
+  "watch.lede":
+    "Just paste a link. Fermata only remembers the seconds you stopped at — it never downloads or stores the video.",
+  "watch.tabAll": "All",
+  "watch.tabFavorites": "★ Favorites",
+  "watch.migrationNotice": "Some features aren't enabled yet. In Supabase → SQL Editor, run",
+  "watch.migrationTail": ". Nothing else is affected.",
+  "detail.watchedTimes": (n: number) => (n === 1 ? "Watched once" : `Watched ${n} times`),
+
+  // ── Login ──────────────────────────────────────────────────────────────
+  "login.aria": "Sign in",
+  "login.headline1": "Make every pause",
+  "login.headline2": "leave something behind.",
+  "login.lede":
+    "While you watch and listen, Fermata turns your curiosity into something you actually remember.",
+  "login.cardTitle": "Enter your study pod",
+  "login.cardHintGoogle": "No password · Google or email, your call",
+  "login.cardHintEmail": "No password · just your email to confirm it's you",
+  "login.tagline": "Where you pause is where you learn.",
+  "login.privacy": "Privacy Policy",
+  "login.terms": "Terms of Service",
+  "login.emailLabel": "Your email",
+  "login.sendBtn": "Send me a sign-in email",
+  "login.sending": "Sending…",
+  "login.googleBtn": "Continue with Google",
+  "login.googleGoing": "Taking you to Google…",
+  "login.orEmail": "or use email",
+  "login.sentTitle": "Confirmation email is on its way",
+  "login.sentSameDevice": "On this device: tap the sign-in button in the email.",
+  "login.sentOtherDevice":
+    "Opened the email on another device? Type the numeric code from it below.",
+  "login.codePlaceholder": "Code from the email",
+  "login.verifySubmit": "Sign in with the code",
+  "login.verifying": "Confirming…",
+  "login.changeEmail": "Use another email / resend",
+
+  // ── Sign-in errors (D44: name which failure it was) ────────────────────
+  "login.errAuth": "That sign-in link is invalid or has expired. Send yourself a new one.",
+  "login.errTooFrequent": "Too many sends: security rules require 60 seconds between emails.",
+  "login.errTooFrequentWait": (s: string) =>
+    `Too many sends: security rules require 60 seconds between emails (about ${s}s to go).`,
+  "login.errRateLimit": "This hour's email quota is used up. Try again in a little while.",
+  "login.errGoogleOff": "Google sign-in is unavailable right now — use the email option below.",
+  "login.errSignupsOff": "This email can't sign up yet: new registrations are turned off.",
+  "login.errBadEmail": "That email address doesn't look right — check for a missing character.",
+  "login.errBadCode": "Wrong or expired code. Send a new email and try again.",
+  "login.errSendFailed":
+    "The email couldn't be sent — that's a failure on our sending side, not a mistake in your address. Try again shortly; if it keeps happening, send us a screenshot of this message.",
+  "legal.updated": "Last updated",
 } as const satisfies CopyDict;

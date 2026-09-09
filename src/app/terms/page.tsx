@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { getUiLang } from "@/lib/ui-lang";
 import { LegalDoc } from "@/components/legal-doc";
 
 export const metadata: Metadata = {
@@ -10,11 +9,9 @@ export const metadata: Metadata = {
 // 同 `/privacy`：**不登录也要能打开**，这里不许出现 `createClient()`。
 
 export default async function TermsPage() {
-  const uiLang = await getUiLang();
 
   return (
     <LegalDoc
-      initial={uiLang.toLowerCase().startsWith("en") ? "en" : "zh"}
       zhTitle="服务条款"
       enTitle="Terms of Service"
       updated="2026-09-08"
