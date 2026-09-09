@@ -8,6 +8,7 @@ import { getLangPrefs } from "@/lib/settings";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow } from "@/lib/types";
+import { getT } from "@/lib/ui-lang";
 
 // M3.11 悬浮词卡 —— 气泡里那两半东西从哪来（plans/M3.11-plan.md §B）。
 //
@@ -35,17 +36,18 @@ const schema = z.object({
 });
 
 export async function POST(request: Request) {
-  if (!supabaseConfigured) return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  const t = await getT();
+  if (!supabaseConfigured) return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
 
   const parsed = schema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: t("err.badRequest") }, { status: 400 });
   const { term, contextQuote, sourceId, atomId } = parsed.data;
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
 
   const prefs = await getLangPrefs(supabase, user.id);
   const supportLang = prefs.nativeLang;
@@ -162,8 +164,8 @@ export async function POST(request: Request) {
       e instanceof PhraseError
         ? e.message
         : e instanceof Error && e.name === "TimeoutError"
-          ? "查这个词超时了。"
-          : "查这个词时出错了。";
+          ? t("err.lookupTimeout")
+          : t("err.lookupFailed");
     // 语境意思要是本来就在库里，**别因为义项没查成就把它一起吞掉** ——
     // 有一半总比一片空白强，剩下那一半如实说没查到 + 给人点的重试
     if (context) {

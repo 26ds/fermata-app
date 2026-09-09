@@ -11,6 +11,7 @@ import { captionScriptFor } from "@/lib/zh-script";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
+import { getT } from "@/lib/ui-lang";
 
 // M3.7 词库 —— 整片扫一次的唯一入口（D40 + D42）。**懒触发**：第一次在这片子里
 // 暂停时前端后台打一次，不看的片子一分钱不花。
@@ -51,17 +52,18 @@ function lockAge(status: string | null | undefined): number | null {
 }
 
 export async function POST(request: Request) {
-  if (!supabaseConfigured) return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  const t = await getT();
+  if (!supabaseConfigured) return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
 
   const parsed = schema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: t("err.badRequest") }, { status: 400 });
   const { sourceId, force } = parsed.data;
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
 
   // select("*")：`phrases` / `phrases_status` 是迁移 0007 的列，点名查会在没跑迁移的库上整条炸掉
   const { data } = await supabase
@@ -70,7 +72,7 @@ export async function POST(request: Request) {
     .eq("id", sourceId)
     .eq("user_id", user.id)
     .maybeSingle();
-  if (!data) return NextResponse.json({ error: "找不到这条内容" }, { status: 404 });
+  if (!data) return NextResponse.json({ error: t("err.noSource") }, { status: 404 });
   const source = data as SourceRow;
 
   const raw: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
@@ -184,7 +186,7 @@ export async function POST(request: Request) {
         .eq("id", sourceId)
         .eq("user_id", user.id);
     }
-    const message = e instanceof PhraseError ? e.message : "这次没扫出词组，稍后再试。";
+    const message = e instanceof PhraseError ? e.message : t("err.phraseScanFailed");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 

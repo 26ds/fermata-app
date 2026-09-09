@@ -562,4 +562,56 @@ export const en = {
   "live.voiceLeda": "Leda · female-leaning, youthful",
   "live.voiceZephyr": "Zephyr · female-leaning, clear",
   "live.tokenFailed": (code: number) => `The token endpoint returned ${code}`,
+
+  // ── API errors (`src/app/api/**`) ──────────────────────────────────────
+  "err.noSupabase": "Supabase isn't configured",
+  "err.needLogin": "Please sign in first",
+  "err.badRequest": "Invalid request parameters",
+  "err.badFormat": "Malformed request",
+  "err.noSource": "Couldn't find that item",
+  "err.sourceMissing": "That item doesn't exist",
+  "err.noInterrupt": "That pause point doesn't exist",
+  "err.noInterruptPoint": "Couldn't find that pause point",
+  "err.noAtom": "Couldn't find that word",
+  "err.needUrl": "Paste a link first",
+  "err.needQuestion": "Write your question first",
+  "err.needSourceId": "Missing item id",
+  "err.missingSourceId": "Missing sourceId",
+  "err.nothingToUpdate": "No fields to update",
+  "err.noCaptionsAsk": "This item has no subtitles yet — generate them first, then ask.",
+  "err.noCaptionsChat": "This item has no subtitles yet — generate them first, then chat.",
+  "err.chatCreateFailed": "Couldn't start the conversation. Please try again.",
+  "err.answerFailed": (detail: string) => `Something went wrong while answering: ${detail}`,
+  "err.glossTimeout": "Fetching the explanation timed out (no reply in 20 seconds).",
+  "err.glossFailed": "Something went wrong fetching the explanation.",
+  "err.lookupTimeout": "Looking up that word timed out.",
+  "err.lookupFailed": "Something went wrong looking up that word.",
+  "err.atomSaveFailed": "It wasn't saved to your vocabulary. Please try again.",
+  "err.interruptSaveFailed": "That wasn't saved. Please try again.",
+  "err.phraseScanFailed": "No phrases came out of this scan. Try again shortly.",
+  "err.unknownLink":
+    "That link isn't recognised yet. Right now we support YouTube videos, podcast RSS feeds, and direct audio links.",
+  "err.upstreamTimeout": "The other server didn't respond. Try again in a bit.",
+  "err.saveFailed": "Saving failed. Please try again.",
+  "err.noGeminiKey": "The server doesn't have GEMINI_API_KEY configured",
+  "err.noGeminiKeyHint":
+    "The server doesn't have GEMINI_API_KEY configured (Vercel → Settings → Environment Variables)",
+  "err.emptyToken": "Gemini returned an empty token. Please try again shortly.",
+  "err.badGeminiKey":
+    "GEMINI_API_KEY is invalid: copy it again from aistudio.google.com, and watch out for stray spaces",
+  "err.geminiQuota": "Gemini's free quota is used up for now. Try again in a few minutes.",
+  "err.allTranscriptSourcesFailed":
+    "None of the subtitle sources worked. You can paste subtitles in by hand, or try again later.",
+  "err.translateFailed": (detail: string) => `Something went wrong while translating: ${detail}`,
+  "err.badTargetLang": "Unsupported target language",
+  "err.noCaptionsTranslate":
+    "This item has no subtitles yet — generate them first, then translate.",
+  "err.sameLangNoTranslate": (lang: string) =>
+    `I read this content as already being in ${lang}, the same language you picked — so nothing was translated, and nothing was charged for it.`,
+  "err.alreadyThatScript": (lang: string) => `The subtitles you're looking at are already ${lang}.`,
+  "err.noTranscriberFor": (kind: string) => `Subtitles aren't wired up for this kind of content (${kind}) yet`,
+  "err.tooLong":
+    "This item is over 4 hours long, so it isn't auto-transcribed for now — you can paste subtitles in by hand.",
+  "err.providerFellBack": (name: string) => `${name} didn't work — trying the next one`,
+  "err.compactFailed": "Something went wrong condensing this conversation. Try again shortly.",
 } as const satisfies CopyDict;

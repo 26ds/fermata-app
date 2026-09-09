@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
-import { UI_LANG_COOKIE, UI_LANG_COOKIE_MAX_AGE, uiLocaleFromSettings } from "@/lib/ui-lang";
+import { UI_LANG_COOKIE, UI_LANG_COOKIE_MAX_AGE, getT, uiLocaleFromSettings } from "@/lib/ui-lang";
 
 // M3 Phase-2 —— 用户设置（存后台=换设备同步）。目前放沉浸聊天的流光颜色 settings.chatGlow。
 // GET 取；PUT { settings } 浅合并进已有（改一个键不冲掉别的）。个人数据，RLS 只许本人（迁移 0006）。
@@ -31,12 +31,13 @@ const putSchema = z.object({
 });
 
 export async function GET() {
-  if (!supabaseConfigured) return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  const t = await getT();
+  if (!supabaseConfigured) return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
 
   const { data } = await supabase
     .from("user_settings")
@@ -48,15 +49,16 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  if (!supabaseConfigured) return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+  const t = await getT();
+  if (!supabaseConfigured) return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "请先登录" }, { status: 401 });
+  if (!user) return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
 
   const parsed = putSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
+  if (!parsed.success) return NextResponse.json({ error: t("err.badRequest") }, { status: 400 });
 
   // 浅合并进已有设置，别把没动的键冲没了
   const { data: existingRow } = await supabase

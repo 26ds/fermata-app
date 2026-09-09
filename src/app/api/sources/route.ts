@@ -4,16 +4,19 @@ import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { detectAdapter } from "@/lib/sources/registry";
 import { SourceResolveError } from "@/lib/sources/types";
+import { getT } from "@/lib/ui-lang";
+import { tMaybeKey } from "@/lib/copy";
 
 // M1a — 导入一条内容源。只存指针（kind + external_id + url），永不下载媒体（D3/§10）。
 
 const bodySchema = z.object({
-  url: z.string().trim().min(1, "请贴一条链接"),
+  url: z.string().trim().min(1, "err.needUrl"),
 });
 
 export async function POST(request: Request) {
+  const t = await getT();
   if (!supabaseConfigured) {
-    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+    return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   }
 
   const supabase = await createClient();
@@ -21,7 +24,7 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
   }
 
   let parsedBody: z.infer<typeof bodySchema>;
@@ -29,19 +32,19 @@ export async function POST(request: Request) {
     const result = bodySchema.safeParse(await request.json());
     if (!result.success) {
       return NextResponse.json(
-        { error: result.error.issues[0]?.message ?? "请求格式不对" },
+        { error: tMaybeKey(t, result.error.issues[0]?.message, "err.badFormat") },
         { status: 400 },
       );
     }
     parsedBody = result.data;
   } catch {
-    return NextResponse.json({ error: "请求格式不对" }, { status: 400 });
+    return NextResponse.json({ error: t("err.badFormat") }, { status: 400 });
   }
 
   const detected = detectAdapter(parsedBody.url);
   if (!detected) {
     return NextResponse.json(
-      { error: "这条链接暂时认不出来。现在支持 YouTube 视频、播客 RSS，以及音频直链。" },
+      { error: t("err.unknownLink") },
       { status: 400 },
     );
   }
@@ -74,7 +77,7 @@ export async function POST(request: Request) {
     if (e instanceof SourceResolveError) {
       return NextResponse.json({ error: e.message }, { status: 400 });
     }
-    return NextResponse.json({ error: "对方服务器没响应，过一会儿再试" }, { status: 502 });
+    return NextResponse.json({ error: t("err.upstreamTimeout") }, { status: 502 });
   }
 
   const externalId = meta.externalId ?? parsed.externalId;
@@ -112,7 +115,7 @@ export async function POST(request: Request) {
 
   if (error || !data) {
     return NextResponse.json(
-      { error: error?.message ?? "保存失败，请重试" },
+      { error: error?.message ?? t("err.saveFailed") },
       { status: 500 },
     );
   }

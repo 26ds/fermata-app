@@ -12,6 +12,7 @@ import { detectContentLang } from "@/lib/lang-detect";
 import { dominantScript, mightBeSameLang, resolveContentLang } from "@/lib/text-script";
 import { conformSegments, scriptOfText } from "@/lib/zh-convert";
 import { displayedHanScript, hanScriptOf } from "@/lib/zh-script";
+import { getT } from "@/lib/ui-lang";
 
 // M2.9 双语字幕 —— 把一条已有字幕翻成目标语言的唯一入口。
 //
@@ -46,8 +47,9 @@ function ndjsonOnce(payloads: unknown[]): Response {
 }
 
 export async function POST(request: Request) {
+  const t = await getT();
   if (!supabaseConfigured) {
-    return NextResponse.json({ error: "Supabase 未配置" }, { status: 500 });
+    return NextResponse.json({ error: t("err.noSupabase") }, { status: 500 });
   }
 
   const supabase = await createClient();
@@ -55,16 +57,16 @@ export async function POST(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.json({ error: "请先登录" }, { status: 401 });
+    return NextResponse.json({ error: t("err.needLogin") }, { status: 401 });
   }
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json({ error: "请求参数不合法" }, { status: 400 });
+    return NextResponse.json({ error: t("err.badRequest") }, { status: 400 });
   }
   const { sourceId, targetLang } = parsed.data;
   if (!isSupportedLang(targetLang)) {
-    return NextResponse.json({ error: "不支持的目标语言" }, { status: 400 });
+    return NextResponse.json({ error: t("err.badTargetLang") }, { status: 400 });
   }
 
   const { data: row } = await supabase
@@ -74,14 +76,14 @@ export async function POST(request: Request) {
     .eq("user_id", user.id)
     .maybeSingle();
   if (!row) {
-    return NextResponse.json({ error: "找不到这条内容" }, { status: 404 });
+    return NextResponse.json({ error: t("err.noSource") }, { status: 404 });
   }
 
   const source = row as SourceRow;
   const segments: TranscriptSegment[] = Array.isArray(source.transcript) ? source.transcript : [];
   if (segments.length === 0) {
     return NextResponse.json(
-      { error: "这条内容还没有字幕，先生成字幕再翻译。" },
+      { error: t("err.noCaptionsTranslate") },
       { status: 400 },
     );
   }
@@ -151,7 +153,7 @@ export async function POST(request: Request) {
         type: "same-language",
         lang: targetLang,
         sourceLang,
-        note: `这条内容的原文我判断就是${langLabel(sourceLang)}，跟你选的译文是同一门语言 —— 没翻，也没花那笔翻译的钱。`,
+        note: t("err.sameLangNoTranslate", langLabel(sourceLang)),
       },
     ]);
   }
@@ -182,7 +184,7 @@ export async function POST(request: Request) {
           lang: targetLang,
           // 屏幕上那份就是这套字形 —— 对选择器来说，这一项就是「原文」
           sourceLang: targetLang,
-          note: `你现在看的字幕已经是${langLabel(targetLang)}了。`,
+          note: t("err.alreadyThatScript", langLabel(targetLang)),
         },
       ]);
     }
@@ -248,7 +250,7 @@ export async function POST(request: Request) {
         const message =
           e instanceof TranslateError
             ? e.message
-            : `翻译时出错了：${e instanceof Error ? e.message.slice(0, 120) : String(e)}`;
+            : t("err.translateFailed", e instanceof Error ? e.message.slice(0, 120) : String(e));
         push({ type: "error", message });
       }
       controller.close();

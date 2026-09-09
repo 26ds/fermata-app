@@ -579,4 +579,58 @@ export const zh = {
   "live.voiceLeda": "Leda · 偏女声，年轻",
   "live.voiceZephyr": "Zephyr · 偏女声，明亮",
   "live.tokenFailed": (code: number) => `token 接口返回 ${code}`,
+
+  // ── API 报错（`src/app/api/**`）─────────────────────────────────────────
+  // 这些是**直接回给客户端、原样显示**的人话（M3.9 计划 §E：不改成错误码，
+  // 那是更干净但更大的重构，本片不做）。语言取自 `getUiLang()` ——
+  // cookie → Accept-Language → 英文。
+  //
+  // **登录之前那几条（未配置 / 请先登录）读设备语言是对的**：此刻我们确实还不知道
+  // 这个人是谁，读设备是唯一诚实的信号；而且**只用于显示，不写进任何人的档案**，
+  // 和 D42 修订①禁止的"拿设备语言冒充人的母语"是两回事。别把这里当反例。
+  "err.noSupabase": "Supabase 未配置",
+  "err.needLogin": "请先登录",
+  "err.badRequest": "请求参数不合法",
+  "err.badFormat": "请求格式不对",
+  "err.noSource": "找不到这条内容",
+  "err.sourceMissing": "内容不存在",
+  "err.noInterrupt": "这个打断点不存在",
+  "err.noInterruptPoint": "找不到这个打断点",
+  "err.noAtom": "找不到这条词",
+  "err.needUrl": "请贴一条链接",
+  "err.needQuestion": "先写一句想问的",
+  "err.needSourceId": "缺少内容 id",
+  "err.missingSourceId": "缺少 sourceId",
+  "err.nothingToUpdate": "没有要更新的字段",
+  "err.noCaptionsAsk": "这条内容还没有字幕，先生成字幕再问。",
+  "err.noCaptionsChat": "这条内容还没有字幕，先生成字幕再聊。",
+  "err.chatCreateFailed": "建立对话失败，请重试",
+  "err.answerFailed": (detail: string) => `回答时出错了：${detail}`,
+  "err.glossTimeout": "取解释超时了（20 秒没回来）。",
+  "err.glossFailed": "取解释时出错了。",
+  "err.lookupTimeout": "查这个词超时了。",
+  "err.lookupFailed": "查这个词时出错了。",
+  "err.atomSaveFailed": "没收进词库，请重试",
+  "err.interruptSaveFailed": "没记下来，请重试",
+  "err.phraseScanFailed": "这次没扫出词组，稍后再试。",
+  "err.unknownLink": "这条链接暂时认不出来。现在支持 YouTube 视频、播客 RSS，以及音频直链。",
+  "err.upstreamTimeout": "对方服务器没响应，过一会儿再试",
+  "err.saveFailed": "保存失败，请重试",
+  "err.noGeminiKey": "服务器还没配置 GEMINI_API_KEY",
+  "err.noGeminiKeyHint": "服务器还没配置 GEMINI_API_KEY（Vercel → Settings → Environment Variables）",
+  "err.emptyToken": "Gemini 返回了空 token，请稍后重试",
+  "err.badGeminiKey": "GEMINI_API_KEY 无效：去 aistudio.google.com 重新复制一遍，注意别带空格",
+  "err.geminiQuota": "Gemini 免费额度暂时用完了，等几分钟再试",
+  "err.allTranscriptSourcesFailed": "所有字幕来源都没成。可以手动粘贴字幕，或稍后重试。",
+  "err.translateFailed": (detail: string) => `翻译时出错了：${detail}`,
+  "err.badTargetLang": "不支持的目标语言",
+  "err.noCaptionsTranslate": "这条内容还没有字幕，先生成字幕再翻译。",
+  // D51：**一个不可证伪的拒绝等于一个藏起来的 bug** —— 说得出"我以为它是哪门语言"
+  "err.sameLangNoTranslate": (lang: string) =>
+    `这条内容的原文我判断就是${lang}，跟你选的译文是同一门语言 —— 没翻，也没花那笔翻译的钱。`,
+  "err.alreadyThatScript": (lang: string) => `你现在看的字幕已经是${lang}了。`,
+  "err.noTranscriberFor": (kind: string) => `这类内容（${kind}）的字幕还没接上`,
+  "err.tooLong": "这条内容超过 4 小时，暂时不自动转写 —— 可以手动粘贴字幕。",
+  "err.providerFellBack": (name: string) => `${name} 没成，换下一个`,
+  "err.compactFailed": "浓缩这次对话时出错了，稍后再试。",
 } as const;

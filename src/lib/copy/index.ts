@@ -112,3 +112,22 @@ export function makeT(lang: string | null | undefined): Translate {
     return typeof v === "function" ? (v as (...a: unknown[]) => string)(...args) : (v as string);
   };
 }
+
+/**
+ * 这个字符串是不是一条真的文案 key（M3.9 片 c）。
+ *
+ * **为什么需要它**：`zod` 的 `.min(1, "…")` 挂在**模块级常量**上，
+ * 那时候拿不到"这个人用什么语言看界面"。所以 schema 里挂的是 **key**
+ * （`"err.needUrl"`），出错时在路由里翻。
+ * 但 zod 自己也会产生消息（`"Invalid input"` 之类），那些不是 key ——
+ * 所以翻之前先问一句，不是 key 就原样奉还，**绝不把 `err.needUrl` 这种东西显示给人看**。
+ */
+export function isCopyKey(s: string | null | undefined): s is CopyKey {
+  return typeof s === "string" && s in zh;
+}
+
+/** 翻一条"可能是 key、也可能是现成人话"的消息。见 `isCopyKey` */
+export function tMaybeKey(t: Translate, message: string | null | undefined, fallback: CopyKey): string {
+  if (isCopyKey(message)) return t(message);
+  return message?.trim() ? message : t(fallback);
+}
