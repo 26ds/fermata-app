@@ -294,4 +294,46 @@ export const en = {
   "bubble.otherSenses": "Other common meanings",
   "bubble.noOther": "No other common meanings",
   "bubble.close": "Close",
+
+  // ── Pause-point replay ─────────────────────────────────────────────────
+  "pause.tagAsked": "Asked",
+  "pause.tagAnswered": "Answered",
+  "pause.tagStoppedAt": "Stopped on",
+  "pause.justStopped": "Just paused here",
+  "pause.deleteFailed": "Couldn't delete it. Please try again.",
+  "pause.heading": "replay / pause points",
+  "pause.collapse": "Collapse ⌃",
+  "pause.expand": (n: number) => `Expand ⌄ ${n}`,
+  "pause.chatRow": (n: number) => (n === 1 ? "1 exchange about this" : `${n} exchanges about this`),
+  "pause.chatOpen": "Open →",
+  "pause.empty":
+    "You haven't paused on this one yet. While watching, tap the orb at the bottom right — every moment you stop lands here.",
+  "pause.jumpAria": (time: string) => `Jump back to ${time}`,
+  "pause.toggleAria": (open: string, time: string) => `${open} the full exchange at ${time}`,
+  "pause.toggleOpen": "Expand",
+  "pause.toggleClose": "Collapse",
+  "pause.deleteAria": (time: string) => `Delete the pause point at ${time}`,
+  "pause.youAsked": "You asked:",
+
+  // ── Item detail (replay) ───────────────────────────────────────────────
+  "detail.tabPauses": "Pauses & chats",
+  "detail.tabVocab": "Vocabulary",
+  "detail.emptyPauses":
+    "You haven't paused on this one yet. Open it in the player and tap the orb at the bottom right — every moment you stop lands here.",
+  "detail.dayToday": "Today · that session",
+  "detail.dayYesterday": "Yesterday · that session",
+  "detail.dayUnknown": "Date unknown · that session",
+  "detail.dayOn": (date: string) => `${date} · that session`,
+
+  // ── Tap-to-select a span (D45 / M3.10) ─────────────────────────────────
+  "sel.take": "Save it",
+  "sel.drop": "In vocabulary · remove",
+  "sel.cancel": "Cancel",
+  "sel.hint": "Tap another word to select all the way to it",
+  "sel.word": (word: string) => `Selected “${word}”`,
+  "sel.saved": "Saved to vocabulary",
+  "sel.glossBusy": "Looking up what this means…",
+  "sel.glossFailed": "Couldn't find a meaning",
+  "sel.glossRetry": "Try again",
+  "sel.glossDismiss": "Dismiss",
 } as const satisfies CopyDict;

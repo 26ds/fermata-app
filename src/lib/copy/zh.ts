@@ -299,4 +299,46 @@ export const zh = {
   "bubble.otherSenses": "其他常用意思",
   "bubble.noOther": "没有别的常用意思",
   "bubble.close": "关掉",
+
+  // ── 暂停点回看 ──────────────────────────────────────────────────────────
+  "pause.tagAsked": "问了",
+  "pause.tagAnswered": "答过",
+  "pause.tagStoppedAt": "停在这句",
+  "pause.justStopped": "只是停了一下",
+  "pause.deleteFailed": "没删掉，请重试",
+  "pause.heading": "replay / 暂停点回看",
+  "pause.collapse": "收起 ⌃",
+  "pause.expand": (n: number) => `展开 ⌄ ${n}`,
+  "pause.chatRow": (n: number) => `和这条内容聊过 ${n} 轮`,
+  "pause.chatOpen": "打开 →",
+  "pause.empty": "这条内容你还没停过。看的时候点右下角悬浮球，停下的每一刻都会记在这里。",
+  "pause.jumpAria": (time: string) => `跳回 ${time}`,
+  "pause.toggleAria": (open: string, time: string) => `${open} ${time} 的完整问答`,
+  "pause.toggleOpen": "展开",
+  "pause.toggleClose": "收起",
+  "pause.deleteAria": (time: string) => `删除 ${time} 这个暂停点`,
+  "pause.youAsked": "你问：",
+
+  // ── 内容详情页（回看）──────────────────────────────────────────────────
+  "detail.tabPauses": "暂停点与聊天",
+  "detail.tabVocab": "词库",
+  "detail.emptyPauses": "这条内容你还没停过。回观看页看的时候点右下角悬浮球，停下的每一刻都会记在这里。",
+  // 「那次看的」这个后缀原来是拼在四种日期后面的。拼串在英文里语序会散，
+  // 所以四条各自写完整（`detail.dayOn` 的日期由 `Intl.DateTimeFormat` 按界面语言排版）
+  "detail.dayToday": "今天 · 那次看的",
+  "detail.dayYesterday": "昨天 · 那次看的",
+  "detail.dayUnknown": "时间不详 · 那次看的",
+  "detail.dayOn": (date: string) => `${date} · 那次看的`,
+
+  // ── 划词选段（点两下选一段，D45/M3.10）──────────────────────────────────
+  "sel.take": "收下",
+  "sel.drop": "已在词库 · 去掉",
+  "sel.cancel": "取消",
+  "sel.hint": "再点一个词，就一直选到那儿",
+  "sel.word": (word: string) => `选中「${word}」`,
+  "sel.saved": "已收进词库",
+  "sel.glossBusy": "查这个词的意思…",
+  "sel.glossFailed": "没查到意思",
+  "sel.glossRetry": "再试一次",
+  "sel.glossDismiss": "收起",
 } as const;

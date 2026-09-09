@@ -4,6 +4,8 @@ import { useId, useMemo, useState } from "react";
 import { firstSentence, segmentsInWindow } from "@/lib/captions";
 import { mmss } from "@/lib/time";
 import type { InterruptRow, TranscriptSegment } from "@/lib/types";
+import { useCopy } from "@/components/copy-provider";
+import type { Translate } from "@/lib/copy";
 
 // M3.5 暂停点回看 —— 把已经攒下的打断点变成「看得见、点得回」的一竖列。
 //
@@ -35,16 +37,21 @@ const CAPTION_AFTER_S = 4;
  * 再兜不住（这条内容还没字幕）才认命说一句大白话。
  * 「用 flash 生成 ≤15 字摘要」是可选增强，本片不做 —— 要花钱、要新路由，字幕首句已经够用。
  */
+// M3.9 片 c：纯函数拿不到界面语言，所以只返回 key，那句话由调用处 `t()` 出来。
+// `labelKey` 为空串 = 这一档没有前缀标签（"只是停了一下"那一档）
 function reasonOf(
   p: PausePoint,
   caption: string,
+  t: Translate,
 ): { label: string; text: string; fromCaption: boolean } {
   const q = p.question?.trim();
-  if (q) return { label: "问了", text: q, fromCaption: false };
+  if (q) return { label: t("pause.tagAsked"), text: q, fromCaption: false };
   const a = p.ai_answer?.trim();
-  if (a) return { label: "答过", text: firstSentence(a), fromCaption: false };
-  if (caption) return { label: "停在这句", text: firstSentence(caption), fromCaption: true };
-  return { label: "", text: "只是停了一下", fromCaption: false };
+  if (a) return { label: t("pause.tagAnswered"), text: firstSentence(a), fromCaption: false };
+  if (caption) {
+    return { label: t("pause.tagStoppedAt"), text: firstSentence(caption), fromCaption: true };
+  }
+  return { label: "", text: t("pause.justStopped"), fromCaption: false };
 }
 
 interface PauseListProps {
@@ -74,6 +81,7 @@ export function PauseList({
   onOpenChat,
   heading,
 }: PauseListProps) {
+  const t = useCopy();
   // 同一页会有好几个（按天分堆），id 必须各不相同，否则 aria-labelledby 全指向第一个
   const titleId = useId();
   // 默认展开：创始人要的是「点进一条内容就看见列出来的每一个暂停节点」。
@@ -94,7 +102,7 @@ export function PauseList({
       await onDelete(id);
       if (expandedId === id) setExpandedId(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "没删掉，请重试");
+      setError(e instanceof Error ? e.message : t("pause.deleteFailed"));
     } finally {
       setBusyId(null);
     }
@@ -107,7 +115,7 @@ export function PauseList({
     <section aria-labelledby={titleId} className="mt-1">
       <div className="flex items-center justify-between px-1">
         <p id={titleId} className="eyebrow">
-          {heading ?? "replay / 暂停点回看"}
+          {heading ?? t("pause.heading")}
         </p>
         <button
           type="button"
@@ -115,7 +123,7 @@ export function PauseList({
           aria-expanded={open}
           className="ui-mono min-h-11 rounded-xl px-2 text-[0.68rem] text-ink-500 transition-colors hover:text-teal-300"
         >
-          {open ? "收起 ⌃" : `展开 ⌄ ${sorted.length}`}
+          {open ? t("pause.collapse") : t("pause.expand", sorted.length)}
         </button>
       </div>
 
@@ -133,15 +141,15 @@ export function PauseList({
                 ◎
               </span>
               <span className="min-w-0 flex-1 truncate text-sm text-ink-100">
-                和这条内容聊过 {chatRounds} 轮
+                {t("pause.chatRow", chatRounds)}
               </span>
-              <span className="shrink-0 text-xs text-ink-500">打开 →</span>
+              <span className="shrink-0 text-xs text-ink-500">{t("pause.chatOpen")}</span>
             </button>
           )}
 
           {sorted.length === 0 ? (
             <p className="px-4 py-4 text-xs leading-5 text-ink-500">
-              这条内容你还没停过。看的时候点右下角悬浮球，停下的每一刻都会记在这里。
+              {t("pause.empty")}
             </p>
           ) : (
             <ul className="flex flex-col">
@@ -154,7 +162,7 @@ export function PauseList({
                   .map((s) => s.text)
                   .join(" ")
                   .trim();
-                const reason = reasonOf(p, caption);
+                const reason = reasonOf(p, caption, t);
                 // 有完整回答才给展开箭头 —— 这就是 M3 欠的「点回打断点看历史问答」
                 const canExpand = Boolean(p.ai_answer?.trim());
                 const isOpen = expandedId === p.id;
@@ -167,7 +175,7 @@ export function PauseList({
                       <button
                         type="button"
                         onClick={() => onSeek(p.t_s)}
-                        aria-label={`跳回 ${mmss(p.t_s)}`}
+                        aria-label={t("pause.jumpAria", mmss(p.t_s))}
                         className="flex min-h-14 min-w-0 flex-1 items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-ink-700/40"
                       >
                         <span
@@ -204,7 +212,7 @@ export function PauseList({
                           type="button"
                           onClick={() => setExpandedId(isOpen ? null : p.id)}
                           aria-expanded={isOpen}
-                          aria-label={`${isOpen ? "收起" : "展开"} ${mmss(p.t_s)} 的完整问答`}
+                          aria-label={t("pause.toggleAria", isOpen ? t("pause.toggleClose") : t("pause.toggleOpen"), mmss(p.t_s))}
                           className="mt-1.5 flex h-11 w-8 shrink-0 items-center justify-center text-ink-500 transition-colors hover:text-teal-300"
                         >
                           <span aria-hidden>{isOpen ? "⌃" : "⌄"}</span>
@@ -216,7 +224,7 @@ export function PauseList({
                         type="button"
                         disabled={busyId === p.id}
                         onClick={() => remove(p.id)}
-                        aria-label={`删除 ${mmss(p.t_s)} 这个暂停点`}
+                        aria-label={t("pause.deleteAria", mmss(p.t_s))}
                         className="mr-1 mt-1.5 flex h-11 w-9 shrink-0 items-center justify-center text-ink-500 transition-colors hover:text-red-300 disabled:opacity-40"
                       >
                         {busyId === p.id ? "…" : "✕"}
@@ -227,7 +235,7 @@ export function PauseList({
                       <div className="border-t border-ink-700/70 bg-ink-900/40 px-4 py-3">
                         {p.question?.trim() && (
                           <p className="text-sm leading-6 text-ink-100">
-                            <span className="text-ink-500">你问：</span>
+                            <span className="text-ink-500">{t("pause.youAsked")}</span>
                             {p.question.trim()}
                           </p>
                         )}

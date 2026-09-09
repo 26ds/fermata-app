@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { segmentLine, spanAt, spanOf, type TermSpan } from "@/lib/segment";
 import type { PhraseItem } from "@/lib/phrases/types";
+import { useCopy } from "@/components/copy-provider";
 
 // M3.10 手动选词 —— 一行字幕，**他自己划一段收进词库**（D45）。
 //
@@ -19,26 +20,16 @@ import type { PhraseItem } from "@/lib/phrases/types";
 // D18：那条「收下 / 取消」**就地长在这一行下面**，不做浮层 —— 手机上浮层会被
 // 磨砂层、面板、悬浮球轮流盖住（M3.7 已经踩过一次）。
 
-/** D42：文案集中在顶部，M3.9 抽语言表时只动这一处 */
-const COPY = {
-  take: "收下",
-  // 真机反馈 2026-08-04：「我并没有看到中文解释，测试了很多个视频」。
-  // 探针证明解释**生成得出来**（同一句话、同一个词，Gemini 三种模式都给了中文）——
-  // 错在我只把它写进了词库那一页，**他点词的地方从头到尾什么都不说**。
-  // 他点一个词就是在问"这什么意思"，答案必须落在他手指下面
-  glossBusy: "查这个词的意思…",
-  glossFailed: "没查到意思",
-  glossRetry: "再试一次",
-  glossDismiss: "收起",
-  saved: "已收进词库",
-  // **动词必须排在最前面**：第一版是「〔词〕已在词库 · 去掉」，划了一长段之后按钮被
-  // 截断成「〔about machine learning is t…」—— 这句话到底让人干什么，全被吃掉了。
-  // 选中的原文就在正上方高亮着，不必在按钮里再抄一遍
-  drop: "已在词库 · 去掉",
-  cancel: "取消",
-  hint: "再点一个词，就一直选到那儿",
-  word: (t: string) => `选中「${t}」`,
-};
+// M3.9 片 c：文案全在 `src/lib/copy/`（`sel.*`）。
+//
+// ⚠️ 那几条 gloss 文案别删。真机反馈 2026-08-04：「我并没有看到中文解释，
+// 测试了很多个视频」—— 探针证明解释**生成得出来**（同一句话、同一个词，Gemini
+// 三种模式都给了中文），错在我只把它写进了词库那一页，**他点词的地方从头到尾
+// 什么都不说**。他点一个词就是在问"这什么意思"，答案必须落在他手指下面。
+//
+// ⚠️ `sel.drop` 的**动词必须排在最前面**：第一版是「〔词〕已在词库 · 去掉」，
+// 划了一长段之后按钮被截断成「〔about machine learning is t…」——
+// 这句话到底让人干什么，全被吃掉了。选中的原文就在正上方高亮着，不必在按钮里再抄一遍。
 
 /** 一个刚收下的词，它的解释取到哪一步了 */
 export interface GlossState {
@@ -94,6 +85,8 @@ export function SelectableLine({
   className,
   style,
 }: SelectableLineProps) {
+  // ⚠️ 这个文件里翻译函数叫 `tr` 不叫 `t` —— `t` 已经被 props 里"这一行从第几秒开始"占了
+  const tr = useCopy();
   /**
    * 选中的区间 `[lo, hi]`（含两端）。第一次点两头相同 = 只选中那一个词。
    *
@@ -243,7 +236,7 @@ export function SelectableLine({
               role="button"
               tabIndex={0}
               aria-pressed={inSel}
-              aria-label={COPY.word(b.text)}
+              aria-label={tr("sel.word", b.text)}
               // ── 鼠标：**移上去立刻出**（他要"秒出现"，不加 hover 延迟）──
               onPointerEnter={
                 shaded && onLookup
@@ -351,7 +344,7 @@ export function SelectableLine({
             }`}
           >
             {/* 动词不许被截断（shrink-0），要截就截那段原文 */}
-            <span className="shrink-0">{pickedSaved ? COPY.drop : COPY.take}</span>
+            <span className="shrink-0">{pickedSaved ? tr("sel.drop") : tr("sel.take")}</span>
             {!pickedSaved && <span className="min-w-0 truncate">「{picked.text}」</span>}
           </button>
           <button
@@ -362,12 +355,12 @@ export function SelectableLine({
             }}
             className="min-h-9 shrink-0 rounded-xl border border-ink-500/60 px-3 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300"
           >
-            {COPY.cancel}
+            {tr("sel.cancel")}
           </button>
         </div>
       )}
       {picked && onToggleTerm && lo === hi && (
-        <p className="mt-1 text-[0.68rem] leading-4 text-ink-500">{COPY.hint}</p>
+        <p className="mt-1 text-[0.68rem] leading-4 text-ink-500">{tr("sel.hint")}</p>
       )}
 
       {/* 刚收下的那个词的解释，**就长在这一行下面**（D18：不做浮层）。
@@ -384,13 +377,13 @@ export function SelectableLine({
                 glosses.get(answer)!.text
               ) : (
                 <span className="text-ink-500">
-                  {glosses.get(answer)!.status === "busy" ? COPY.glossBusy : COPY.glossFailed}
+                  {glosses.get(answer)!.status === "busy" ? tr("sel.glossBusy") : tr("sel.glossFailed")}
                 </span>
               )}
             </span>
           </p>
           <div className="mt-1 flex items-center gap-2">
-            <span className="text-[0.66rem] text-ink-500">{COPY.saved}</span>
+            <span className="text-[0.66rem] text-ink-500">{tr("sel.saved")}</span>
             <span className="flex-1" />
             {glosses.get(answer)!.status === "failed" && onRetryGloss && (
               <button
@@ -401,7 +394,7 @@ export function SelectableLine({
                 }}
                 className="min-h-7 shrink-0 rounded-lg border border-teal-400/50 px-2 text-[0.66rem] text-teal-300"
               >
-                {COPY.glossRetry}
+                {tr("sel.glossRetry")}
               </button>
             )}
             <button
@@ -412,7 +405,7 @@ export function SelectableLine({
               }}
               className="min-h-7 shrink-0 rounded-lg px-2 text-[0.66rem] text-ink-500 hover:text-teal-300"
             >
-              {COPY.glossDismiss}
+              {tr("sel.glossDismiss")}
             </button>
           </div>
         </div>
