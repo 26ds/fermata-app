@@ -409,3 +409,56 @@ select:focus-visible {
   .glow-burst { animation: none; display: none; }
   .siri-orb { animation: none; }
 }
+
+/* ── 法务长文（/privacy、/terms）───────────────────────────────────────────
+   这两页是**文档**不是界面：段落多、层级浅、要能一路读下去。
+   没装 @tailwindcss/typography，也不必为两页装 —— 这里就是它需要的全部排版。 */
+.legal-prose {
+  color: var(--color-ink-300);
+  line-height: 1.85;
+}
+.legal-prose h2 {
+  margin: 2.5rem 0 0.75rem;
+  color: var(--color-ink-100);
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.legal-prose h3 {
+  margin: 1.75rem 0 0.5rem;
+  color: var(--color-ink-100);
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.legal-prose p { margin: 0.85rem 0; }
+.legal-prose ul { margin: 0.85rem 0; padding-left: 1.15rem; list-style: disc; }
+.legal-prose li { margin: 0.4rem 0; }
+.legal-prose strong { color: var(--color-ink-100); font-weight: 600; }
+.legal-prose a { color: var(--color-teal-300); text-decoration: underline; text-underline-offset: 3px; }
+.legal-prose code {
+  padding: 0.1em 0.35em;
+  border-radius: 0.3rem;
+  background: color-mix(in srgb, var(--color-ink-100) 10%, transparent);
+  font-family: var(--font-mono-ui);
+  font-size: 0.88em;
+}
+/* 表格在窄屏上必须自己横向滚，不能把整页顶宽 */
+.legal-prose .table-wrap { overflow-x: auto; margin: 1rem 0; }
+.legal-prose table { width: 100%; min-width: 30rem; border-collapse: collapse; font-size: 0.875rem; }
+.legal-prose th,
+.legal-prose td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-ink-300) 18%, transparent);
+  text-align: left;
+  vertical-align: top;
+}
+.legal-prose th { color: var(--color-ink-100); font-weight: 600; white-space: nowrap; }
+.legal-prose blockquote {
+  margin: 1.5rem 0;
+  padding: 0.9rem 1.1rem;
+  border-left: 2px solid var(--color-teal-600);
+  border-radius: 0 0.75rem 0.75rem 0;
+  background: color-mix(in srgb, var(--color-teal-950) 55%, transparent);
+  color: var(--color-teal-100);
+  font-size: 0.9rem;
+}
