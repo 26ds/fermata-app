@@ -10,8 +10,10 @@ import { ImmersiveChat } from "@/components/immersive-chat";
 import { InterruptPanel, type PanelLine } from "@/components/interrupt-panel";
 import type { PausePoint } from "@/components/pause-list";
 import { PlayerControls } from "@/components/player-controls";
+import { QaRail, type QaTab } from "@/components/qa-rail";
 import type { GlossState } from "@/components/selectable-line";
 import { ViewportLayer } from "@/components/viewport-layer";
+import { isWideNow, useIsWide } from "@/components/use-wide";
 import { useWordLookup } from "@/components/word-lookup";
 import { DEFAULT_LANG_PREFS, type LangPrefs } from "@/lib/lang";
 import {
@@ -214,6 +216,14 @@ export function WatchStage({
   // 只问"用哪个壳"。这条链接是什么平台、叫什么名字，是服务端 registry 的活（M1d）
   const shell = playerFor(source.kind);
   const t = useCopy();
+  /**
+   * M3.15 片 a —— 宽屏（≥1024px）吗。**这一片砍掉的两样东西靠它**（D61 / 计划 §F）：
+   * 暂停不再自动弹面板、悬浮球不再挂载。两样都**不是"藏起来"是"不发生"**，
+   * 所以必须是 JS 判据，不能是 `lg:hidden`（理由写在 use-wide.ts 里）。
+   * 窄屏那套一个字节都没动 —— 手机上面板照弹、球照在。
+   */
+  const isWide = useIsWide();
+
   /** 播放控制卡展开着吗（宽屏专有，见文件顶上那段说明） */
   const controlsShown = useSyncExternalStore(
     subscribeControls,
@@ -335,6 +345,14 @@ export function WatchStage({
   const scanRunningRef = useRef(false);
   /** 刚收下的词，解释取到哪一步了（`词 → 状态`）。只活在这一次观看里，不落库 */
   const [glosses, setGlosses] = useState<Map<string, GlossState>>(() => new Map());
+  // ── M3.15 片 a：右栏三个栏目（D61）──
+  /** 现在露在外面的是哪一个。**每次进这一页都从「问答」开始** —— 记住上次选的是片 g 的事 */
+  const [qaTab, setQaTab] = useState<QaTab>("chat");
+  /** 「只记下这一刻」那颗按钮的状态。error 非空 = 上一次没记上，界面上要说出来（D44） */
+  const [capture, setCapture] = useState<{ busy: boolean; error: string }>({
+    busy: false,
+    error: "",
+  });
   const savedRef = useRef(savedMap);
   useEffect(() => {
     savedRef.current = savedMap;
@@ -1013,13 +1031,56 @@ export function WatchStage({
   /** 用户真的按了暂停（缓冲/播放结束不算，见 PlayerProps.onPause） */
   const handlePause = useCallback(() => {
     if (panelOpenRef.current || immersiveRef.current) return; // 面板已开 / 沉浸态：不弹短问答面板
+    // ── M3.15 片 a（D61）：**宽屏上暂停不再自动弹面板** ──
+    // 推翻的是 D5 / D39（「点球或暂停 → 打断面板」）在宽屏上的那半边：
+    // 右栏的问答 tab 常驻，想问随时能问，不该再有半屏面板扑上来盖住视频。
+    // ⚠️ 窄屏一个字节都没动 —— 手机上那条路（暂停 → 面板）原样活着。
+    if (isWideNow()) {
+      // D40 的懒触发**得留着**：原来"第一次停下来才扫词组"这一下挂在开面板里，
+      // 面板没了它会跟着一起没。autoScan 开着＝用户已经点过头了（D44 的"人点过"），
+      // 不补这一句，开着开关的人在宽屏上永远等不到扫描。
+      if (autoScanRef.current) void ensurePhrases();
+      return;
+    }
     openPanel(currentTimeRef.current, false);
-  }, [openPanel]);
+  }, [openPanel, ensurePhrases]);
 
-  /** 轻点悬浮球 = 记下这一刻并开面板 */
+  /** 轻点悬浮球 = 记下这一刻并开面板（**窄屏专用** —— 宽屏上球已经不挂载了） */
   const captureNow = useCallback(() => {
     openPanel(currentTimeRef.current, true);
   }, [openPanel]);
+
+  /**
+   * 「只记下这一刻，先不问」——— **悬浮球在宽屏上的替身**（计划 §F）。
+   *
+   * 片 a 把球从宽屏上摘了，可"先记下来待会儿再说"这个能力**不能跟着一起没**：
+   * 那是 M1 就有的东西，砍掉一个入口不等于砍掉一个功能。所以这里走
+   * 和 `openPanel(capture=true)` 一样的落库路径，**只是不开面板**。
+   * 片 b 会把这颗按钮挪到输入框边上，那才是它最终的家。
+   *
+   * 乐观先画点、落库回来换真 id；**没记上要说出来**（D44：不许静默失败），
+   * 所以失败时把假点撤掉并回一句人话，不是闷着不动。
+   */
+  const captureOnly = useCallback(async () => {
+    const tS = currentTimeRef.current;
+    const tempId = `temp-${Date.now()}`;
+    setCapture({ busy: true, error: "" });
+    setPoints((prev) => [
+      ...prev,
+      { id: tempId, t_s: tS, question_mode: null, question: null, ai_answer: null },
+    ]);
+    try {
+      const saved = await postInterrupt(tS, null);
+      setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+      setCapture({ busy: false, error: "" });
+    } catch (e) {
+      setPoints((prev) => prev.filter((p) => p.id !== tempId));
+      setCapture({
+        busy: false,
+        error: e instanceof Error ? e.message : "没记下这一刻，再点一次试试",
+      });
+    }
+  }, [postInterrupt]);
 
   /** 问一句：确保这刻已落库（拿到 interruptId）→ 流式取 /api/ask，边收边显示 */
   const handleAsk = useCallback(
@@ -1638,7 +1699,13 @@ export function WatchStage({
           （创始人 2026-09-06 在截图上画的那条线）。这个数由 measureRightH 量出来；
           播客那一档是 `auto`，照旧吃满整行（左边那张控制卡只有 137px 高，
           照它收字幕等于把主战场砍没了）。 */}
-      <div className="flex min-w-0 flex-col lg:h-[var(--right-h)] lg:min-h-0 lg:overflow-y-auto lg:pr-1">
+      <div className="flex min-w-0 flex-col lg:min-h-0 lg:pr-1">
+        {/* 字幕这一块**自己收到视频下沿**（`--right-h`），滚的也是它自己。
+            片 a 之前这两件事长在外面那个 div 上 —— 整个右栏就是字幕，两者是一回事；
+            现在右栏底下多了三个栏目，**上限必须往里挪一层**，
+            不然三个栏也被一起夹在视频下沿以上、挤成一条缝。
+            创始人 2026-09-06 画的那条红线管的是**字幕**，不是"右栏里所有东西"。 */}
+        <div className="flex min-w-0 flex-col lg:h-[var(--right-h)] lg:min-h-0 lg:overflow-y-auto">
         {/* D4：字幕可开关、字号可调、行宽自适应 —— 视频与播客共用同一层 */}
         <CaptionLayer
           sourceId={source.id}
@@ -1668,6 +1735,26 @@ export function WatchStage({
             onRun: () => void runTranscription(),
           }}
         />
+        </div>
+
+        {/* ── M3.15 片 a：三个栏目（① 问答 ② 问题列表 ③ Takeaway，D61）──
+            **只在宽屏挂载**。手机上右栏就是字幕本身，塞第三条问答路进去正是
+            计划 §八 明确不做的事（那才叫"重新设计手机界面"）。
+            量出来的地（1512×859，播放控制展开）：视频下沿到这一行底还有 **297px**，
+            其中 114px 今天完全空着 —— 也就是说三个栏**没从字幕身上拿走一个像素**。
+            片 g 的布局 ②③ 会把整条右栏让给它。 */}
+        {isWide && (
+          <div className="mt-3 flex min-h-0 flex-1 flex-col">
+            <QaRail
+              tab={qaTab}
+              onTab={setQaTab}
+              onCaptureNow={() => void captureOnly()}
+              capturing={capture.busy}
+              captureError={capture.error}
+              pointCount={points.length}
+            />
+          </div>
+        )}
       </div>
 
       {/* 拖中缝时整页盖一层透明遮罩 —— **这一层不是装饰，是拖动能不能成立的前提**（D47 §B）。
@@ -1689,15 +1776,25 @@ export function WatchStage({
           实测：挂在 `<main class="page-enter">` 里，`fixed` 就不再相对视口，
           球按 `window.innerWidth` 算出来的横坐标会再叠一个 main 的左边距，
           1280 宽上直接飞出屏幕。三层都得靠 <ViewportLayer> 搬到 body 底下。 */}
-      <ViewportLayer>
-        <CaptureOrb
-          state={orbReady ? "ready" : "pending"}
-          immersive={immersive}
-          onTap={captureNow}
-          onLongPress={immersive ? exitImmersive : enterImmersive}
-        />
-      </ViewportLayer>
+      {/* ⚠️ **组件、动画、长按逻辑一律保留不删**，宽屏上只是不挂载（计划 §F）——
+          创始人 2026-09-07：「悬浮球就变成以后介入语音的时候吧，那个动画和逻辑保留我还挺喜欢」。
+          将来语音进来时它就是那颗按钮（D34 路线①）。
+          宽屏上"只记下这一刻"的替身是问答栏里那颗按钮（captureOnly）。 */}
+      {!isWide && (
+        <ViewportLayer>
+          <CaptureOrb
+            state={orbReady ? "ready" : "pending"}
+            immersive={immersive}
+            onTap={captureNow}
+            onLongPress={immersive ? exitImmersive : enterImmersive}
+          />
+        </ViewportLayer>
+      )}
 
+      {/* ⚠️ **不许删**：窄屏还在用它（暂停 → 面板那条路手机上原样活着）。
+          宽屏不挂载 —— 藏起来不算砍掉，藏起来的面板照样会抢焦点、照样把
+          `panelOpenRef` 弄成 true。 */}
+      {!isWide && (
       <ViewportLayer>
         <InterruptPanel
           open={panel.open}
@@ -1725,11 +1822,19 @@ export function WatchStage({
           onAnswerTarget={answerTarget}
         />
       </ViewportLayer>
+      )}
 
       {/* M3.11：悬浮词卡。**整页只有这一个** —— 暂停面板和字幕列表共用它。
           它自己就 portal 到 body（word-bubble.tsx），所以这里不用再裹一层 */}
       {lookup.bubble}
 
+      {/* ⚠️ **不许删**，而且宽屏上也**照旧挂载**（和悬浮球 / 暂停面板不同）。
+          理由：宽屏上进沉浸聊天的入口只剩 `?chat=1` —— 那是「历史与知识库」里
+          「和这条内容聊过 N 轮」点进来的**用户主动行为**，不是这一片要砍的自动弹出。
+          片 a 还没有问答栏本体（那是片 b），这会儿把它一起摘了，
+          那条链接就变成**点了什么都不发生** —— 正是 D44 不许的静默失败。
+          片 b 接上问答栏之后，这条路再一起收编。
+          长按进沉浸已经随球一起没了（§F），所以宽屏上它只可能由 `?chat=1` 打开。 */}
       {immersive && (
         <ViewportLayer>
           <ImmersiveChat

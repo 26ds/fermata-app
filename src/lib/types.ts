@@ -15,6 +15,12 @@ export type SourceKind = "youtube" | "podcast" | "manual";
 export type TranscriptStatus = "pending" | "partial" | "ready" | "failed";
 export type AtomType = "vocab" | "concept" | "claim";
 export type QuestionMode = "word" | "concept" | "voice" | "free";
+/**
+ * D65：问题三分类，**一个问题可以同时属于多类**（所以落库是 `text[]` 不是枚举）。
+ * `language` 问的是这门语言本身、`knowledge` 问的是内容讲的那件事、
+ * `misheard` 问的是"刚才发生了什么"（走神 / 没听清 / 要复述）。
+ */
+export type QuestionKind = "language" | "knowledge" | "misheard";
 export type SessionMode = "post_session" | "weekly_interview";
 export type FsrsState = "new" | "learning" | "review" | "relearning";
 
@@ -49,6 +55,12 @@ export interface SourceRow {
   phrases?: unknown;
   /** `ready` / `partial` / `running@<ISO>`（并发锁）/ 空 = 还没扫过 */
   phrases_status?: string | null;
+  // ── 迁移 0011（M3.15 问答工作台）。同样写成可选：迁移没跑时这一列不存在 ──
+  /**
+   * D66：看过的区间 `[[start,end],…]`（秒）。点点条上的灰段（＝跳过没看的）由它算。
+   * 用 unknown 是因为它是 jsonb —— 读的地方自己校验，别信数据库里躺着的形状。
+   */
+  watched_ranges?: unknown;
 }
 
 /** interrupts 表行：打断点指针 (source, t) + 上下文窗口 [t−15, t+3] */
@@ -63,6 +75,18 @@ export interface InterruptRow {
   question_mode: QuestionMode | null;
   ai_answer: string | null;
   created_at: string;
+  // ── 迁移 0011（M3.15 问答工作台，D62：每一轮问答就是一个捕获点）──
+  //    全部写成可选：迁移没跑的时候这些列根本不存在，`select *` 拿回来的行就是少这几个键。
+  /** 追问的母问题。答完之后**没有继续播视频**就又问的那一句，挂在它下面（计划 §B.4） */
+  parent_id?: string | null;
+  /** D65 问题三分类，可多属。答题那一次调用顺带标出来的 */
+  kinds?: QuestionKind[] | null;
+  /** D64：答案引用的其他时刻。jsonb，读的地方自己校验形状 */
+  refs?: unknown;
+  /** ③ Takeaway 的要点，切到那个 tab 才生成（D44）。jsonb */
+  takeaway?: unknown;
+  /** 勾进「知识点」清单了吗 */
+  saved?: boolean | null;
 }
 
 /** atoms 表行：统一知识原子（FSRS Card 字段一比一落库） */
