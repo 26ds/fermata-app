@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
@@ -67,9 +68,22 @@ export default async function LoginPage({
         </section>
       </div>
 
-      <footer className="relative flex items-center justify-between pb-[env(safe-area-inset-bottom)] text-xs text-ink-500">
-        <span>Fermata / 01</span>
-        <span>停留之处，即学习之处。</span>
+      {/* 隐私政策/条款必须从登录页点得到 —— Google 同意屏幕挂的就是这两个链接，
+          而且注册前就该看得见，不能藏在登录之后 */}
+      <footer className="relative flex flex-col gap-3 pb-[env(safe-area-inset-bottom)] text-xs text-ink-500">
+        <div className="flex items-center justify-between">
+          <span>Fermata / 01</span>
+          <span>停留之处，即学习之处。</span>
+        </div>
+        {/* 单独一行，不挤掉那句标语 */}
+        <div className="flex items-center gap-4 border-t border-ink-500/25 pt-3">
+          <Link href="/privacy" className="min-h-8 underline-offset-4 hover:text-ink-100 hover:underline">
+            隐私政策
+          </Link>
+          <Link href="/terms" className="min-h-8 underline-offset-4 hover:text-ink-100 hover:underline">
+            服务条款
+          </Link>
+        </div>
       </footer>
     </main>
   );
