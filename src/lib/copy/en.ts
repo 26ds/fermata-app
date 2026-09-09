@@ -185,4 +185,70 @@ export const en = {
   "login.errSendFailed":
     "The email couldn't be sent — that's a failure on our sending side, not a mistake in your address. Try again shortly; if it keeps happening, send us a screenshot of this message.",
   "legal.updated": "Last updated",
+
+  // ── Import form ────────────────────────────────────────────────────────
+  "import.label": "Paste a link",
+  "import.placeholder": "YouTube / Xiaoyuzhou / Apple Podcasts…",
+  "import.submit": "Start watching",
+  "import.busy": "Importing…",
+  "import.failed": "Import failed. Please try again.",
+  "import.offline": "No connection — check your network and try again",
+  "import.hintA": "In Apple Podcasts, open the episode and tap",
+  "import.hintB":
+    ", then paste the URL here. In other apps it's “Share → Copy link”. A show page or RSS feed works too — that imports the latest episode.",
+
+  // ── Content list (lower half of /watch) ────────────────────────────────
+  "list.empty": "Nothing here yet. Paste a link above to try it.",
+  "list.groupPinned": "Pinned",
+  "list.groupUnknown": "Date unknown",
+  "list.groupToday": "Added today",
+  "list.groupYesterday": "Added yesterday",
+  "list.groupWeek": "Added this week",
+  "list.groupOlder": "Added earlier",
+  "list.pinned": "Pinned",
+  "list.favorited": "Favorited",
+  "list.moreActions": (title: string) => `More actions for ${title}`,
+  "list.actionsAria": "Item actions",
+  "list.close": "Close",
+  "list.pin": "Pin",
+  "list.unpin": "Unpin",
+  "list.favorite": "Add to favorites",
+  "list.unfavorite": "Remove from favorites",
+  "list.delete": "Delete",
+  "list.cancel": "Cancel",
+  "list.changeFailed": "Couldn't change that. Please try again.",
+  "list.changeOffline": "No connection — the change didn't go through",
+  "list.deleteFailed": "Delete failed. Please try again.",
+  "list.deleteOffline": "No connection — nothing was deleted",
+  "list.flagsMigration": "Pinning and favorites need one run in Supabase first:",
+
+  // ── Watch history (/library list) ──────────────────────────────────────
+  "history.empty":
+    "Nothing watched yet. Go to Watch, paste a link, watch a few minutes — then it shows up here.",
+  "history.emptyFolders":
+    "Auto-sorting isn't ready yet. Once it ships, what you've watched gets grouped into folders here.",
+  "history.watchedTo": (t: string) => `Up to ${t}`,
+  "history.times": (n: number) => (n === 1 ? "Watched once" : `Watched ${n} times`),
+  "history.pauses": (n: number) => (n === 1 ? "1 pause point" : `${n} pause points`),
+  "history.bucketToday": "Watched today",
+  "history.bucketYesterday": "Watched yesterday",
+  "history.bucketWeek": "Watched this week",
+  "history.bucketOlder": "Watched earlier",
+  "history.bucketUnknown": "Date unknown",
+  "history.unknownNote":
+    "These were watched before migration 0007 — back then there was no field recording when you watched. Watch one again and it moves into place.",
+
+  // ── Vocabulary list ────────────────────────────────────────────────────
+  "vlist.empty":
+    "No words saved yet. Pause while watching and tap a word in the subtitles to keep it; tap a second word to keep the whole span.",
+  "vlist.emptyAll":
+    "Your vocabulary is still empty. Pause inside any item and tap a word in the subtitles to save it.",
+  "vlist.remove": "Remove from vocabulary",
+  "vlist.removeAria": (term: string) => `Remove from vocabulary: ${term}`,
+  "vlist.removeFailed": "Couldn't remove it. Please try again.",
+  "vlist.jumpAria": (term: string) => `Jump back to the audio: ${term}`,
+  "vlist.glossMissing": "Explanation not fetched yet",
+  "vlist.glossRetry": "Try again",
+  "vlist.glossBusy": "Fetching explanation…",
+  "vlist.glossFailed": "Still didn't come through — try again in a bit",
 } as const satisfies CopyDict;

@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useCopy } from "@/components/copy-provider";
 
 // M1a — 贴链接导入。只记指针，不碰媒体文件。
 export function ImportForm() {
+  const t = useCopy();
   const router = useRouter();
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -23,13 +25,13 @@ export function ImportForm() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setError(data?.error ?? "导入失败，请重试");
+        setError(data?.error ?? t("import.failed"));
         setBusy(false);
         return;
       }
       router.push(`/watch/${data.id}`);
     } catch {
-      setError("网络不通，检查一下连接再试");
+      setError(t("import.offline"));
       setBusy(false);
     }
   }
@@ -37,7 +39,7 @@ export function ImportForm() {
   return (
     <form onSubmit={submit} className="flex flex-col gap-3">
       <label htmlFor="source-url" className="text-xs font-semibold tracking-wide text-ink-300">
-        贴一条链接
+        {t("import.label")}
       </label>
       <input
         id="source-url"
@@ -45,7 +47,7 @@ export function ImportForm() {
         required
         inputMode="url"
         autoComplete="off"
-        placeholder="YouTube / 小宇宙 / Apple Podcasts…"
+        placeholder={t("import.placeholder")}
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         className="h-14 rounded-xl border border-ink-500/70 bg-ink-900 px-4 text-ink-100 placeholder:text-ink-500 outline-none focus:border-teal-400"
@@ -55,13 +57,13 @@ export function ImportForm() {
         disabled={busy || url.trim().length === 0}
         className="flex h-14 items-center justify-center gap-2 rounded-xl bg-teal-400 px-4 font-semibold text-teal-950 disabled:opacity-50"
       >
-        {busy ? "正在导入…" : "开始看"}
+        {busy ? t("import.busy") : t("import.submit")}
         {!busy && <span aria-hidden>→</span>}
       </button>
       <p className="text-xs leading-5 text-ink-500">
-        苹果播客里点这一集的{" "}
-        <span className="text-ink-300">「From this episode」</span>，直接拷贝网址粘贴进来；
-        小宇宙等其他 App 就是「分享 → 复制链接」。贴节目主页或 RSS 也认，那会导入最新一集。
+        {t("import.hintA")}{" "}
+        <span className="text-ink-300">「From this episode」</span>
+        {t("import.hintB")}
       </p>
       {error && (
         <p className="text-sm text-red-400" role="alert">
