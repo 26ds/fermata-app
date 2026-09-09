@@ -440,4 +440,65 @@ export const zh = {
   "stage.transcribeFailed": "字幕没生成出来，稍后再试",
   "stage.transcribeFailedShort": "字幕没生成出来",
   "stage.deleteFailed": "没删掉，请重试",
+
+  // ── 打断面板（暂停时弹出来那张）────────────────────────────────────────
+  "panel.stuckAt": "卡在",
+  "panel.askHint": "问一句，我扣着这段字幕答你。",
+  "panel.lastTwoSeconds": "刚才这两秒",
+  // 创始人 2026-08-04 指名要加：**只有收进词库的词才查得了意思**。
+  // 不说清楚的话，悬浮在普通词上没反应，看着就像功能坏了
+  "panel.pickHint": "点词收进词库 · 收进后才能查意思",
+  "panel.noCaptionHere": "这一刻附近没有字幕。",
+  "panel.collapse": "点我收起，去看字幕",
+  "panel.expand": "展开",
+  "panel.expandLabel": "展开面板",
+  "panel.close": "关闭",
+  "panel.collapsedAria": "打断面板（已收起）",
+  "panel.backToPick": "回到暂停那两秒挑词",
+  "panel.askShort": "问一句",
+  "panel.addWord": "＋词",
+  "panel.chat": "沉浸聊天",
+  "panel.rescan": "再扫一次",
+  "panel.placeholder": "这里在讲什么？这个词什么意思？",
+  "panel.thinking": "思考中…",
+  "panel.send": "发送",
+  "panel.immersiveTitle": "长问答沉浸聊天",
+  "panel.immersiveHint": "有诸多疑惑？进来接着问，我扣着当前进度答。",
+  "panel.justCapture": "只记下这一刻，先不问",
+  "panel.done": "完成",
+  "panel.cancel": "取消",
+  "panel.saveFailed": "没记下来，请重试",
+
+  // 扫描的几种结局，每一种都得说人话 —— 说不清楚的失败等于没做
+  "panel.scanOff": "AI 标词关着 —— 开关在下面「字幕」那一行。",
+  "panel.scanScanning": "正在把这条内容里值得收的表达标出来…",
+  "panel.scanReady": (n: number) => `全片标出 ${n} 个，下面的字幕里也都标了`,
+  "panel.scanEmpty": "整片扫完了，一个都没标出来。",
+  "panel.scanNotReady": "字幕还太少，等它多转出一段再来扫。",
+  "panel.scanRunning": "上一次扫描还没结束（或卡住了）。",
+  "panel.scanFailed": "这次没扫成。",
+
+  // 这一份是按**旧的语言设置**扫的。说清楚是哪儿旧了，别只丢一个按钮
+  "panel.driftMode": "你改过语言设置了 —— 这一份是按之前那套标的。",
+  "panel.driftSupport": "你换了母语 —— 这些解释还是用之前那门语言写的。",
+  "panel.driftRescan": "按新的重扫",
+
+  // 第一次遇到非母语内容时问的那一句（D42）
+  "panel.targetTitle": (lang: string) => `这条内容是 ${lang}。`,
+  "panel.targetQuestion": "你是想学这门语言，还是只想搞懂内容？",
+  "panel.targetLearn": (lang: string) => `我想学 ${lang}`,
+  "panel.targetJustContent": "只想搞懂内容",
+
+  // ── 快捷问 ──────────────────────────────────────────────────────────────
+  // ⚠️ `quick.*Q` 这两条是**真的发给模型的那句话**，不是界面标签。
+  // 放进文案表是想清楚了的：它不是"提示词模板"（D42 红线禁的是那个），
+  // 而是**替用户打的那句话** —— 聊天流里会原样显示成「你问：…」。
+  // 用英文界面的人按下去，冒出来一句中文"我问的问题"，那是荒谬的；
+  // 而且创始人 2026-09-09 明说 AI 的输出语言应当跟着**用户的输入语言**走。
+  "quick.explainLabel": "解释这段",
+  "quick.explainHint": "整段没跟上",
+  "quick.explainQ": "把刚才这段内容讲清楚一点，我没跟上。",
+  "quick.wordLabel": "有个词没听懂",
+  "quick.wordHint": "卡在某个词",
+  "quick.wordQ": "刚才这段里有没有比较难懂的词或术语？挑出来解释一下。",
 } as const;

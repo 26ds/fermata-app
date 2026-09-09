@@ -430,4 +430,60 @@ export const en = {
   "stage.transcribeFailed": "Subtitles didn't come through. Try again shortly.",
   "stage.transcribeFailedShort": "Subtitles didn't come through",
   "stage.deleteFailed": "Couldn't delete it. Please try again.",
+
+  // ── Interrupt panel ────────────────────────────────────────────────────
+  "panel.stuckAt": "Stuck at",
+  "panel.askHint": "Ask something — I'll answer with these subtitle lines in hand.",
+  "panel.lastTwoSeconds": "The last two seconds",
+  "panel.pickHint": "Tap a word to save it · saved words are the ones you can look up",
+  "panel.noCaptionHere": "No subtitles around this moment.",
+  "panel.collapse": "Tap to collapse and read the subtitles",
+  "panel.expand": "Expand",
+  "panel.expandLabel": "Expand the panel",
+  "panel.close": "Close",
+  "panel.collapsedAria": "Interrupt panel (collapsed)",
+  "panel.backToPick": "Back to picking words from those two seconds",
+  "panel.askShort": "Ask",
+  "panel.addWord": "＋word",
+  "panel.chat": "Immersive chat",
+  "panel.rescan": "Scan again",
+  "panel.placeholder": "What's going on here? What does this word mean?",
+  "panel.thinking": "Thinking…",
+  "panel.send": "Send",
+  "panel.immersiveTitle": "Long-form immersive chat",
+  "panel.immersiveHint": "Lots of questions? Come in and keep going — I'll answer from where you are.",
+  "panel.justCapture": "Just mark this moment, no question",
+  "panel.done": "Done",
+  "panel.cancel": "Cancel",
+  "panel.saveFailed": "That wasn't saved. Please try again.",
+
+  "panel.scanOff": "AI word marking is off — the switch is in the “captions” row below.",
+  "panel.scanScanning": "Marking the expressions worth keeping in this one…",
+  "panel.scanReady": (n: number) =>
+    n === 1 ? "1 marked across the whole thing, and in the subtitles below too" : `${n} marked across the whole thing, and in the subtitles below too`,
+  "panel.scanEmpty": "Scanned the whole thing — nothing worth marking.",
+  "panel.scanNotReady": "Not enough subtitles yet. Come back once more has been transcribed.",
+  "panel.scanRunning": "The last scan hasn't finished (or it's stuck).",
+  "panel.scanFailed": "That scan didn't go through.",
+
+  "panel.driftMode": "You changed your language settings — this batch was marked under the old ones.",
+  "panel.driftSupport":
+    "You changed your native language — these explanations are still written in the previous one.",
+  "panel.driftRescan": "Rescan with the new settings",
+
+  "panel.targetTitle": (lang: string) => `This content is in ${lang}.`,
+  "panel.targetQuestion": "Are you here to learn this language, or just to understand the content?",
+  "panel.targetLearn": (lang: string) => `I want to learn ${lang}`,
+  "panel.targetJustContent": "Just here for the content",
+
+  // ── Quick questions ────────────────────────────────────────────────────
+  // ⚠️ `quick.*Q` is the actual message sent to the model — it shows up in the
+  // chat as “You asked: …”, so it must be in the reader's own language.
+  "quick.explainLabel": "Explain this part",
+  "quick.explainHint": "Lost the whole stretch",
+  "quick.explainQ": "Explain what was just said a bit more clearly — I lost the thread.",
+  "quick.wordLabel": "A word I didn't catch",
+  "quick.wordHint": "Stuck on one word",
+  "quick.wordQ":
+    "Were there any difficult words or jargon in what was just said? Pick them out and explain them.",
 } as const satisfies CopyDict;
