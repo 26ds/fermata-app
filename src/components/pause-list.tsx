@@ -23,7 +23,18 @@ import type { Translate } from "@/lib/copy";
 export type PausePoint = Pick<
   InterruptRow,
   "id" | "t_s" | "question_mode" | "question" | "ai_answer"
->;
+> & {
+  /**
+   * M3.15 片 b：右栏那条问答线**按落库时间排，不是按 t_s**
+   * （往回拨一段再问一句，那句仍然是"最新的一条"，该排在最下面）。
+   *
+   * 写成可选是因为这个类型有三个调用处，只有观看页和回看页会带上它；
+   * 拿不到就当"最早"排（`sortKeyOf` 里那句 `?? ""`）—— 不会炸，只是次序退化。
+   */
+  created_at?: string | null;
+  /** M3.15 片 b：追问挂在母问题下面（计划 §B.4）。迁移 0011 的列 */
+  parent_id?: string | null;
+};
 
 /** 「那一刻的字幕」取这一刻前后各几秒。够唤起记忆即可，多了会把每行撑成一段文章 */
 const CAPTION_BEFORE_S = 4;

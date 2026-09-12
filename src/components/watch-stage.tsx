@@ -152,6 +152,13 @@ function Chevron({ up }: { up: boolean }) {
  * 视频和播客**分开记**（D47 §B2）：看视频调好的宽度，不该在听播客时被套用。
  * `manual` 归到视频那一档 —— 它没有播放器，走哪个默认都无所谓，别为它多开一个键。
  */
+/**
+ * 播放头挪了这么多秒以上就当成"跳"，不当成"播过去的"（M3.15 片 b）。
+ * 250ms 一轮，正常播放最多走 0.25s × 倍速 —— 2.5s 的门槛到 10 倍速都还稳，
+ * 而真人拖进度条一拖就是几十秒，两边差着一个数量级，不用调。
+ */
+const SEEK_EPS_S = 2.5;
+
 function splitKindOf(kind: SourceKind): "video" | "podcast" {
   return kind === "podcast" ? "podcast" : "video";
 }
@@ -345,6 +352,32 @@ export function WatchStage({
   const scanRunningRef = useRef(false);
   /** 刚收下的词，解释取到哪一步了（`词 → 状态`）。只活在这一次观看里，不落库 */
   const [glosses, setGlosses] = useState<Map<string, GlossState>>(() => new Map());
+  // ── M3.15 片 b：问答栏要的三样"只有 watch-stage 知道"的东西 ──
+  /**
+   * 播放器**播起来过几次**。追问的判据（计划 §B.4）是
+   * 「上一轮答完之后播放器**有没有播过**」—— 不是"隔了几秒"。
+   * 所以要的是一个只增不减的计数：问答栏答完时记下当时的值，下次发送时对一眼。
+   */
+  const playTickRef = useRef(0);
+  /** 上一轮 250ms 读到的秒数。和这一轮一比就知道播放头是不是被"扔"过去的 */
+  const prevTimeRef = useRef(0);
+  /** 我们自己刚发起的那一跳（`handleSeek(t, true)` 记的）—— 别把它算成用户拖进度条 */
+  const ourSeekRef = useRef<{ to: number; at: number } | null>(null);
+  /**
+   * **用户自己**动播放头的次数（拖 YouTube 自己的进度条、点点点条、点字幕行）。
+   * D63：一动就撤掉钉在问答栏底下那块返回牌（他知道自己在干嘛）。
+   * 走 state 而不是 ref —— 问答栏要能看见它变。
+   */
+  const [userSeekTick, setUserSeekTick] = useState(0);
+  /**
+   * 老的沉浸聊天逐字记录（D62：**老数据不搬家**，读的时候只读地混进来）。
+   * null = 还没取到 / 这条内容没聊过。**取不到不致命**：新问答照样能问 ——
+   * 和 `/library/[id]` 对这张表的态度一致（迁移 0006 没跑时它根本不存在）。
+   */
+  const [oldChat, setOldChat] = useState<{ role: "user" | "assistant"; text: string; at_s?: number }[] | null>(
+    null,
+  );
+
   // ── M3.15 片 a：右栏三个栏目（D61）──
   /** 现在露在外面的是哪一个。**每次进这一页都从「问答」开始** —— 记住上次选的是片 g 的事 */
   const [qaTab, setQaTab] = useState<QaTab>("chat");
@@ -708,6 +741,9 @@ export function WatchStage({
   const handlePlayingChange = useCallback(
     (next: boolean) => {
       playingRef.current = next;
+      // M3.15 片 b：**播起来了就 +1**。问答栏拿它判断"上一轮答完之后有没有继续看"
+      // （＝这一句是追问还是新问题，计划 §B.4）。只增不减，不需要清。
+      if (next) playTickRef.current += 1;
       // 这条内容**这一次进来有没有真的播出过画面**。±N 秒要靠它把自己拦住 —— 见 seekBy
       if (next && !started) setStarted(true);
       setPlaying(next);
@@ -944,11 +980,11 @@ export function WatchStage({
   );
 
   const postInterrupt = useCallback(
-    async (tS: number, mode: QuestionMode | null): Promise<PausePoint> => {
+    async (tS: number, mode: QuestionMode | null, parentId: string | null = null): Promise<PausePoint> => {
       const res = await fetch("/api/interrupts", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ sourceId: source.id, tS, questionMode: mode }),
+        body: JSON.stringify({ sourceId: source.id, tS, questionMode: mode, parentId }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? t("stage.captureFailed"));
@@ -1030,7 +1066,6 @@ export function WatchStage({
 
   /** 用户真的按了暂停（缓冲/播放结束不算，见 PlayerProps.onPause） */
   const handlePause = useCallback(() => {
-    if (panelOpenRef.current || immersiveRef.current) return; // 面板已开 / 沉浸态：不弹短问答面板
     // ── M3.15 片 a（D61）：**宽屏上暂停不再自动弹面板** ──
     // 推翻的是 D5 / D39（「点球或暂停 → 打断面板」）在宽屏上的那半边：
     // 右栏的问答 tab 常驻，想问随时能问，不该再有半屏面板扑上来盖住视频。
@@ -1042,6 +1077,11 @@ export function WatchStage({
       if (autoScanRef.current) void ensurePhrases();
       return;
     }
+    // ⚠️ 这两句片 b 从上面挪到了这儿。原来它们排在宽屏那一支**前面**，
+    // 于是带 `?chat=1` 进来的宽屏页（`immersiveRef` 一开始就是 true）
+    // 会在这里直接 return，**D40 的懒扫词组永远轮不到跑**。
+    // 窄屏一个字节没变：`isWideNow()` 是 false，照旧落到这两句上。
+    if (panelOpenRef.current || immersiveRef.current) return; // 面板已开 / 沉浸态：不弹短问答面板
     openPanel(currentTimeRef.current, false);
   }, [openPanel, ensurePhrases]);
 
@@ -1081,6 +1121,57 @@ export function WatchStage({
       });
     }
   }, [postInterrupt]);
+
+  /**
+   * **M3.15 片 b：问一句之前先把这一刻落库**（D62：每一轮问答就是一个捕获点）。
+   *
+   * 和 `captureOnly` 是同一条落库路径，两处差别只有两个：这里带 `parentId`（追问挂母问题），
+   * 而且**失败要往上抛** —— 问答栏得知道"这一轮根本没发生"，好把流里那条半截的撤掉。
+   * 乐观先画点：**点点条上当场就多一个点**（片 b 的第一条交付判据），落库回来换真 id。
+   */
+  const createPointForAsk = useCallback(
+    async (tS: number, parentId: string | null): Promise<string> => {
+      const tempId = `temp-${Date.now()}`;
+      setPoints((prev) => [
+        ...prev,
+        {
+          id: tempId,
+          t_s: tS,
+          question_mode: "free",
+          question: null,
+          ai_answer: null,
+          // 乐观那一条的时间用浏览器的钟，落库回来换成数据库的 —— 都是"此刻"，
+          // 差的那几毫秒不会把它排到别人前面去
+          created_at: new Date().toISOString(),
+          parent_id: parentId,
+        },
+      ]);
+      try {
+        const saved = await postInterrupt(tS, "free", parentId);
+        setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+        return saved.id;
+      } catch (e) {
+        setPoints((prev) => prev.filter((p) => p.id !== tempId)); // 没存上撤掉假点
+        throw e;
+      }
+    },
+    [postInterrupt],
+  );
+
+  /**
+   * 一轮答完，把问题与答案补进这份 `points`。
+   * **点点条、问题列表、`/library/[id]` 吃的是同一份** —— 不在这儿补，
+   * 刚问完的那一条在点点条上还是个"只是停了一下"的空点，得刷新页面才对得上。
+   */
+  const onQaAnswered = useCallback((id: string, question: string, answer: string) => {
+    setPoints((prev) =>
+      prev.map((p) =>
+        p.id === id ? { ...p, question, ai_answer: answer, question_mode: p.question_mode ?? "free" } : p,
+      ),
+    );
+  }, []);
+
+  const getPlayTick = useCallback(() => playTickRef.current, []);
 
   /** 问一句：确保这刻已落库（拿到 interruptId）→ 流式取 /api/ask，边收边显示 */
   const handleAsk = useCallback(
@@ -1185,7 +1276,17 @@ export function WatchStage({
     closePanel();
   }
 
-  const handleSeek = useCallback((t: number) => {
+  /**
+   * 跳到第几秒。
+   *
+   * `ours = true` 表示**这一跳是我们自己的链接干的**（问答里那个 `@MM:SS`、±N 秒），
+   * 250ms 那一轮据此不把它算成"用户自己动了播放头" —— 否则 D63 钉着的那块返回牌
+   * 会被我们自己刚发起的那一跳当场撤掉（点了 `@11:06`，牌子闪一下就没）。
+   * 点点条、字幕行**故意不标 ours**：那是用户自己在重新导航，牌子该撤（D63 原话
+   * 「用户自己拖进度条 = 撤掉钉着的那条」）。
+   */
+  const handleSeek = useCallback((t: number, ours = false) => {
+    if (ours) ourSeekRef.current = { to: t, at: Date.now() };
     handleRef.current?.seekTo(t);
     // 立刻把"现在在哪"改过来，别等下一次 250ms 轮询。
     // 否则连点两下点点条的「下一个」会卡在原地 —— 第二下读到的还是旧位置。
@@ -1211,7 +1312,9 @@ export function WatchStage({
       const duration = handle.getDuration();
       const raw = (handle.getCurrentTime() || currentTimeRef.current) + deltaS;
       const ceiling = duration > 0 ? Math.max(0, duration - 0.5) : raw;
-      handleSeek(Math.max(0, Math.min(ceiling, raw)));
+      // ±N 秒算**我们的**跳：它是"在落点附近挪一下"，不是重新导航 ——
+      // 跳到 11:06 之后往回听 5 秒，那块「回到 24:10」的牌子不该跟着没
+      handleSeek(Math.max(0, Math.min(ceiling, raw)), true);
     },
     [handleSeek, started, source.kind],
   );
@@ -1409,6 +1512,25 @@ export function WatchStage({
       if (!handle) return;
 
       const t = handle.getCurrentTime();
+      // ── M3.15 片 b：**播放头是自己走过来的，还是被扔过来的** ──
+      // 正常播放两轮之间最多前进 0.25s × 倍速，跳这么远只可能是 seek。
+      // 是我们自己的链接干的就吞掉（见 handleSeek 的 `ours`），
+      // 否则记一笔 —— D63 钉着那块返回牌靠它撤。
+      // ⚠️ 片 f 会把"播放头去哪了"做成**一套监听喂三个消费者**（灰段 / 回拨提示 / 这块牌子）。
+      // 这里**故意只做最小的一份**：现在只有一个消费者，先造那套架子等于替片 f 写代码。
+      const prev = prevTimeRef.current;
+      prevTimeRef.current = t;
+      if (Math.abs(t - prev) > SEEK_EPS_S) {
+        const ours = ourSeekRef.current;
+        if (ours && Date.now() - ours.at < 3000 && Math.abs(t - ours.to) < SEEK_EPS_S) {
+          ourSeekRef.current = null;
+        } else if (isWideNow()) {
+          // **只有宽屏才记这一笔**：唯一的消费者是问答栏里那块返回牌，而它只在宽屏挂载。
+          // 窄屏也 setState 的话，手机上每拖一次进度条就白白整页重渲染一次 ——
+          // 这一片说好了「手机上什么都没发生」，那就得连一次多余的渲染都不欠。
+          setUserSeekTick((v) => v + 1);
+        }
+      }
       currentTimeRef.current = t;
       if (clockRef.current) clockRef.current.textContent = mmss(t);
 
@@ -1460,6 +1582,35 @@ export function WatchStage({
     }, 250);
     return () => window.clearInterval(timer);
   }, [source.id, savePosition]);
+
+  /**
+   * M3.15 片 b：把**老的沉浸聊天记录**取回来，只读地摆在问答栏最上面（D62）。
+   *
+   * 为什么非取不可：这一片同时**收编了宽屏上的沉浸聊天**（下面 ImmersiveChat 那段），
+   * `?chat=1` 在宽屏上不再打开那层浮层。不把老记录接过来，
+   * 宽屏用户就是**净丢了一段历史** —— 和片 a 补那颗「只记下这一刻」是同一笔账。
+   *
+   * 只在宽屏取：窄屏那层浮层自己会取（`immersive-chat.tsx`），别多打一次。
+   * 取不到不报错：新问答照样能问，而这张表在迁移 0006 没跑时压根不存在
+   * （`/library/[id]` 对它也是这个态度）。
+   */
+  useEffect(() => {
+    if (!isWide) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/chat?sourceId=${encodeURIComponent(source.id)}`);
+        if (!res.ok) return;
+        const b = await res.json();
+        if (alive && Array.isArray(b.messages)) setOldChat(b.messages);
+      } catch {
+        /* 老记录取不到不影响问新的 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [isWide, source.id]);
 
   useEffect(() => {
     // 手机上"离开页面"多半不触发 unload，pagehide + 切后台才是可靠信号
@@ -1752,6 +1903,20 @@ export function WatchStage({
               capturing={capture.busy}
               captureError={capture.error}
               pointCount={points.length}
+              chat={{
+                points,
+                // `ours = true`：问答里点 `@MM:SS` 是**我们的链接**把人送走的，
+                // 所以那一跳不该顺手把刚立起来的返回牌撤掉（D63）
+                onSeek: (sec: number) => handleSeek(sec, true),
+                getCurrentTime,
+                pauseVideo: () => handleRef.current?.pause(),
+                createPoint: createPointForAsk,
+                onAnswered: onQaAnswered,
+                getPlayTick,
+                userSeekTick,
+                answerFailedText: t("stage.answerFailed"),
+                oldTurns: oldChat,
+              }}
             />
           </div>
         )}
@@ -1828,14 +1993,18 @@ export function WatchStage({
           它自己就 portal 到 body（word-bubble.tsx），所以这里不用再裹一层 */}
       {lookup.bubble}
 
-      {/* ⚠️ **不许删**，而且宽屏上也**照旧挂载**（和悬浮球 / 暂停面板不同）。
-          理由：宽屏上进沉浸聊天的入口只剩 `?chat=1` —— 那是「历史与知识库」里
-          「和这条内容聊过 N 轮」点进来的**用户主动行为**，不是这一片要砍的自动弹出。
-          片 a 还没有问答栏本体（那是片 b），这会儿把它一起摘了，
-          那条链接就变成**点了什么都不发生** —— 正是 D44 不许的静默失败。
-          片 b 接上问答栏之后，这条路再一起收编。
-          长按进沉浸已经随球一起没了（§F），所以宽屏上它只可能由 `?chat=1` 打开。 */}
-      {immersive && (
+      {/* ⚠️ **不许删**：窄屏还在用它（`?chat=1` 和长按悬浮球两条路都在）。
+          **宽屏从片 b 起不再挂载 —— 这就是片 a 欠下的那笔"收编"。**
+
+          片 a 当时把它留在宽屏上，理由是"问答栏还没做出来，摘了那条链接就点了没反应"
+          （D44 不许的静默失败）。现在问答栏做出来了，那个理由就没了，
+          而 D61 要的是**一条问答线**，不是宽屏上并排两套聊天。
+
+          收编不是"藏起来"，两件事一起做才算数：
+          ① 宽屏不挂载这一层；
+          ② **老的逐字记录接进问答栏**（上面那个 `oldChat`，只读）——
+             否则宽屏用户就是净丢一段历史。 */}
+      {immersive && !isWide && (
         <ViewportLayer>
           <ImmersiveChat
             sourceId={source.id}

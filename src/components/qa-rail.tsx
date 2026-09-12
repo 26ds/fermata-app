@@ -2,6 +2,8 @@
 
 import { useCallback, useLayoutEffect, useRef } from "react";
 import { useCopy } from "@/components/copy-provider";
+import type { PausePoint } from "@/components/pause-list";
+import { QaChat } from "@/components/qa-chat";
 import type { CopyKey } from "@/lib/copy/keys";
 
 // M3.15 片 a —— 右栏三个栏目的**骨架**（计划 §A / D61）。
@@ -9,10 +11,11 @@ import type { CopyKey } from "@/lib/copy/keys";
 // 三个 tab：① 问答 ② 问题列表 ③ Takeaway。同一时刻只显示一个。
 // **字幕不是其中之一** —— 它按布局模式待在别处（§D），片 a 里就还在这三个栏上面。
 //
-// 这一片只做壳：切得动、各记各的滚动位置、空态说人话。
-// 里面的内容分别是片 b（问答本体）、片 d（问题列表 + `@`）、片 e（Takeaway）的活。
+// 片 a 只做壳：切得动、各记各的滚动位置、空态说人话。
+// **片 b 把第一栏填上了**（`qa-chat.tsx`）；②③ 仍是空态，分别是片 d、片 e 的活。
 // **空态里写「功能开发中」是照 `watch.captures.help` 的规矩**（D44：
-// 没做的事不许在界面上说得像做好了）。
+// 没做的事不许在界面上说得像做好了）——**反过来也成立**：做好了的事不许还写着"开发中"，
+// 所以片 b 落地时把 `watch.rail.empty.chat` 那句里的「（功能开发中）」删掉了。
 
 export type QaTab = "chat" | "questions" | "takeaway";
 
@@ -25,13 +28,19 @@ const TABS = [
 ] as const satisfies readonly { id: QaTab; label: CopyKey }[];
 
 /**
- * 三个栏各记各的滚动位置（片 a 的交付判据之一）。
+ * ②③ 两栏共用一个滚动容器，**各记各的滚动位置**（片 a 的交付判据之一）。
  *
- * ⚠️ **不能只靠"三个都挂着、用 CSS 藏起来"** —— 元素一旦 `display:none`，
+ * ⚠️ **不能只靠"两个都挂着、用 CSS 藏起来"** —— 元素一旦 `display:none`，
  * 部分浏览器会把 `scrollTop` 抹成 0，切回来就跳到顶上。所以这里**显式存、显式还**：
  * 切走那一刻把当前 `scrollTop` 记进 ref，切回来在 `useLayoutEffect` 里写回去
  * （用 layout effect 不用 effect：要赶在浏览器画这一帧**之前**还原，
  * 否则会看见先跳到顶、再弹回去）。
+ *
+ * ⚠️ **① 问答不在这个容器里**（片 b 改的）：它底下钉着输入框和返回牌，
+ * 能滚的只有上半截的消息流。所以它自己是一个独立的滚动容器、
+ * 自己记自己的位置（同一套写法，搬进了 `qa-chat.tsx`）。
+ * 而且它**永远挂着、切走只是 `hidden`** —— 卸载会把正在流式作答的那一轮打断，
+ * 切去「问题列表」看一眼再切回来，答案就没了。
  */
 export function QaRail({
   tab,
@@ -40,34 +49,44 @@ export function QaRail({
   capturing,
   captureError,
   pointCount,
+  chat,
 }: {
   tab: QaTab;
   onTab: (next: QaTab) => void;
   /**
    * 「只记下这一刻，先不问」。**这是悬浮球在宽屏上的替身**（§F）——
    * 球在宽屏不再挂载，这个能力不能跟着一起没了。
-   * 片 b 会把它挪到输入框边上，那才是它最终的家。
+   * **片 b 已经把它挪到输入框边上了**（`qa-chat.tsx` 里那颗），这里只负责往下传。
    */
   onCaptureNow: () => void;
   capturing: boolean;
   /** 没记上就要说是哪一种失败，**不许静默**（D44） */
   captureError: string;
   pointCount: number;
+  /** 片 b：问答那一栏要的东西。壳不认识它们，原样往下递 */
+  chat: Omit<
+    React.ComponentProps<typeof QaChat>,
+    "hidden" | "onCaptureNow" | "capturing" | "captureError"
+  > & { points: PausePoint[] };
 }) {
   const t = useCopy();
   const bodyRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<Record<QaTab, number>>({ chat: 0, questions: 0, takeaway: 0 });
+  // 只剩 ②③ 两栏用它 —— ① 自己记自己的（见上面那段）
+  const scrollRef = useRef<Record<"questions" | "takeaway", number>>({
+    questions: 0,
+    takeaway: 0,
+  });
 
   useLayoutEffect(() => {
     const el = bodyRef.current;
-    if (el) el.scrollTop = scrollRef.current[tab];
+    if (el && tab !== "chat") el.scrollTop = scrollRef.current[tab];
   }, [tab]);
 
   const switchTo = useCallback(
     (next: QaTab) => {
       if (next === tab) return;
       const el = bodyRef.current;
-      if (el) scrollRef.current[tab] = el.scrollTop;
+      if (el && tab !== "chat") scrollRef.current[tab] = el.scrollTop;
       onTab(next);
     },
     [tab, onTab],
@@ -92,7 +111,7 @@ export function QaRail({
               role="tab"
               id={`qa-tab-${id}`}
               aria-selected={active}
-              aria-controls="qa-rail-panel"
+              aria-controls={id === "chat" ? "qa-rail-panel-chat" : "qa-rail-panel"}
               onClick={() => switchTo(id)}
               className={`h-8 rounded-lg px-2.5 text-[0.72rem] transition-colors ${
                 active ? "bg-ink-700/60 text-teal-300" : "text-ink-500 hover:text-ink-300"
@@ -108,41 +127,33 @@ export function QaRail({
         })}
       </div>
 
-      <div
-        ref={bodyRef}
-        role="tabpanel"
-        id="qa-rail-panel"
-        aria-labelledby={`qa-tab-${tab}`}
-        className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
-      >
-        {tab === "chat" && (
-          <div className="flex flex-col gap-3">
-            <p className="text-xs leading-5 text-ink-500">{t("watch.rail.empty.chat")}</p>
-            {/* 悬浮球的替身。**先不问、只记下这一刻** —— 记完点点条上当场多一个点 */}
-            <div>
-              <button
-                type="button"
-                onClick={onCaptureNow}
-                disabled={capturing}
-                className="h-9 rounded-xl border border-ink-700 px-3 text-xs text-ink-200 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:pointer-events-none disabled:opacity-50"
-              >
-                {capturing ? t("watch.rail.capturing") : t("watch.rail.capture")}
-              </button>
-              {captureError && (
-                <p role="status" className="mt-2 text-[0.68rem] leading-4 text-amber-300/90">
-                  {captureError}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-        {tab === "questions" && (
-          <p className="text-xs leading-5 text-ink-500">{t("watch.rail.empty.questions")}</p>
-        )}
-        {tab === "takeaway" && (
-          <p className="text-xs leading-5 text-ink-500">{t("watch.rail.empty.takeaway")}</p>
-        )}
-      </div>
+      {/* ① 问答：**永远挂着**，切走只是 hidden（正在流式的答案不能被卸载打断） */}
+      <QaChat
+        {...chat}
+        hidden={tab !== "chat"}
+        onCaptureNow={onCaptureNow}
+        capturing={capturing}
+        captureError={captureError}
+      />
+
+      {/* ②③ 共用一个滚动容器。它们还是空态 —— 分别是片 d、片 e 的活 */}
+      {tab !== "chat" && (
+        <div
+          ref={bodyRef}
+          role="tabpanel"
+          id="qa-rail-panel"
+          aria-labelledby={`qa-tab-${tab}`}
+          className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
+        >
+          {tab === "questions" && (
+            <p className="text-xs leading-5 text-ink-500">{t("watch.rail.empty.questions")}</p>
+          )}
+          {tab === "takeaway" && (
+            <p className="text-xs leading-5 text-ink-500">{t("watch.rail.empty.takeaway")}</p>
+          )}
+        </div>
+      )}
+
     </section>
   );
 }

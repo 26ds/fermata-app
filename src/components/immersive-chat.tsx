@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+// M3.15 片 b：这两个函数原来长在本文件里，现在搬去 `lib/chat-text.ts` ——
+// 右栏那条问答线要用同一套，**不许复制粘贴两份**（计划「文件地图」）。
+import { toSegments } from "@/lib/chat-text";
 import { putSettings } from "@/lib/settings-client";
 import { useCopy } from "@/components/copy-provider";
 
@@ -46,26 +49,6 @@ const CHAT_FONTS = [
   { px: 32, nameKey: "chat.fsXL" },
 ] as const;
 const DEFAULT_CHAT_FONT = 24;
-
-/** 剥掉 markdown 记号，像人聊天一样纯文字（引擎已被提示词禁 markdown，这是兜底；
- *  且流式半截收到 `**` 也不会闪出星号 —— 全局去掉 * 和行首 #/项目符号/序号）。 */
-function cleanMarkdown(text: string): string {
-  return text
-    .replace(/`+/g, "")
-    .replace(/\*+/g, "")
-    .replace(/^#{1,6}\s+/gm, "")
-    .replace(/^\s*[-+]\s+/gm, "")
-    .replace(/^\s*\d+\.\s+/gm, "");
-}
-
-/** 把一轮文字切成 1–4 行的小段（先剥 markdown，再按换行 + 句末标点），歌词式留白 */
-function toSegments(text: string): string[] {
-  return cleanMarkdown(text)
-    .split(/\n+/)
-    .flatMap((line) => line.split(/(?<=[。！？!?…])/))
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
 
 interface ImmersiveChatProps {
   sourceId: string;
