@@ -377,7 +377,9 @@ export function QaChat({
 
       if (!retryId) {
         setInput("");
-        const tS = Math.max(0, Math.round(getCurrentTime()));
+        // 往下取整（片 b 是四舍五入）：播放器的时钟、互动记录里的「停在 02:03」都是往下取整的，
+        // 四舍五入会让紧跟着的那一问写成「@02:04」—— 片 c0 的 lab 页上并排出现过，看着像又跳了一秒
+        const tS = Math.max(0, Math.floor(getCurrentTime()));
         // ── 追问判据（计划 §B.4）：**上一轮答完之后播放器有没有播过** ──
         // 写死成"有没有播过"而不是"隔了几秒"是创始人定的口径：
         // 盯着答案读了两分钟再追问，那仍然是追问；看了十秒视频再问，那是新问题。
