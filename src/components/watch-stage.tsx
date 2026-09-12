@@ -36,6 +36,8 @@ import type {
   TranscriptSegment,
   TranscriptStatus,
 } from "@/lib/types";
+import { KEEPS_BACK_CARD, type SeekVia, type WatchEvent } from "@/lib/watch-events";
+import { WatchRecorder } from "@/lib/watch-recorder";
 
 /** 进度回写节流：播放中最快 10 秒存一次，别把网络当秒表用 */
 const SAVE_EVERY_MS = 10_000;
@@ -152,13 +154,6 @@ function Chevron({ up }: { up: boolean }) {
  * 视频和播客**分开记**（D47 §B2）：看视频调好的宽度，不该在听播客时被套用。
  * `manual` 归到视频那一档 —— 它没有播放器，走哪个默认都无所谓，别为它多开一个键。
  */
-/**
- * 播放头挪了这么多秒以上就当成"跳"，不当成"播过去的"（M3.15 片 b）。
- * 250ms 一轮，正常播放最多走 0.25s × 倍速 —— 2.5s 的门槛到 10 倍速都还稳，
- * 而真人拖进度条一拖就是几十秒，两边差着一个数量级，不用调。
- */
-const SEEK_EPS_S = 2.5;
-
 function splitKindOf(kind: SourceKind): "video" | "podcast" {
   return kind === "podcast" ? "podcast" : "video";
 }
@@ -198,6 +193,9 @@ export function WatchStage({
   play = DEFAULT_PLAY_PREFS,
   autoScan: autoScanInitial = false,
   savedAtoms = [],
+  watchEvents = [],
+  watchEventsTrouble = null,
+  watchEventsCapped = false,
 }: {
   source: SourceRow;
   interrupts: PausePoint[];
@@ -219,6 +217,12 @@ export function WatchStage({
   autoScan?: boolean;
   /** M3.7：这条内容里已经收进词库的词组（决定 ✓ 是实心还是空心） */
   savedAtoms?: { id: string; term: string }[];
+  /** M3.15 片 c0（D71）：这条内容以前几次观看的互动记录（最新的 READ_CAP 行，按时间正序） */
+  watchEvents?: WatchEvent[];
+  /** 首屏读互动记录失败了：`missing` = 表还不存在（迁移 0012 没跑）/ `failed` = 别的原因 */
+  watchEventsTrouble?: "missing" | "failed" | null;
+  /** 记录太多、被截过 */
+  watchEventsCapped?: boolean;
 }) {
   // 只问"用哪个壳"。这条链接是什么平台、叫什么名字，是服务端 registry 的活（M1d）
   const shell = playerFor(source.kind);
@@ -359,10 +363,25 @@ export function WatchStage({
    * 所以要的是一个只增不减的计数：问答栏答完时记下当时的值，下次发送时对一眼。
    */
   const playTickRef = useRef(0);
-  /** 上一轮 250ms 读到的秒数。和这一轮一比就知道播放头是不是被"扔"过去的 */
-  const prevTimeRef = useRef(0);
-  /** 我们自己刚发起的那一跳（`handleSeek(t, true)` 记的）—— 别把它算成用户拖进度条 */
-  const ourSeekRef = useRef<{ to: number; at: number } | null>(null);
+  /**
+   * M3.15 片 c0（D71）：**互动记录的记录器** —— 播放、跳转、停留、离开、提问、记点，按真实先后全记下来并落库。
+   * 片 b 那两个"播放头是不是被扔过去的"ref（上一轮的秒数 / 我们刚发起的那一跳）搬进它里面了，
+   * 判据也换了：按真实经过的时间算，后台限速不再凭空造出跳转（开工先量第 6 条，见 watch-recorder.ts）。
+   * **手机上照记、不显示**：它不是 React state，没有订户就一次渲染都不多。
+   */
+  const [recorder] = useState(
+    () =>
+      new WatchRecorder({
+        sourceId: source.id,
+        initial: watchEvents,
+        rate: play.rate,
+        missingTable: watchEventsTrouble === "missing",
+      }),
+  );
+  useEffect(() => {
+    recorder.start();
+    return () => recorder.stop();
+  }, [recorder]);
   /**
    * **用户自己**动播放头的次数（拖 YouTube 自己的进度条、点点点条、点字幕行）。
    * D63：一动就撤掉钉在问答栏底下那块返回牌（他知道自己在干嘛）。
@@ -684,13 +703,15 @@ export function WatchStage({
     const t = startAtRef.current;
     if (t != null && t > 0) {
       startAtRef.current = null;
+      // 这一跳不是用户在这一页上干的（是从回看页点进来的深链）—— 别让互动记录把它记成一次跳转
+      recorder.noteLanding(t);
       handle.seekTo(t);
       currentTimeRef.current = t;
       if (clockRef.current) clockRef.current.textContent = mmss(t);
     }
     // 播放器每次就绪都把用户选的倍速重设一遍 —— 它自己不记，默认永远是 1
     if (rateRef.current !== 1) handle.setRate(rateRef.current);
-  }, []);
+  }, [recorder]);
 
   /**
    * M3.6：记下"这条内容什么时候被看的"（迁移 0007）。
@@ -744,6 +765,9 @@ export function WatchStage({
       // M3.15 片 b：**播起来了就 +1**。问答栏拿它判断"上一轮答完之后有没有继续看"
       // （＝这一句是追问还是新问题，计划 §B.4）。只增不减，不需要清。
       if (next) playTickRef.current += 1;
+      // 片 c0：在播 / 没在播。**缓冲也会报"没在播"**（实测 YouTube 每跳一次约 0.6 秒），
+      // 所以记录器不拿它当暂停 —— 「停住」只认下面的 handlePause
+      recorder.onPlaying(next, handleRef.current?.getCurrentTime() ?? currentTimeRef.current);
       // 这条内容**这一次进来有没有真的播出过画面**。±N 秒要靠它把自己拦住 —— 见 seekBy
       if (next && !started) setStarted(true);
       setPlaying(next);
@@ -752,7 +776,7 @@ export function WatchStage({
       // 暂停的那一刻是最该记住的位置
       if (!next) savePosition();
     },
-    [savePosition, markWatched, started],
+    [savePosition, markWatched, started, recorder],
   );
 
   /**
@@ -1025,6 +1049,7 @@ export function WatchStage({
           .then((saved) => {
             setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
             setPanel((p) => (p.open && p.id === null ? { ...p, id: saved.id } : p));
+            recorder.capture(saved.id, tS);
             return saved.id;
           })
           .catch(() => {
@@ -1035,7 +1060,7 @@ export function WatchStage({
         panelIdRef.current = null; // 还没落库，等真问了再记
       }
     },
-    [postInterrupt, ensurePhrases],
+    [postInterrupt, ensurePhrases, recorder],
   );
 
   const closePanel = useCallback(() => {
@@ -1066,6 +1091,8 @@ export function WatchStage({
 
   /** 用户真的按了暂停（缓冲/播放结束不算，见 PlayerProps.onPause） */
   const handlePause = useCallback(() => {
+    // 片 c0：「停住」从这一刻算起（宽屏窄屏都记 —— 手机照记、不显示）。放在最前面：下面宽屏那一支会早退
+    recorder.onPause(handleRef.current?.getCurrentTime() ?? currentTimeRef.current);
     // ── M3.15 片 a（D61）：**宽屏上暂停不再自动弹面板** ──
     // 推翻的是 D5 / D39（「点球或暂停 → 打断面板」）在宽屏上的那半边：
     // 右栏的问答 tab 常驻，想问随时能问，不该再有半屏面板扑上来盖住视频。
@@ -1083,7 +1110,7 @@ export function WatchStage({
     // 窄屏一个字节没变：`isWideNow()` 是 false，照旧落到这两句上。
     if (panelOpenRef.current || immersiveRef.current) return; // 面板已开 / 沉浸态：不弹短问答面板
     openPanel(currentTimeRef.current, false);
-  }, [openPanel, ensurePhrases]);
+  }, [openPanel, ensurePhrases, recorder]);
 
   /** 轻点悬浮球 = 记下这一刻并开面板（**窄屏专用** —— 宽屏上球已经不挂载了） */
   const captureNow = useCallback(() => {
@@ -1113,6 +1140,7 @@ export function WatchStage({
       const saved = await postInterrupt(tS, null);
       setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
       setCapture({ busy: false, error: "" });
+      recorder.capture(saved.id, tS);
     } catch (e) {
       setPoints((prev) => prev.filter((p) => p.id !== tempId));
       setCapture({
@@ -1120,7 +1148,7 @@ export function WatchStage({
         error: e instanceof Error ? e.message : "没记下这一刻，再点一次试试",
       });
     }
-  }, [postInterrupt]);
+  }, [postInterrupt, recorder]);
 
   /**
    * **M3.15 片 b：问一句之前先把这一刻落库**（D62：每一轮问答就是一个捕获点）。
@@ -1149,13 +1177,15 @@ export function WatchStage({
       try {
         const saved = await postInterrupt(tS, "free", parentId);
         setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+        // 片 c0：「?」那一行 —— 这一轮落成点的这一刻就记，并立刻送一批（保证「先跳后问」的顺序落得住）
+        recorder.ask(saved.id, tS);
         return saved.id;
       } catch (e) {
         setPoints((prev) => prev.filter((p) => p.id !== tempId)); // 没存上撤掉假点
         throw e;
       }
     },
-    [postInterrupt],
+    [postInterrupt, recorder],
   );
 
   /**
@@ -1192,6 +1222,8 @@ export function WatchStage({
         }
         const id = await idPromise;
         if (!id) throw new Error(t("stage.captureLost"));
+        // 片 c0：手机上照记（不显示）—— 点球记下的点再问一句，也是同一个点上多一行「?」
+        recorder.ask(id, panelTSRef.current);
 
         const res = await fetch("/api/ask", {
           method: "POST",
@@ -1266,33 +1298,39 @@ export function WatchStage({
         });
       }
     },
-    [postInterrupt, t],
+    [postInterrupt, t, recorder],
   );
 
   /** 不问，只把这一刻记下来（暂停触发、还没落库时的入口） */
   async function handleJustCapture() {
     const saved = await postInterrupt(panelTSRef.current, null);
     setPoints((prev) => [...prev, saved]);
+    recorder.capture(saved.id, saved.t_s);
     closePanel();
   }
 
   /**
-   * 跳到第几秒。
+   * 跳到第几秒。**`via` = 这一跳是哪颗控件发起的**（D71：每颗会跳的 Fermata 控件都自报家门）。
    *
-   * `ours = true` 表示**这一跳是我们自己的链接干的**（问答里那个 `@MM:SS`、±N 秒），
-   * 250ms 那一轮据此不把它算成"用户自己动了播放头" —— 否则 D63 钉着的那块返回牌
-   * 会被我们自己刚发起的那一跳当场撤掉（点了 `@11:06`，牌子闪一下就没）。
-   * 点点条、字幕行**故意不标 ours**：那是用户自己在重新导航，牌子该撤（D63 原话
-   * 「用户自己拖进度条 = 撤掉钉着的那条」）。
+   * 两件事靠它：① 互动记录里那一行写「怎么跳的」；② D63 钉着的返回牌撤不撤 ——
+   * `at_link / step / back / record / card` 是我们的链接把人送走的（或 ±N 秒在落点附近挪一下），**不撤**
+   * （否则点了 `@11:06`，牌子闪一下就没）；捕获轴的点和 ◀▶、字幕行 = 用户自己在重新导航，撤
+   * （D63 原话「用户自己拖进度条 = 撤掉钉着的那条」）。和片 b 的 `ours` 一模一样，只是从布尔值换成了名字。
+   * 播放器自己的跳转不走这里 —— 那种没人报名，由 250ms 那一轮认出来（记录器的 `tick`）。
    */
-  const handleSeek = useCallback((t: number, ours = false) => {
-    if (ours) ourSeekRef.current = { to: t, at: Date.now() };
-    handleRef.current?.seekTo(t);
-    // 立刻把"现在在哪"改过来，别等下一次 250ms 轮询。
-    // 否则连点两下点点条的「下一个」会卡在原地 —— 第二下读到的还是旧位置。
-    currentTimeRef.current = t;
-    if (clockRef.current) clockRef.current.textContent = mmss(t);
-  }, []);
+  const handleSeek = useCallback(
+    (t: number, via: SeekVia, step: number | null = null) => {
+      recorder.seek(via, handleRef.current?.getCurrentTime() ?? currentTimeRef.current, t, step);
+      // **只有宽屏才记这一笔**：唯一的消费者是右栏那块返回牌，而它只在宽屏挂载（片 b 同一条理由）
+      if (!KEEPS_BACK_CARD.has(via) && isWideNow()) setUserSeekTick((v) => v + 1);
+      handleRef.current?.seekTo(t);
+      // 立刻把"现在在哪"改过来，别等下一次 250ms 轮询。
+      // 否则连点两下点点条的「下一个」会卡在原地 —— 第二下读到的还是旧位置。
+      currentTimeRef.current = t;
+      if (clockRef.current) clockRef.current.textContent = mmss(t);
+    },
+    [recorder],
+  );
 
   /**
    * ±N 秒。夹在 [0, 时长) 里 —— 往前跳过头会让 YouTube 直接判"播完了"。
@@ -1314,19 +1352,24 @@ export function WatchStage({
       const ceiling = duration > 0 ? Math.max(0, duration - 0.5) : raw;
       // ±N 秒算**我们的**跳：它是"在落点附近挪一下"，不是重新导航 ——
       // 跳到 11:06 之后往回听 5 秒，那块「回到 24:10」的牌子不该跟着没
-      handleSeek(Math.max(0, Math.min(ceiling, raw)), true);
+      handleSeek(Math.max(0, Math.min(ceiling, raw)), "step", deltaS);
     },
     [handleSeek, started, source.kind],
   );
 
   /** 换倍速：先落到播放器，再记进偏好（换台设备也是这个速度） */
-  const changeRate = useCallback((next: number) => {
-    rateRef.current = next;
-    shownRateRef.current = next;
-    setRate(next);
-    handleRef.current?.setRate(next);
-    void putSettings({ playRate: next });
-  }, []);
+  const changeRate = useCallback(
+    (next: number) => {
+      rateRef.current = next;
+      shownRateRef.current = next;
+      setRate(next);
+      handleRef.current?.setRate(next);
+      // 片 c0：播放段一段只有一个倍速，换了就切一刀（「看了 X（1.5×）」才说得准）
+      recorder.setRate(next, currentTimeRef.current);
+      void putSettings({ playRate: next });
+    },
+    [recorder],
+  );
 
   const changeStep = useCallback((next: number) => {
     setSkipStep(next);
@@ -1336,6 +1379,9 @@ export function WatchStage({
   /** 字幕层自己按 250ms 来取时间。给它 ref 的读法，而不是把秒数灌进 state ——
       灌进去就是每秒 4 次整页重渲染，M0.5 栽过的那个坑 */
   const getCurrentTime = useCallback(() => currentTimeRef.current, []);
+
+  /** 字幕行点一下 = 跳到那一句（D71：自报 `caption`）。身份稳定 —— 别让字幕层每次都拿到一个新函数 */
+  const seekFromCaption = useCallback((t: number) => handleSeek(t, "caption"), [handleSeek]);
 
   /**
    * M2a：把字幕转出来。服务端回的是 **NDJSON 流** —— 一行一个事件，
@@ -1512,24 +1558,16 @@ export function WatchStage({
       if (!handle) return;
 
       const t = handle.getCurrentTime();
-      // ── M3.15 片 b：**播放头是自己走过来的，还是被扔过来的** ──
-      // 正常播放两轮之间最多前进 0.25s × 倍速，跳这么远只可能是 seek。
-      // 是我们自己的链接干的就吞掉（见 handleSeek 的 `ours`），
-      // 否则记一笔 —— D63 钉着那块返回牌靠它撤。
-      // ⚠️ 片 f 会把"播放头去哪了"做成**一套监听喂三个消费者**（灰段 / 回拨提示 / 这块牌子）。
-      // 这里**故意只做最小的一份**：现在只有一个消费者，先造那套架子等于替片 f 写代码。
-      const prev = prevTimeRef.current;
-      prevTimeRef.current = t;
-      if (Math.abs(t - prev) > SEEK_EPS_S) {
-        const ours = ourSeekRef.current;
-        if (ours && Date.now() - ours.at < 3000 && Math.abs(t - ours.to) < SEEK_EPS_S) {
-          ourSeekRef.current = null;
-        } else if (isWideNow()) {
-          // **只有宽屏才记这一笔**：唯一的消费者是问答栏里那块返回牌，而它只在宽屏挂载。
-          // 窄屏也 setState 的话，手机上每拖一次进度条就白白整页重渲染一次 ——
-          // 这一片说好了「手机上什么都没发生」，那就得连一次多余的渲染都不欠。
-          setUserSeekTick((v) => v + 1);
-        }
+      // ── 播放头是自己走过来的，还是被扔过来的 ──
+      // 片 c0 起这件事归记录器判（判据换成了按真实经过的时间算，见 watch-recorder.ts 的 `tick`），
+      // 它顺带把「播了一段」一路长下去 —— **这就是片 f 说过的「一套监听喂三个消费者」**：
+      // 「看了几遍」的填色、这块返回牌、将来的回拨提示，都从同一份记录里读。
+      // 返回 true = 播放器自己跳的（没有任何 Fermata 控件报过名）→ D63：用户自己动了，撤牌子。
+      if (recorder.tick(t) && isWideNow()) {
+        // **只有宽屏才记这一笔**：唯一的消费者是问答栏里那块返回牌，而它只在宽屏挂载。
+        // 窄屏也 setState 的话，手机上每拖一次进度条就白白整页重渲染一次 ——
+        // 这一片说好了「手机上什么都没发生」，那就得连一次多余的渲染都不欠。
+        setUserSeekTick((v) => v + 1);
       }
       currentTimeRef.current = t;
       if (clockRef.current) clockRef.current.textContent = mmss(t);
@@ -1542,6 +1580,8 @@ export function WatchStage({
       // **只镜像、不回存偏好**：播放器自己把倍速打回 1 的情况（换片 / 重建）很常见，
       // 那不是用户的意思，存下去等于把他选的速度悄悄抹了。要恢复，点一下就好。
       const actualRate = handle.getRate();
+      // 片 c0：记录器按**播放器实测**的倍速算（用户可能在 YouTube 自带的齿轮里改过）。没变就什么都不做
+      if (actualRate > 0) recorder.setRate(actualRate, t);
       if (actualRate > 0 && Math.abs(actualRate - shownRateRef.current) > 0.01) {
         shownRateRef.current = actualRate;
         setRate(actualRate);
@@ -1581,7 +1621,7 @@ export function WatchStage({
       if (Date.now() - lastSavedAtRef.current > SAVE_EVERY_MS) savePosition();
     }, 250);
     return () => window.clearInterval(timer);
-  }, [source.id, savePosition]);
+  }, [source.id, savePosition, recorder]);
 
   /**
    * M3.15 片 b：把**老的沉浸聊天记录**取回来，只读地摆在问答栏最上面（D62）。
@@ -1626,6 +1666,20 @@ export function WatchStage({
       savePosition(true);
     };
   }, [savePosition]);
+
+  // 片 c0：页面藏起来 / 回来、关掉 —— 记录器要知道。停着的时候藏起来 = 「离开页面」，**不算停留**
+  // （去倒水那几分钟不许算进「停了多久」，D71）；关页面时手里没存上的，趁 keepalive 送出去
+  useEffect(() => {
+    const pos = () => handleRef.current?.getCurrentTime() ?? currentTimeRef.current;
+    const onVis = () => recorder.onVisibility(document.visibilityState === "hidden", pos());
+    const onHide = () => recorder.pageHide();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("pagehide", onHide);
+    };
+  }, [recorder]);
 
   // M3.7：把扫描结果对齐回**当前**字幕。字幕会变（转到一半会继续长、还能重新粘一份），
   // 下标错位就会把高亮标到别的句子上 —— `resolvePhrases` 逐条校验，对不上的宁可不标。
@@ -1807,6 +1861,8 @@ export function WatchStage({
           getCurrentTime={getCurrentTime}
           onSeek={handleSeek}
           onDelete={handleDelete}
+          // 片 c0（D71）：「看了几遍」画在这根轴上 —— **只在宽屏**。手机上不传，那根 1px 的线一个像素不动
+          coverage={isWide ? recorder : undefined}
           // 收起来的时候，开关落到这一行的**末尾**（展开时它在控制卡上，见 controlsToggle）。
           // 这里传的是**光秃秃一颗按钮**，右对齐/藏起来的事交给点点条和按钮自己：
           // 按钮自带 `hidden lg:inline-flex`，所以窄屏上它就是不存在，一个像素都不占。
@@ -1863,7 +1919,7 @@ export function WatchStage({
           transcript={transcript}
           kind={source.kind}
           getCurrentTime={getCurrentTime}
-          onSeek={handleSeek}
+          onSeek={seekFromCaption}
           captionLang={prefs.captionLang}
           highlights={highlights}
           savedTerms={savedTerms}
@@ -1888,7 +1944,7 @@ export function WatchStage({
         />
         </div>
 
-        {/* ── M3.15 片 a：三个栏目（① 问答 ② 问题列表 ③ Takeaway，D61）──
+        {/* ── M3.15 片 a：三个栏目（① 问答 ② 互动记录 ③ Takeaway，D61；②片 c0 起由「问题列表」改成「互动记录」，D71）──
             **只在宽屏挂载**。手机上右栏就是字幕本身，塞第三条问答路进去正是
             计划 §八 明确不做的事（那才叫"重新设计手机界面"）。
             量出来的地（1512×859，播放控制展开）：视频下沿到这一行底还有 **297px**，
@@ -1903,17 +1959,22 @@ export function WatchStage({
               capturing={capture.busy}
               captureError={capture.error}
               pointCount={points.length}
+              points={points}
+              // 问答里的 `@`、互动记录里的时间、返回牌都从这儿跳 —— 各自报 `via`（D71），
+              // 返回牌撤不撤由 `via` 决定（KEEPS_BACK_CARD），和片 b 的 `ours` 一个口径
+              onSeek={handleSeek}
+              getCurrentTime={getCurrentTime}
+              userSeekTick={userSeekTick}
+              recorder={recorder}
+              durationS={durationS}
+              sourceKind={source.kind}
+              eventsCapped={watchEventsCapped}
+              eventsLoadFailed={watchEventsTrouble === "failed"}
               chat={{
-                points,
-                // `ours = true`：问答里点 `@MM:SS` 是**我们的链接**把人送走的，
-                // 所以那一跳不该顺手把刚立起来的返回牌撤掉（D63）
-                onSeek: (sec: number) => handleSeek(sec, true),
-                getCurrentTime,
                 pauseVideo: () => handleRef.current?.pause(),
                 createPoint: createPointForAsk,
                 onAnswered: onQaAnswered,
                 getPlayTick,
-                userSeekTick,
                 answerFailedText: t("stage.answerFailed"),
                 oldTurns: oldChat,
               }}

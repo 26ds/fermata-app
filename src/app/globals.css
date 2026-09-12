@@ -195,11 +195,31 @@ select:focus-visible {
   animation-delay: 0.32s;
 }
 
+/* ── M3.15 片 c0：从「互动记录」点一个问题过来 —— 问答栏里那一轮闪一下 ──
+   告诉他「是这一条」。1.6 秒后 JS 把这个类摘掉（qa-chat.tsx），所以减弱动效时
+   换成一块不动的底色也会自己消失，不会一直挂着。 */
+@keyframes qa-flash {
+  from {
+    background-color: color-mix(in srgb, var(--color-teal-400) 24%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.qa-flash {
+  border-radius: 0.75rem;
+  animation: qa-flash 1.6s ease-out;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .page-enter,
   .skeleton,
   .fermata-dots > span {
     animation: none;
+  }
+  .qa-flash {
+    animation: none;
+    background-color: color-mix(in srgb, var(--color-teal-400) 14%, transparent);
   }
 }
 

@@ -19,7 +19,7 @@ export default async function PrivacyPage() {
     <LegalDoc
       zhTitle="隐私政策"
       enTitle="Privacy Policy"
-      updated="2026-09-08"
+      updated="2026-09-12"
       zh={
         <>
           <p>
@@ -42,6 +42,9 @@ export default async function PrivacyPage() {
             <li>暂停点：第几秒停的、你问了什么、AI 答了什么</li>
             <li>你划下来收进词库的词，和它的解释</li>
             <li>对话记录、看到第几秒、看过几次</li>
+            <li>
+              观看过程（2026-09-12 起）：每一段播了哪几秒、每一次跳转（从哪到哪、点的是什么）、停了多久、离开页面多久
+            </li>
             <li>你的设置：母语、想学的语言、字幕译文语言、播放偏好、界面语言</li>
           </ul>
 
@@ -130,7 +133,12 @@ export default async function PrivacyPage() {
           </p>
           <p>
             <strong>只属于你、别人绝对读不到的</strong>：你的暂停点、你的提问和 AI 的回答、你的词库、
-            观看记录、你的设置。这一层锁在数据库上（行级安全策略），不是靠代码自觉。
+            观看记录和观看过程、你的设置。这一层锁在数据库上（行级安全策略），不是靠代码自觉。
+          </p>
+          <p>
+            <strong>但开发者本人看得到</strong>：我是这个数据库的管理员，技术上能在后台看到上面这些记录
+            （包括观看过程）—— 用来排查问题、看这个产品到底好不好用。行级安全策略挡的是其他用户，挡不住管理员，
+            这一点照实告诉你。
           </p>
 
           <h2>四、存多久，怎么删</h2>
@@ -185,6 +193,10 @@ export default async function PrivacyPage() {
             <li>Pause points: the second you stopped at, what you asked, what the AI answered</li>
             <li>Words you selected into your vocabulary, and their explanations</li>
             <li>Chat history, how far you watched, how many times</li>
+            <li>
+              How you watched (since 2026-09-12): which seconds each stretch played, every jump (from where to
+              where, and what you clicked), how long you paused, how long you were away from the page
+            </li>
             <li>Your settings: native language, language you are learning, subtitle language, playback preferences, interface language</li>
           </ul>
 
@@ -276,8 +288,14 @@ export default async function PrivacyPage() {
           </p>
           <p>
             <strong>Yours alone, unreadable by anyone else</strong>: your pause points, your questions and
-            the AI&apos;s answers, your vocabulary, your watch history, your settings. That boundary is
-            enforced by the database itself (row-level security), not by careful coding.
+            the AI&apos;s answers, your vocabulary, your watch history and how you watched, your settings.
+            That boundary is enforced by the database itself (row-level security), not by careful coding.
+          </p>
+          <p>
+            <strong>The developer can see them, though</strong>: I administer this database, so I can
+            technically see these records in the backend (including how you watched) — to fix problems and to
+            learn whether the product actually works. Row-level security keeps other users out; it does not
+            keep the administrator out, and you should know that.
           </p>
 
           <h2>4. Retention and deletion</h2>

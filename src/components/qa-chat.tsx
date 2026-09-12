@@ -20,7 +20,8 @@ import { mmss } from "@/lib/time";
 // ── 四件必须一起成立的事 ──────────────────────────────────────────────────
 // ① **一问就暂停**（D33 的老规矩，没改）：发送那一刻的播放头 = 这一轮的 `t_s`。
 // ② **`@11:06` 可点，就地 seek，绝不换路由**（D33 死线：播放器实例永不卸载）。
-// ③ **被链接送走就留返回牌，而且留两处**（D63）：流里一条永久记录 + 输入框上钉一条动作。
+// ③ **被链接送走就留返回牌**（D63）。片 c0 起：钉着的那块归 `qa-rail.tsx` 管（三个栏共用），
+//    在这一栏里它仍然长在输入框上面；流里那条灰线「从 X 跳到了 Y」搬进了「互动记录」，而且落库（D71）。
 // ④ **答完之后才出现三连**（计划 §B.6）：为什么会这样 / 跟刚才那段什么关系 / 说短一点。
 
 /** 连着几轮 `t_s` 挨得这么近就不重复标 `@`（D55 原有的防吵规则，计划 §B.2） */
@@ -33,10 +34,12 @@ interface OldTurn {
   at_s?: number;
 }
 
-/** 屏幕上从上到下的一行东西。**跳转记录和问答轮次是同一条流里的两种行** */
+/**
+ * 屏幕上从上到下的一行东西。片 b 时这条流里还有一种「跳转记录」—— 片 c0 把它搬进了「互动记录」（D71），
+ * 这里只剩老聊天和问答轮次两种。
+ */
 type Row =
   | { kind: "old"; key: string; role: "user" | "assistant"; text: string }
-  | { kind: "jump"; key: string; from: number; to: number }
   | {
       kind: "turn";
       key: string;
@@ -63,22 +66,6 @@ function FermataDots() {
       <span className="h-1.5 w-1.5 rounded-full bg-teal-300" />
       <span className="h-1.5 w-1.5 rounded-full bg-teal-300" />
     </span>
-  );
-}
-
-/** ↩ 那个箭头。两处返回牌共用一个画法，别让它们长得不一样 */
-function BackArrow() {
-  return (
-    <svg viewBox="0 0 12 12" className="h-3 w-3 shrink-0" aria-hidden focusable="false">
-      <path
-        d="M5 2.5 2 5.5l3 3M2.4 5.5H7a3 3 0 0 1 0 6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
   );
 }
 
@@ -143,13 +130,16 @@ async function streamAsk(
 export function QaChat({
   hidden,
   points,
-  onSeek,
+  onJump,
   getCurrentTime,
   pauseVideo,
   createPoint,
   onAnswered,
   getPlayTick,
-  userSeekTick,
+  pinBar,
+  focusTurn,
+  labelResets,
+  peekReset,
   onCaptureNow,
   capturing,
   captureError,
@@ -160,8 +150,12 @@ export function QaChat({
   hidden: boolean;
   /** 这条内容所有的捕获点。问过问题的才进聊天流，纯记号只是点点条上一个点（§E.4） */
   points: PausePoint[];
-  /** 就地 seek。**调用方要把它标成"我们干的"**，否则钉着的返回牌会被自己撤掉 */
-  onSeek: (t: number) => void;
+  /**
+   * 点一个 `@MM:SS`：就地跳过去（D33 死线：绝不换路由）。
+   * **返回牌归 qa-rail 管了**（片 c0：三个栏共用一块，在互动记录里点时间跳走也得看得见）——
+   * 它先记下"他现在在哪"、立牌子，再以 `via = at_link` 跳。
+   */
+  onJump: (t: number) => void;
   getCurrentTime: () => number;
   pauseVideo: () => void;
   /** 落一个新捕获点，返回真 id（乐观点由调用方画，失败它自己撤） */
@@ -174,8 +168,14 @@ export function QaChat({
    * 不是"时间差多少秒"。所以这里要的是一个只增不减的计数，不是时间戳。
    */
   getPlayTick: () => number;
-  /** 用户**自己**动了播放头的次数（拖进度条 / 点点点条 / 点字幕）。D63：一动就撤掉钉着那条 */
-  userSeekTick: number;
+  /** D63 钉着的那块返回牌（qa-rail 画好了递进来）—— 在这一栏里它仍然长在输入框上面，和片 b 一模一样 */
+  pinBar: React.ReactNode;
+  /** 从互动记录点了一个问题过来：滚到那一轮、闪一下（`n` 每点一次 +1，同一条连点两次也要再闪） */
+  focusTurn: { id: string; n: number } | null;
+  /** 哪几轮之前跳过 —— `@` 标注从那一轮重新算（片 b 的规矩，依据换成了互动记录，D71） */
+  labelResets: ReadonlySet<string>;
+  /** 现在发出去的这一句算不算"跳过之后"（正在飞、还没落库的那一轮用） */
+  peekReset: () => boolean;
   onCaptureNow: () => void;
   capturing: boolean;
   captureError: string;
@@ -196,15 +196,11 @@ export function QaChat({
     answer: string;
     parentId: string | null;
     error: string;
+    /** 发出去那一刻，这一问之前跳过没有（`@` 标注从这儿重新算）—— 还没落库，记录器那份 Set 里还没有它 */
+    reset: boolean;
   } | null>(null);
   /** 连点都没落上（`createPoint` 就失败了）—— 这时候流里连一行都没有，只能在输入框下面说 */
   const [sendError, setSendError] = useState("");
-
-  // ── D63 返回牌，两处 ──
-  /** 流里那条：**永不消失**（它是这次交互的历史）。⚠️ 只活在这一次观看里，见文件末尾的说明 */
-  const [jumps, setJumps] = useState<{ key: string; at: string; from: number; to: number }[]>([]);
-  /** 钉在输入框上面那条：**只留最近一次**，回去了 / 用户自己动了播放头 → 撤掉 */
-  const [pinned, setPinned] = useState<number | null>(null);
 
   /** D56「说短一点」的短版，按轮次存。**只在内存里** —— 刷新就没，原答案永远是库里那份 */
   const [briefs, setBriefs] = useState<
@@ -229,7 +225,8 @@ export function QaChat({
       .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
   }, [points]);
 
-  // 一条流里的所有行：老聊天在最前（只读），然后问答轮次和跳转记录按时间穿插。
+  // 一条流里的所有行：老聊天在最前（只读），然后问答轮次按落库时间排（liveTurns 已经排好了）。
+  // 跳转记录不在这条流里了 —— 片 c0 搬进了「互动记录」（D71）
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
     (oldTurns ?? []).forEach((o, i) => {
@@ -237,27 +234,19 @@ export function QaChat({
       out.push({ kind: "old", key: `old-${i}`, role: o.role, text: o.text });
     });
 
-    const merged: { at: string; row: Row }[] = [
-      ...liveTurns.map<{ at: string; row: Row }>((p) => ({
-        at: p.created_at ?? "",
-        row: {
-          kind: "turn",
-          key: p.id,
-          id: p.id,
-          tS: p.t_s,
-          question: p.question ?? "",
-          answer: p.ai_answer ?? "",
-          depth: p.parent_id ? 1 : 0,
-          live: false,
-          error: "",
-        },
-      })),
-      ...jumps.map<{ at: string; row: Row }>((j) => ({
-        at: j.at,
-        row: { kind: "jump", key: j.key, from: j.from, to: j.to },
-      })),
-    ].sort((a, b) => a.at.localeCompare(b.at));
-    out.push(...merged.map((m) => m.row));
+    for (const p of liveTurns) {
+      out.push({
+        kind: "turn",
+        key: p.id,
+        id: p.id,
+        tS: p.t_s,
+        question: p.question ?? "",
+        answer: p.ai_answer ?? "",
+        depth: p.parent_id ? 1 : 0,
+        live: false,
+        error: "",
+      });
+    }
 
     // 正在问的那一轮永远在最下面（它还没落库，也就还没有 created_at）
     if (flight) {
@@ -274,29 +263,30 @@ export function QaChat({
       });
     }
     return out;
-  }, [oldTurns, liveTurns, jumps, flight]);
+  }, [oldTurns, liveTurns, flight]);
 
   /**
    * 哪几行要标 `@MM:SS`。**连着几轮挨得近就不重复标**（计划 §B.2）——
    * 每 8 秒问一句的人不该看见一柱子长得一样的时间戳。
    * 跳转之后**重新开始算**：他刚被送到别处，那一刻的时间戳是有信息量的。
+   * 片 c0 起「有没有跳过」的依据是**互动记录**：两问之间 `watch_events` 里有没有一次跳转（D71）——
+   * 不再只认问答里那个 `@`，播放器上、捕获轴、字幕、±N 的跳转都算。
    */
+  const flightReset = flight?.reset ?? false;
   const labelled = useMemo(() => {
     const show = new Set<string>();
     let lastShown: number | null = null;
     for (const r of rows) {
-      if (r.kind === "jump") {
-        lastShown = null;
-        continue;
-      }
       if (r.kind !== "turn") continue;
+      const reset = r.key === "flight" ? flightReset : r.id !== null && labelResets.has(r.id);
+      if (reset) lastShown = null;
       if (lastShown === null || Math.abs(r.tS - lastShown) >= REPEAT_LABEL_GAP_S) {
         show.add(r.key);
         lastShown = r.tS;
       }
     }
     return show;
-  }, [rows]);
+  }, [rows, labelResets, flightReset]);
 
   // ── 滚动 ──
   // 停在底部就跟最新；用户上滑看历史则不抢（和沉浸聊天同一条规矩）。
@@ -306,6 +296,27 @@ export function QaChat({
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [rows, atBottom, hidden]);
+
+  /**
+   * 片 c0：从互动记录点了一个问题过来 —— 滚到那一轮、闪一下（D71：**不动视频**）。
+   * 排在上面那个"跟到最新"的 effect **后面**：两个同时跑时，这一下要最后说了算。
+   * 不用 `scrollIntoView`：它会顺带去滚所有能滚的祖先（包括整页那个 `overflow-hidden` 的根），
+   * 页面会被悄悄挪走。只改这一栏自己的 `scrollTop`。
+   */
+  useEffect(() => {
+    if (!focusTurn || hidden) return;
+    const box = scrollRef.current;
+    const el = box?.querySelector<HTMLElement>(`[data-turn-id="${focusTurn.id}"]`);
+    if (!box || !el) return;
+    const b = box.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    box.scrollTop += r.top - b.top - Math.max(0, (box.clientHeight - r.height) / 2);
+    el.classList.remove("qa-flash");
+    void el.offsetWidth; // 重启动画：同一条连点两次也要再闪一次
+    el.classList.add("qa-flash");
+    const timer = window.setTimeout(() => el.classList.remove("qa-flash"), 1600);
+    return () => window.clearTimeout(timer);
+  }, [focusTurn, hidden]);
 
   /**
    * 切走 / 切回来时**自己记自己的滚动位置**（片 a 定的规矩，这一栏也照办）。
@@ -339,43 +350,17 @@ export function QaChat({
     setAtBottom(bottom);
   };
 
-  // ── D63：**用户自己动了播放头就撤掉钉着那条**（他知道自己在干嘛）──
-  // 流里那条不动 —— 记录和动作是两件事，这正是这条决策要留两处的原因。
-  //
-  // ⚠️ **这里不需要"这一跳是不是我们干的"的判断**：`@MM:SS` 那一跳走的是
-  // `handleSeek(t, ours=true)`，watch-stage 那一头就把它吞掉了，`userSeekTick` 根本不会变。
-  // 在这儿再挡一道（我第一版那样干过）反而会把**下一次真正的用户 seek** 一起吃掉。
-  //
-  // 写成"渲染时对一眼"而不是 `useEffect` 里 setState：这个仓库里
-  // `react-hooks/set-state-in-effect` 已经拦过好几次，而 React 官方给
-  // 「外部值变了要顺手改一个 state」的写法就是这个（不提交、直接重来一遍渲染）。
-  const [seenSeekTick, setSeenSeekTick] = useState(userSeekTick);
-  if (userSeekTick !== seenSeekTick) {
-    setSeenSeekTick(userSeekTick);
-    if (pinned !== null) setPinned(null);
-  }
+  // （片 b 在这儿的「用户自己动了播放头就撤掉钉着那条」—— 片 c0 随返回牌一起搬去了 qa-rail.tsx）
 
-  /** 点一个 `@MM:SS`：**先记下他现在在哪**，再跳过去，两处返回牌一起立起来 */
+  /** 点一个 `@MM:SS`：跳过去 + 立返回牌（都交给 qa-rail）。这一栏自己跟到最新 */
   const jumpTo = useCallback(
     (toS: number) => {
-      const from = Math.max(0, Math.round(getCurrentTime()));
-      // 跳去的地方就是脚下这一秒（差一秒以内），那不叫"被送走"，别为它立牌子
-      if (Math.abs(from - toS) < 1) return;
-      const at = new Date().toISOString();
-      setJumps((prev) => [...prev, { key: `jump-${at}-${toS}`, at, from, to: toS }]);
-      setPinned(from);
-      onSeek(toS); // ours=true 由 watch-stage 那头标，见上面那段
+      onJump(toS);
       
       setAtBottom(true);
     },
-    [getCurrentTime, onSeek],
+    [onJump],
   );
-
-  const goBack = useCallback(() => {
-    if (pinned === null) return;
-    onSeek(pinned);
-    setPinned(null);
-  }, [pinned, onSeek]);
 
   /** 真正把一句话发出去。`retryId` 有值 = 这一轮的点早就落好了，别再落一个 */
   const send = useCallback(
@@ -401,7 +386,7 @@ export function QaChat({
         const followUp = last && lastAnswerTickRef.current === getPlayTick();
         // 追问的追问仍然挂在**同一个母问题**下面 —— 只缩一格，不无限往右退
         parentId = followUp ? (last.parent_id ?? last.id) : null;
-        setFlight({ id: null, tS, question, answer: "", parentId, error: "" });
+        setFlight({ id: null, tS, question, answer: "", parentId, error: "", reset: peekReset() });
         try {
           id = await createPoint(tS, parentId);
         } catch (e) {
@@ -446,6 +431,7 @@ export function QaChat({
       createPoint,
       onAnswered,
       answerFailedText,
+      peekReset,
     ],
   );
 
@@ -532,21 +518,6 @@ export function QaChat({
             );
           }
 
-          if (r.kind === "jump") {
-            // D63 流里那条：灰、细、**永不消失**。它是"这次跳转发生过"的记录，
-            // 不是动作 —— 动作是底下钉着那条。两件事，两处，别合并。
-            return (
-              <div key={r.key} className="my-3 flex items-center gap-2 text-ink-500">
-                <span className="h-px flex-1 bg-ink-700" aria-hidden />
-                <span className="inline-flex items-center gap-1 text-[0.62rem]">
-                  <BackArrow />
-                  {t("watch.qa.jumpNote", mmss(r.from), mmss(r.to))}
-                </span>
-                <span className="h-px flex-1 bg-ink-700" aria-hidden />
-              </div>
-            );
-          }
-
           const brief = r.id ? briefs.get(r.id) : undefined;
           const showingBrief = Boolean(brief?.showing && (brief.text || brief.busy));
           const body = showingBrief ? (brief?.text ?? "") : r.answer;
@@ -555,6 +526,8 @@ export function QaChat({
           return (
             <div
               key={r.key}
+              // 互动记录里点一个问题，要靠它找到这一轮（片 c0）
+              data-turn-id={r.id ?? undefined}
               className={`${i === 0 ? "" : "mt-4"} ${
                 // 追问缩进两格 + 一条细线，看一眼就知道它挂在上面那句下面
                 r.depth === 1 ? "border-l border-ink-700 pl-3" : ""
@@ -681,27 +654,8 @@ export function QaChat({
         </div>
       )}
 
-      {/* ── D63 钉在这儿那条：**动作**，一键回去，不用滚 ── */}
-      {pinned !== null && (
-        <div className="flex items-center gap-1 border-t border-ink-700 px-2 py-1.5">
-          <button
-            type="button"
-            onClick={goBack}
-            className="flex min-h-8 flex-1 items-center gap-1.5 rounded-lg px-2 text-left text-[0.68rem] text-teal-300 transition-colors hover:bg-ink-700"
-          >
-            <BackArrow />
-            {t("watch.qa.backTo", mmss(pinned))}
-          </button>
-          <button
-            type="button"
-            onClick={() => setPinned(null)}
-            aria-label={t("watch.qa.backDismiss")}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-500 transition-colors hover:bg-ink-700 hover:text-ink-200"
-          >
-            <span aria-hidden>✕</span>
-          </button>
-        </div>
-      )}
+      {/* ── D63 钉在这儿那条：**动作**，一键回去，不用滚。片 c0 起由 qa-rail 画好递进来（三个栏共用一块）── */}
+      {pinBar}
 
       {/* ── 输入条 ── */}
       <div className="shrink-0 border-t border-ink-700 px-2 py-2">

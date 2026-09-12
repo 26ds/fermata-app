@@ -50,12 +50,11 @@ export const en = {
   // Wide screens only (≥1024px). Nothing on phones changed.
   "watch.rail.aria": "Q&A workbench",
   "watch.rail.tab.chat": "Ask",
-  "watch.rail.tab.questions": "Questions",
+  // M3.15 slice c0 (D71): the old “Questions” tab folded in and renamed — its list is now the “Questions” filter
+  "watch.rail.tab.activity": "Activity",
   "watch.rail.tab.takeaway": "Takeaway",
   "watch.rail.empty.chat":
     "Pausing no longer pops open the ask panel on wide screens — ask in the box below instead. Every question you send leaves a dot on the timeline.",
-  "watch.rail.empty.questions":
-    "Questions you asked about this piece will be listed here in time order, follow-ups indented (not built yet). For now, the dots below are the map.",
   "watch.rail.empty.takeaway":
     "Key points from each answer show up here; tick one to add it to your notes. Generated only when you open this tab, so ignoring it costs nothing (not built yet).",
   "watch.rail.capture": "Just mark this moment",
@@ -67,7 +66,6 @@ export const en = {
   "watch.qa.thinking": "Thinking…",
   "watch.qa.jumpTo": (at: string) => `Jump to ${at}`,
   "watch.qa.followUpAria": "Follow-up",
-  "watch.qa.jumpNote": (from: string, to: string) => `Jumped from ${from} to ${to}`,
   "watch.qa.backTo": (at: string) => `Back to ${at}`,
   "watch.qa.backDismiss": "No need to go back",
   "watch.qa.toLatest": "Back to latest",
@@ -83,6 +81,55 @@ export const en = {
   "watch.qa.shorterFailed": "The short version didn't come through — tap to try again",
   "watch.qa.oldTitle": "From your earlier immersive chats",
   "watch.qa.oldHint": "Read-only — these predate this rail, so you can't follow up on them here.",
+
+  // ── Watch page · the “Activity” tab (M3.15 slice c0, D71) ─────────────
+  "act.watched": (watched: string, total: string, pct: number) => `Watched ${watched} of ${total} (${pct}%)`,
+  "act.watchedUnknown": "Watched: duration not known yet",
+  "act.filterAria": "Show",
+  "act.filter.all": "All",
+  "act.filter.asks": "Questions",
+  "act.most": "Rewatched most",
+  "act.times": (n: number) => ` (${n}×)`,
+  "act.skipped": "Skipped",
+  "act.listSep": ", ",
+  "act.segWatched": (n: number) => (n === 1 ? "watched once" : `watched ${n}×`),
+  "act.segUnwatched": "not watched",
+  "act.visitNow": "this visit",
+  "act.earlier": "Earlier · before activity was recorded",
+  "act.watchedFor": (d: string) => `watched ${d}`,
+  "act.rate": (r: string) => ` (${r}×)`,
+  "act.bg": " (in the background)",
+  "act.pausedAt": "Paused at",
+  "act.pausedFor": (d: string) => `paused ${d}`,
+  "act.left": (d: string) => `Left the page for ${d}`,
+  "act.via.playerYoutube": "on the YouTube player",
+  "act.via.playerPodcast": "on the podcast player",
+  "act.via.atLink": (at: string) => `tapped @${at} in Ask`,
+  "act.via.back": (at: string) => `tapped “Back to ${at}”`,
+  "act.via.dots": "tapped a point on the capture bar",
+  "act.via.dotsNav": (n: number) => (n > 1 ? `◀ ▶ on the capture bar ×${n}` : "◀ ▶ on the capture bar"),
+  "act.via.caption": "tapped a caption line",
+  "act.via.step": (step: string, n: number) => (n > 1 ? `${step}s ×${n}` : `${step}s`),
+  "act.via.record": "tapped a time in Activity",
+  "act.via.card": "tapped a summary card",
+  "act.quote": (q: string) => `“${q}”`,
+  "act.noAnswer": "(this question wasn't answered)",
+  "act.openTurn": (q: string) => `Open this turn in Ask: ${q}`,
+  "act.captured": "marked this moment",
+  "act.dur": (h: number, m: number, s: number) =>
+    h > 0 ? `${h}h ${m}m` : m > 0 ? (s > 0 ? `${m}m ${String(s).padStart(2, "0")}s` : `${m} min`) : `${s}s`,
+  "act.empty":
+    "From now on, every play, jump, pause and question in this video is logged here in order — every time is clickable. Earlier viewing can't be recovered.",
+  "act.emptyAsks": "No questions asked in this video yet.",
+  "act.unsaved": (n: number) => `${n} not saved yet — retrying automatically`,
+  "act.unsavedAuth": (n: number) => `Your session expired — ${n} can't be saved. Reload the page and sign in again.`,
+  "act.missingTable":
+    "Activity can't be saved yet: the database table is missing (migration 0012 hasn't been run). This visit's log lives only on this page and is gone when you close it.",
+  "act.dropped": (n: number) => `${n} entries were malformed and not saved (a bug on our side, not yours)`,
+  "act.loadFailed": "Couldn't load earlier activity — this visit is still being recorded.",
+  "act.capped": (n: number) => `Too many entries — showing the latest ${n}`,
+  "err.watchEventsMissing":
+    "Activity can't be saved: the database table doesn't exist yet (migration 0012 hasn't been run)",
   // ── 中 / EN toggle (founder, 2026-09-09) ───────────────────────────────
   "lang.toggle.aria": "Interface language",
   "lang.toggle.toZh": "Switch to Simplified Chinese",
