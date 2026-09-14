@@ -60,15 +60,14 @@ export const zh = {
   // 只在宽屏（≥1024px）出现。手机上一个字都没变。
   "watch.rail.aria": "问答工作台",
   "watch.rail.tab.chat": "问答",
-  "watch.rail.tab.questions": "问题列表",
+  // M3.15 片 c0（D71）：原来的「问题列表」并进来、改名「互动记录」—— 问题列表成了它顶上的「只看提问」
+  "watch.rail.tab.activity": "互动记录",
   "watch.rail.tab.takeaway": "Takeaway",
-  // ⚠️ 三句空态都**明说还没做**（D44：没做的事不许在界面上说得像做好了）。
+  // ⚠️ 空态都**明说还没做**（D44：没做的事不许在界面上说得像做好了）。「问题列表」那句随片 c0 退场了。
   // 「暂停不再自动弹面板」是这一片故意改掉的行为，所以第一句要把新规矩讲清楚 ——
   // 老用户会先愣一下"面板怎么不弹了"，那一句就是answer。
   "watch.rail.empty.chat":
     "宽屏上暂停不再自动弹出问答面板 —— 想问就在下面这一栏问。问出去的每一句都会在点点条上留一个点。",
-  "watch.rail.empty.questions":
-    "这条内容里问过的问题会按时间排在这儿，追问缩进两格（功能开发中）。现在先看下面点点条上的点。",
   "watch.rail.empty.takeaway":
     "每条问答的要点会列在这儿，勾中的进「知识点」清单。切到这个 tab 才生成，不看就一分钱不花（功能开发中）。",
   // 悬浮球在宽屏上的替身（计划 §F）。**先不问、只记下这一刻**
@@ -86,9 +85,8 @@ export const zh = {
   // Takeaway / 点点条气泡），创始人 2026-09-07：「在什么时间我觉得可以使用 @」
   "watch.qa.jumpTo": (at: string) => `跳到 ${at}`,
   "watch.qa.followUpAria": "追问",
-  // D63 两处返回牌之一：**流里那条**，灰、细、永不消失（它是历史的一部分）
-  "watch.qa.jumpNote": (from: string, to: string) => `从 ${from} 跳到了 ${to}`,
-  // D63 另一处：**钉在输入框上面那条**，只留最近一次，回去了就撤掉
+  // D63 钉着的那块返回牌：只留最近一次，回去了就撤掉。
+  // （原来流里还有一条灰线「从 X 跳到了 Y」—— 片 c0 把它搬进了「互动记录」，而且落库，D71）
   "watch.qa.backTo": (at: string) => `回到 ${at} 继续看`,
   "watch.qa.backDismiss": "不用回去了",
   "watch.qa.toLatest": "回到最新",
@@ -108,6 +106,67 @@ export const zh = {
   // D62：老的沉浸聊天记录不搬家，只读混进来
   "watch.qa.oldTitle": "以前在沉浸聊天里聊过的",
   "watch.qa.oldHint": "只读 —— 这些是搬到这一栏之前留下的，在这儿不能接着追问。",
+
+  // ── 观看页 · 右栏第二栏「互动记录」（M3.15 片 c0，D71）──────────────────────
+  // 播了一段 / 停住 / 离开页面 / 跳（从哪到哪、怎么跳的）/ 问 / 记点，按真实先后。只在宽屏出现。
+  // 时间一律 mm:ss（位置）；「看了多久」这类时长走 `act.dur`。
+  "act.watched": (watched: string, total: string, pct: number) => `看过 ${watched} / ${total}（${pct}%）`,
+  "act.watchedUnknown": "看过多少：时长还没读出来",
+  "act.filterAria": "显示哪些",
+  "act.filter.all": "全部",
+  "act.filter.asks": "只看提问",
+  "act.most": "回看最多",
+  "act.times": (n: number) => `（${n} 遍）`,
+  "act.skipped": "跳过",
+  "act.listSep": "、",
+  "act.segWatched": (n: number) => `看了 ${n} 遍`,
+  "act.segUnwatched": "没看过",
+  "act.visitNow": "这一次",
+  // 上线之前就有的点和问题：库里知道什么时候记的，但那一次怎么播、怎么跳，没人记过
+  "act.earlier": "更早 · 那时还没有观看记录",
+  // 「看了」＝ 内容时长（到 − 从），不是真实经过的时间（D71）
+  "act.watchedFor": (d: string) => `看了 ${d}`,
+  "act.rate": (r: string) => `（${r}×）`,
+  "act.bg": "（在后台）",
+  "act.pausedAt": "停在",
+  "act.pausedFor": (d: string) => `停了 ${d}`,
+  "act.left": (d: string) => `离开页面 ${d}`,
+  // 「怎么跳的」—— **只写看得见的事实**：YouTube 里按了什么（进度条 / 方向键 / 章节）我们看不见，
+  // 所以只说「在 YouTube 播放器上」，不许写成「拖了进度条」（D71）
+  "act.via.playerYoutube": "在 YouTube 播放器上",
+  "act.via.playerPodcast": "在播客播放器上",
+  "act.via.atLink": (at: string) => `点问答里的 @${at}`,
+  "act.via.back": (at: string) => `点「回到 ${at} 继续看」`,
+  "act.via.dots": "点捕获轴上的点",
+  "act.via.dotsNav": (n: number) => (n > 1 ? `点捕获轴的 ◀ ▶ ×${n}` : "点捕获轴的 ◀ ▶"),
+  "act.via.caption": "点字幕行",
+  "act.via.step": (step: string, n: number) => (n > 1 ? `${step} 秒 ×${n}` : `${step} 秒`),
+  "act.via.record": "点互动记录里的时间",
+  "act.via.card": "点概述卡",
+  "act.quote": (q: string) => `「${q}」`,
+  "act.noAnswer": "（这一问没答上）",
+  "act.openTurn": (q: string) => `到问答里看这一轮：${q}`,
+  "act.captured": "记了一个点",
+  "act.dur": (h: number, m: number, s: number) =>
+    h > 0
+      ? `${h} 小时 ${m} 分`
+      : m > 0
+        ? s > 0
+          ? `${m} 分 ${String(s).padStart(2, "0")} 秒`
+          : `${m} 分钟`
+        : `${s} 秒`,
+  "act.empty":
+    "从现在起，这里会按先后记下你在这条内容里的每一次播放、跳转、停留和提问 —— 每个时间都能点。以前看的补不出来。",
+  "act.emptyAsks": "这条内容里还没问过问题。",
+  // D44：存不上要说出来，而且说得出是哪一种
+  "act.unsaved": (n: number) => `有 ${n} 条还没存上，会自动补`,
+  "act.unsavedAuth": (n: number) => `登录过期了，有 ${n} 条存不上 —— 刷新页面、重新登录`,
+  "act.missingTable":
+    "互动记录还存不上：数据库里缺这张表（要先跑迁移 0012）。这一次的记录只留在这个页面上，关掉就没了。",
+  "act.dropped": (n: number) => `有 ${n} 条记录格式不对，没存（是程序的错，不是你的）`,
+  "act.loadFailed": "以前的互动记录没取到 —— 这一次的照样在记。",
+  "act.capped": (n: number) => `记录太多，只显示最近 ${n} 条`,
+  "err.watchEventsMissing": "互动记录存不上：数据库里还没有这张表（迁移 0012 还没跑）",
   // ── 中 / EN 一键切换（创始人 2026-09-09）────────────────────────────────
   // 「中」「EN」两个标签本身**不进表**：语言开关必须用各自的语言写自己
   // （endonym）—— 写成「英文」，只读英文的人就认不出那是给他的了。

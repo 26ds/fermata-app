@@ -15,6 +15,14 @@ import { sourceOriginUrl } from "@/lib/source-origin";
 import { watchBackTarget } from "@/lib/nav";
 import { conformSegments } from "@/lib/zh-convert";
 import { captionScriptFor } from "@/lib/zh-script";
+import {
+  READ_CAP,
+  WATCH_EVENT_COLUMNS,
+  fromRow,
+  isMissingTableError,
+  type WatchEvent,
+  type WatchEventRow,
+} from "@/lib/watch-events";
 
 // M1a — 观看页。RLS 保证只能查到自己的 source，查不到就是 404。
 //
@@ -68,6 +76,28 @@ export default async function WatchDetailPage({
     .eq("source_id", id)
     .order("t_s", { ascending: true });
   const interrupts = (interruptRows ?? []) as PausePoint[];
+
+  // M3.15 片 c0（D71）：互动记录 —— 取**最新的 READ_CAP 行**，再倒过来按时间正序交给页面。
+  // ⚠️ 迁移 0012 没跑时这张表不存在：**不许把观看页拖下水**（和上面 `select("*")` 同一个脾气）——
+  // 当没有记录，并告诉页面「存不上」是这个原因，互动记录顶上照实写（D44）。
+  const { data: eventRows, error: eventError } = await supabase
+    .from("watch_events")
+    .select(WATCH_EVENT_COLUMNS)
+    .eq("source_id", id)
+    .eq("user_id", user.id)
+    .order("at", { ascending: false })
+    .order("seq", { ascending: false })
+    .limit(READ_CAP);
+  const watchEvents = ((eventRows ?? []) as WatchEventRow[])
+    .map(fromRow)
+    .filter((e): e is WatchEvent => e !== null)
+    .reverse();
+  const watchEventsTrouble = eventError
+    ? isMissingTableError(eventError)
+      ? ("missing" as const)
+      : ("failed" as const)
+    : null;
+  const watchEventsCapped = (eventRows?.length ?? 0) >= READ_CAP;
 
   // M3.7 / D42：三个语言（母语 / 目标语言 / 译文语言）。
   // 词库要标什么、AI 用哪门语言答、字幕译成什么，全从这里推 —— 不许硬编码。
@@ -144,6 +174,9 @@ export default async function WatchDetailPage({
           play={play}
           autoScan={autoScan}
           savedAtoms={savedAtoms}
+          watchEvents={watchEvents}
+          watchEventsTrouble={watchEventsTrouble}
+          watchEventsCapped={watchEventsCapped}
         />
       </main>
     </div>
