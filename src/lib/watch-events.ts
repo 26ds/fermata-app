@@ -568,3 +568,32 @@ export function questionList(points: readonly PointLite[]): QuestionItem[] {
     .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
     .map((p) => ({ id: p.id, tS: p.t_s, question: (p.question ?? "").trim(), followUp: Boolean(p.parent_id) }));
 }
+
+/** 「只看提问」的一组：同一个时间点问过的所有问题 */
+export interface QuestionMoment {
+  /** 这一组的时间（整秒，和屏幕上的 mm:ss 同一个口径：往下取整） */
+  tS: number;
+  /** 按提问先后排，**平铺**（D72：不再按追问缩进） */
+  items: QuestionItem[];
+}
+
+/**
+ * 「只看提问」按**时间点**分组（D72，创始人 2026-09-13：「应该并列，只要是在同一个时间点」）。
+ *
+ * 片 c0 按提问先后排、追问缩进 —— 他真机上看到同一个 @01:32 底下挂出两层：先问两句、往后看了一会、
+ * 回到 01:32 又问三句，于是成了「两个母问题各带几个子问题」。在他眼里这五句是**同一个时刻问的五个问题，地位一样**。所以：
+ * ① 同一秒（屏幕上显示成同一个 mm:ss）的问题归成一组，组里平铺、按提问先后排；
+ * ② 组与组按**视频里的时间**排 —— 这一栏回答的是「我在哪几个地方停下来问过什么」；
+ *    按真实先后发生的完整经过在「全部」里，那一栏一行都没动。
+ * `parent_id` 照旧落库、照旧有用（「问了几个回合才接着看」那份数据），只是不再画成层级。
+ */
+export function questionMoments(points: readonly PointLite[]): QuestionMoment[] {
+  const byS = new Map<number, QuestionItem[]>();
+  for (const q of questionList(points)) {
+    const k = Math.max(0, Math.floor(q.tS));
+    const list = byS.get(k);
+    if (list) list.push(q);
+    else byS.set(k, [q]);
+  }
+  return [...byS.entries()].sort((a, b) => a[0] - b[0]).map(([tS, items]) => ({ tS, items }));
+}

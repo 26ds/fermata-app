@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { CoverageBar } from "@/components/coverage-track";
+import { CoverageBar, TIER_SWATCH } from "@/components/coverage-track";
 import { useCopy, useUiLang } from "@/components/copy-provider";
 import type { Translate } from "@/lib/copy";
 import { hms, mmss } from "@/lib/time";
@@ -11,7 +11,7 @@ import {
   buildActivity,
   coverageSegments,
   coverageSummary,
-  questionList,
+  questionMoments,
   type ActivityGroup,
   type ActivityRow,
   type PointLite,
@@ -329,9 +329,37 @@ const GroupView = memo(function GroupView({
   );
 });
 
+/**
+ * 颜色说明（D73）：三档绿各是看了几遍 + 那根白针是「现在播到哪」。
+ * 创始人 2026-09-13 看片 c0 那版的第一反应是「颜色不对不够明显」—— 颜色自己不会解释自己，得给个说法。
+ * 对读屏藏起来：它说明的那条色带本身就是 `aria-hidden`（同样的信息在「看过 X / Y」「回看最多」「跳过」那几句字里）。
+ */
+function CoverageLegend({ t }: { t: Translate }) {
+  const tiers = [
+    [TIER_SWATCH[1], t("act.legend1")],
+    [TIER_SWATCH[2], t("act.legend2")],
+    [TIER_SWATCH[3], t("act.legend3")],
+  ] as const;
+  return (
+    <span aria-hidden className="ml-auto flex shrink-0 items-center gap-2 text-ink-500">
+      {tiers.map(([bg, label]) => (
+        <span key={bg} className="flex items-center gap-1">
+          <span className={`inline-block h-2 w-3 rounded-sm ${bg}`} />
+          {label}
+        </span>
+      ))}
+      <span className="flex items-center gap-1">
+        <span className="inline-block h-2.5 w-0.5 rounded-full bg-ink-100 shadow-[0_0_0_1px_var(--color-ink-900)]" />
+        {t("act.legendNow")}
+      </span>
+    </span>
+  );
+}
+
 export function ActivityPanel({
   hidden,
   recorder,
+  getCurrentTime,
   points,
   durationS,
   kind,
@@ -343,6 +371,8 @@ export function ActivityPanel({
   /** 切到别的 tab 了：不卸载、只 hidden，而且**不订**记录器（藏着的时候不每秒重画） */
   hidden: boolean;
   recorder: WatchRecorder;
+  /** 播放器现在在第几秒 —— 顶上那条「现在在哪」那根针用（D73）。直接问播放器，不问记录器 */
+  getCurrentTime: () => number;
   /** 这条内容所有的捕获点 —— 问题文字、追问关系从这儿拿（和问答栏、捕获轴同一份） */
   points: readonly PointLite[];
   durationS: number;
@@ -389,7 +419,8 @@ export function ActivityPanel({
     () => (liveGroup ? [...closedGroups.filter((g) => !g.current), liveGroup] : closedGroups),
     [closedGroups, liveGroup],
   );
-  const questions = useMemo(() => questionList(points), [points]);
+  // D72：「只看提问」按时间点分组、组里平铺（片 c0 是按提问先后排、追问缩进）
+  const moments = useMemo(() => questionMoments(points), [points]);
   const segs = useMemo(() => coverageSegments(cover, durationS), [cover, durationS]);
   const summary = useMemo(() => coverageSummary(segs, durationS), [segs, durationS]);
 
@@ -402,7 +433,7 @@ export function ActivityPanel({
     const el = scrollRef.current;
     if (!el || hidden) return;
     el.scrollTop = atBottomRef.current ? el.scrollHeight : keptRef.current;
-  }, [groups, questions, filter, hidden]);
+  }, [groups, moments, filter, hidden]);
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -431,7 +462,7 @@ export function ActivityPanel({
       hidden={hidden}
       className="flex min-h-0 flex-1 flex-col"
     >
-      {/* ── 顶上：看过多少 + 那条更细的「看了几遍」+ 回看最多 / 跳过 + 筛选 ── */}
+      {/* ── 顶上：看过多少 + 那条更细的「看了几遍」+ 回看最多 / 跳过 + 颜色说明 + 筛选 ── */}
       <div className="shrink-0 border-b border-ink-700 px-3 pb-2 pt-2">
         <div className="flex items-center gap-2">
           <p className="min-w-0 flex-1 truncate text-[0.68rem] text-ink-300">
@@ -456,29 +487,41 @@ export function ActivityPanel({
           </div>
         </div>
 
-        <CoverageBar segs={segs} durationS={durationS} onJump={onJump} />
+        <CoverageBar
+          segs={segs}
+          durationS={durationS}
+          onJump={onJump}
+          // 藏着的时候不传 —— 不然藏着也每 250ms 挪一次针
+          getTime={hidden ? undefined : getCurrentTime}
+        />
 
-        {summary.most || summary.skipped.length > 0 ? (
-          <p className="mt-1 text-[0.62rem] leading-4 text-ink-500">
-            {summary.most ? (
-              <span className="mr-2 inline-block">
-                {t("act.most")} <TimeLink s={summary.most.from} onJump={onJump} t={t} />–
-                <TimeLink s={summary.most.to} onJump={onJump} t={t} />
-                {t("act.times", summary.most.n)}
-              </span>
-            ) : null}
-            {summary.skipped.length > 0 ? (
-              <span className="inline-block">
-                {t("act.skipped")}{" "}
-                {summary.skipped.map((s, i) => (
-                  <span key={s.from}>
-                    {i > 0 ? t("act.listSep") : ""}
-                    <TimeLink s={s.from} onJump={onJump} t={t} />–<TimeLink s={s.to} onJump={onJump} t={t} />
+        {/* 回看最多 / 跳过（时间都能点）+ 颜色说明。放不下时说明自己折到下一行、靠右 */}
+        {durationS > 0 ? (
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[0.62rem] leading-4 text-ink-500">
+            {summary.most || summary.skipped.length > 0 ? (
+              <p className="min-w-0">
+                {summary.most ? (
+                  <span className="mr-2 inline-block">
+                    {t("act.most")} <TimeLink s={summary.most.from} onJump={onJump} t={t} />–
+                    <TimeLink s={summary.most.to} onJump={onJump} t={t} />
+                    {t("act.times", summary.most.n)}
                   </span>
-                ))}
-              </span>
+                ) : null}
+                {summary.skipped.length > 0 ? (
+                  <span className="inline-block">
+                    {t("act.skipped")}{" "}
+                    {summary.skipped.map((s, i) => (
+                      <span key={s.from}>
+                        {i > 0 ? t("act.listSep") : ""}
+                        <TimeLink s={s.from} onJump={onJump} t={t} />–<TimeLink s={s.to} onJump={onJump} t={t} />
+                      </span>
+                    ))}
+                  </span>
+                ) : null}
+              </p>
             ) : null}
-          </p>
+            <CoverageLegend t={t} />
+          </div>
         ) : null}
 
         {trouble ? (
@@ -501,28 +544,30 @@ export function ActivityPanel({
       {/* ── 时间线（或「只看提问」）── */}
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         {filter === "asks" ? (
-          questions.length === 0 ? (
+          moments.length === 0 ? (
             <p className="pt-3 text-xs leading-5 text-ink-500">{t("act.emptyAsks")}</p>
           ) : (
             <ul className="pt-2">
-              {questions.map((q) => (
-                // 追问照 parent_id 缩进（计划 §A 原来问题列表的样子）
-                <li
-                  key={q.id}
-                  className={`flex gap-1.5 py-0.5 text-[0.7rem] leading-5 ${
-                    q.followUp ? "ml-3 border-l border-ink-700 pl-2" : ""
-                  }`}
-                >
-                  {q.followUp ? <span className="sr-only">{t("watch.qa.followUpAria")}</span> : null}
-                  <TimeLink s={q.tS} at onJump={onJump} t={t} />
-                  <button
-                    type="button"
-                    onClick={() => onOpenTurn(q.id)}
-                    aria-label={t("act.openTurn", q.question)}
-                    className="min-w-0 flex-1 text-left text-ink-100 transition-colors hover:text-teal-300"
-                  >
-                    {q.question}
-                  </button>
+              {moments.map((m) => (
+                // D72：同一个时间点问的归成一组 —— 时间只写一次，问题平铺在它右边（不再按追问缩进）
+                <li key={m.tS} className="flex gap-1.5 py-1 text-[0.7rem] leading-5">
+                  <span className="shrink-0">
+                    <TimeLink s={m.tS} at onJump={onJump} t={t} />
+                  </span>
+                  <ul aria-label={t("act.momentAria", mmss(m.tS), m.items.length)} className="min-w-0 flex-1">
+                    {m.items.map((q) => (
+                      <li key={q.id}>
+                        <button
+                          type="button"
+                          onClick={() => onOpenTurn(q.id)}
+                          aria-label={t("act.openTurn", q.question)}
+                          className="text-left text-ink-100 transition-colors hover:text-teal-300"
+                        >
+                          {q.question}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 </li>
               ))}
             </ul>

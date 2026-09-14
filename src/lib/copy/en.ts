@@ -94,6 +94,11 @@ export const en = {
   "act.listSep": ", ",
   "act.segWatched": (n: number) => (n === 1 ? "watched once" : `watched ${n}×`),
   "act.segUnwatched": "not watched",
+  "act.legend1": "1×",
+  "act.legend2": "2×",
+  "act.legend3": "3×+",
+  "act.legendNow": "now",
+  "act.momentAria": (at: string, n: number) => (n === 1 ? `1 question asked at ${at}` : `${n} questions asked at ${at}`),
   "act.visitNow": "this visit",
   "act.earlier": "Earlier · before activity was recorded",
   "act.watchedFor": (d: string) => `watched ${d}`,
@@ -507,6 +512,9 @@ export const en = {
   "cap.trNoResponse": "The translation service didn't respond",
   "cap.trSameLang": "This content is already in that language.",
   "cap.trFailed": "Translation didn't go through. Try again shortly.",
+  "cap.trReload": "Reload translation",
+  "cap.trPartial": (done: number, total: number) =>
+    `Only ${done} of ${total} lines are translated — press ↻ (Reload translation) to finish`,
 
   // ── Watch stage ────────────────────────────────────────────────────────
   "stage.noPlayer": (kind: string) => `There's no player for this kind of content (${kind}) yet.`,

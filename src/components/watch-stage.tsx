@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { activeSegmentIndex, segmentsInWindow } from "@/lib/captions";
 import { CaptionLayer } from "@/components/caption-layer";
 import { CaptureOrb } from "@/components/capture-orb";
@@ -10,7 +10,7 @@ import { ImmersiveChat } from "@/components/immersive-chat";
 import { InterruptPanel, type PanelLine } from "@/components/interrupt-panel";
 import type { PausePoint } from "@/components/pause-list";
 import { PlayerControls } from "@/components/player-controls";
-import { QaRail, type QaTab } from "@/components/qa-rail";
+import { QaRail } from "@/components/qa-rail";
 import type { GlossState } from "@/components/selectable-line";
 import { ViewportLayer } from "@/components/viewport-layer";
 import { isWideNow, useIsWide } from "@/components/use-wide";
@@ -398,8 +398,7 @@ export function WatchStage({
   );
 
   // ── M3.15 片 a：右栏三个栏目（D61）──
-  /** 现在露在外面的是哪一个。**每次进这一页都从「问答」开始** —— 记住上次选的是片 g 的事 */
-  const [qaTab, setQaTab] = useState<QaTab>("chat");
+  // （「现在是哪一栏」2026-09-13 起住在 qa-rail.tsx 自己身上：住在这一层的时候，点一下 tab 就是整页重画 —— 见那边的注释）
   /** 「只记下这一刻」那颗按钮的状态。error 非空 = 上一次没记上，界面上要说出来（D44） */
   const [capture, setCapture] = useState<{ busy: boolean; error: string }>({
     busy: false,
@@ -1131,18 +1130,28 @@ export function WatchStage({
   const captureOnly = useCallback(async () => {
     const tS = currentTimeRef.current;
     const tempId = `temp-${Date.now()}`;
-    setCapture({ busy: true, error: "" });
-    setPoints((prev) => [
-      ...prev,
-      { id: tempId, t_s: tS, question_mode: null, question: null, ai_answer: null },
-    ]);
+    // 这两句都标成 transition（2026-09-13，INP）：`capture` 和 `points` 都是这一层的 state，一改就是整页重画
+    // （几百行字幕、捕获轴、两个栏）—— 放在点击的同一拍里，按钮要等整页画完才有反应（lab 页量的：272ms，开发模式）。
+    // 按钮自己的「记着…」由 qa-chat 的 CaptureNowButton 当场亮出来（它等的是这个函数返回的 promise），
+    // 这里就可以不急。和下面 createPointForAsk 同一个理由
+    startTransition(() => {
+      setCapture({ busy: true, error: "" });
+      setPoints((prev) => [
+        ...prev,
+        { id: tempId, t_s: tS, question_mode: null, question: null, ai_answer: null },
+      ]);
+    });
     try {
       const saved = await postInterrupt(tS, null);
-      setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+      startTransition(() => {
+        setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+      });
       setCapture({ busy: false, error: "" });
       recorder.capture(saved.id, tS);
     } catch (e) {
-      setPoints((prev) => prev.filter((p) => p.id !== tempId));
+      startTransition(() => {
+        setPoints((prev) => prev.filter((p) => p.id !== tempId));
+      });
       setCapture({
         busy: false,
         error: e instanceof Error ? e.message : "没记下这一刻，再点一次试试",
@@ -1160,28 +1169,41 @@ export function WatchStage({
   const createPointForAsk = useCallback(
     async (tS: number, parentId: string | null): Promise<string> => {
       const tempId = `temp-${Date.now()}`;
-      setPoints((prev) => [
-        ...prev,
-        {
-          id: tempId,
-          t_s: tS,
-          question_mode: "free",
-          question: null,
-          ai_answer: null,
-          // 乐观那一条的时间用浏览器的钟，落库回来换成数据库的 —— 都是"此刻"，
-          // 差的那几毫秒不会把它排到别人前面去
-          created_at: new Date().toISOString(),
-          parent_id: parentId,
-        },
-      ]);
+      // ⚠️ **标成 transition，别在按 Enter 的那一拍里整页重画**（2026-09-13 创始人真机：Vercel 工具条报
+      // 「输入框上的事件处理挡住界面 218ms」）。这句 setPoints 原来是同步的：按下 Enter →
+      // 问答栏清空输入框、立出「正在问」那一行，**和**整页重画（几百行字幕、捕获轴、互动记录）挤在同一拍里，
+      // 屏幕要等全部画完才动。lab 页量的：Enter 那一下 272ms（开发模式，其中处理 244ms）。
+      // 标成不急之后，React 先把输入框清空、那一行画出来，再在空闲里把点补上 —— 点晚出现几十毫秒，看不出来。
+      // （一轮答完回填问题和答案的 `onQaAnswered` **故意不标**：它得和问答栏撤掉「正在问」那一行同一拍生效，
+      // 否则中间会有一帧那一轮从流里消失、再冒出来。）
+      startTransition(() => {
+        setPoints((prev) => [
+          ...prev,
+          {
+            id: tempId,
+            t_s: tS,
+            question_mode: "free",
+            question: null,
+            ai_answer: null,
+            // 乐观那一条的时间用浏览器的钟，落库回来换成数据库的 —— 都是"此刻"，
+            // 差的那几毫秒不会把它排到别人前面去
+            created_at: new Date().toISOString(),
+            parent_id: parentId,
+          },
+        ]);
+      });
       try {
         const saved = await postInterrupt(tS, "free", parentId);
-        setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+        startTransition(() => {
+          setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
+        });
         // 片 c0：「?」那一行 —— 这一轮落成点的这一刻就记，并立刻送一批（保证「先跳后问」的顺序落得住）
         recorder.ask(saved.id, tS);
         return saved.id;
       } catch (e) {
-        setPoints((prev) => prev.filter((p) => p.id !== tempId)); // 没存上撤掉假点
+        startTransition(() => {
+          setPoints((prev) => prev.filter((p) => p.id !== tempId)); // 没存上撤掉假点
+        });
         throw e;
       }
     },
@@ -1953,9 +1975,8 @@ export function WatchStage({
         {isWide && (
           <div className="mt-3 flex min-h-0 flex-1 flex-col">
             <QaRail
-              tab={qaTab}
-              onTab={setQaTab}
-              onCaptureNow={() => void captureOnly()}
+              // 把 promise 原样递下去：问答栏那颗按钮等它落完才熄掉「记着…」（2026-09-13，INP —— 见 qa-chat 的 CaptureNowButton）
+              onCaptureNow={captureOnly}
               capturing={capture.busy}
               captureError={capture.error}
               pointCount={points.length}

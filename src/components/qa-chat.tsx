@@ -23,9 +23,25 @@ import { mmss } from "@/lib/time";
 // ③ **被链接送走就留返回牌**（D63）。片 c0 起：钉着的那块归 `qa-rail.tsx` 管（三个栏共用），
 //    在这一栏里它仍然长在输入框上面；流里那条灰线「从 X 跳到了 Y」搬进了「互动记录」，而且落库（D71）。
 // ④ **答完之后才出现三连**（计划 §B.6）：为什么会这样 / 跟刚才那段什么关系 / 说短一点。
+//
+// ── 2026-09-13 创始人真机反馈这一轮改的（字号 / 气泡 / 追问不缩进 / 输入框）──────────
+// 「聊天框字体太小」「要把我们问的问题用气泡框框起来，ai 的回复不需要，这样用于区分」「应该并列，只要是在同一个时间点」。
+// 字从 12px 提到 14px（问、答、输入框一起）；提问装进右边一个气泡、回答照旧不套框；追问不再缩进（D72）。
 
 /** 连着几轮 `t_s` 挨得这么近就不重复标 `@`（D55 原有的防吵规则，计划 §B.2） */
 const REPEAT_LABEL_GAP_S = 30;
+
+/**
+ * 提问的气泡（创始人 2026-09-13：「要把我们问的问题用气泡框框起来，ai 的回复不需要，这样用于区分」）。
+ * 2026-08-01 那条「提问靠右、回答靠左」照旧成立，气泡是加在它上面的第二道区分。
+ * 用 ink-700 不用青色：青色在这一页只答「能点 / 是个捕获点」（颜色一物一义），气泡两样都不是。
+ * `[overflow-wrap:anywhere]`：一长串网址也得在气泡里折行，不许把这一栏撑出横向滚动条。
+ */
+const BUBBLE =
+  "min-w-0 whitespace-pre-wrap rounded-2xl rounded-br-md bg-ink-700 px-3 py-1.5 text-sm leading-6 text-ink-100 [overflow-wrap:anywhere]";
+
+/** 输入框最多长到这么高（和它的 `max-h-24` 同一个数），再多才出滚动条 */
+const INPUT_MAX_PX = 96;
 
 /** 老沉浸聊天的一条逐字记录（`chats.messages`）—— 只读 */
 interface OldTurn {
@@ -47,7 +63,7 @@ type Row =
       tS: number;
       question: string;
       answer: string;
-      /** 0 = 母问题，1 = 追问（缩进两格，计划 §B.4） */
+      /** 0 = 母问题，1 = 追问。2026-09-13 起**不再缩进**（D72），只给读屏说一声「追问」 */
       depth: 0 | 1;
       /** 正在流式作答 */
       live: boolean;
@@ -125,6 +141,49 @@ async function streamAsk(
   if (streamErr) throw new Error(streamErr);
   if (!full.trim()) throw new Error(fallbackError);
   return full;
+}
+
+/**
+ * 「只记下这一刻」那颗按钮 —— 按下去**先在自己身上**亮出「记着…」，再等 watch-stage 落完点（2026-09-13，INP）。
+ *
+ * 原来「记着…」这一格挂在 watch-stage 的 state 上：一按就是整页重画（几百行字幕、捕获轴、两个栏），
+ * 按钮要等全画完才变字 —— lab 页上点一下 272ms（开发模式）。现在 watch-stage 那边的两句都标成了 transition，
+ * 这颗按钮自己记一格「按下去了」，**等的是 `onCapture` 返回的那个 promise**（落库成败都算完）。
+ * 不拿「watch-stage 的 busy 亮过没有」来判断什么时候熄：transition 可能被后面的更新合并掉，
+ * busy 从头到尾没亮过也是有的 —— 那样按钮就会永远卡在「记着…」。
+ */
+function CaptureNowButton({
+  onCapture,
+  capturing,
+  label,
+  busyLabel,
+}: {
+  /** 返回 promise 就等它（watch-stage 的 captureOnly 是 async 的）；不返回也行，那就只亮一下 */
+  onCapture: () => unknown;
+  capturing: boolean;
+  label: string;
+  busyLabel: string;
+}) {
+  const [pressed, setPressed] = useState(false);
+  const busy = pressed || capturing;
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        if (busy) return;
+        setPressed(true);
+        try {
+          await Promise.resolve(onCapture());
+        } finally {
+          setPressed(false);
+        }
+      }}
+      disabled={busy}
+      className="min-h-[42px] shrink-0 rounded-xl border border-ink-700 px-2.5 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:pointer-events-none disabled:opacity-50"
+    >
+      {busy ? busyLabel : label}
+    </button>
+  );
 }
 
 export function QaChat({
@@ -214,6 +273,25 @@ export function QaChat({
   const wasHiddenRef = useRef(hidden);
   /** 上一轮**答完那一刻**播放器的播放次数。追问判据就是拿它和现在比（§B.4） */
   const lastAnswerTickRef = useRef<number | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  /**
+   * 输入框跟着字长高，到 INPUT_MAX_PX 为止，再多才出滚动条（2026-09-13）。
+   *
+   * 原来是 `rows=1` 定死一行、滚动条交给浏览器 —— 真机截图里**空着的输入框也冒出一根竖滚动条**：
+   * 一行的高度是按「行高 + 内边距」算死的，浏览器一缩放就差出一个像素，被判成溢出。
+   * 现在默认 `overflow-hidden`，只有真的长过上限才打开滚动。
+   * 用 layout effect：赶在这一帧画出来之前把高度定好，看不见"先跳一下"。每敲一个字量一次，一次不到 1ms。
+   */
+  useLayoutEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const border = el.offsetHeight - el.clientHeight; // border-box：scrollHeight 里不含上下边框
+    const want = el.scrollHeight + border;
+    el.style.height = `${Math.min(want, INPUT_MAX_PX)}px`;
+    el.style.overflowY = want > INPUT_MAX_PX + 1 ? "auto" : "hidden";
+  }, [input]);
 
   // 已落库、问过问题的轮次，**按落库时间排** ——
   // 不是按 `t_s`：往回拨一段再问一句，那句仍然是"最新的一条"，该排在最下面
@@ -356,7 +434,7 @@ export function QaChat({
   const jumpTo = useCallback(
     (toS: number) => {
       onJump(toS);
-      
+
       setAtBottom(true);
     },
     [onJump],
@@ -384,6 +462,7 @@ export function QaChat({
         // 写死成"有没有播过"而不是"隔了几秒"是创始人定的口径：
         // 盯着答案读了两分钟再追问，那仍然是追问；看了十秒视频再问，那是新问题。
         // 顺带白捡「他问了几个回合才接着看」这份数据 —— 就是一串子问题的长度，不另埋点。
+        // （2026-09-13 起追问在界面上不再缩进（D72），但这份数据照旧落库。）
         const last = liveTurns[liveTurns.length - 1];
         const followUp = last && lastAnswerTickRef.current === getPlayTick();
         // 追问的追问仍然挂在**同一个母问题**下面 —— 只缩一格，不无限往右退
@@ -494,7 +573,7 @@ export function QaChat({
         className="min-h-0 flex-1 overflow-y-auto px-3 py-3"
       >
         {rows.length === 0 && (
-          <p className="text-xs leading-5 text-ink-500">{t("watch.rail.empty.chat")}</p>
+          <p className="text-sm leading-6 text-ink-500">{t("watch.rail.empty.chat")}</p>
         )}
 
         {rows.map((r, i) => {
@@ -505,17 +584,24 @@ export function QaChat({
                 {/* 老记录只在**第一条**头上说一次来历，别每条都挂一顶帽子 */}
                 {first && (
                   <div className="mb-2 border-b border-ink-700 pb-1.5">
-                    <p className="text-[0.68rem] font-semibold text-ink-300">{t("watch.qa.oldTitle")}</p>
-                    <p className="mt-0.5 text-[0.62rem] leading-4 text-ink-500">{t("watch.qa.oldHint")}</p>
+                    <p className="text-xs font-semibold text-ink-300">{t("watch.qa.oldTitle")}</p>
+                    <p className="mt-0.5 text-[0.7rem] leading-4 text-ink-500">{t("watch.qa.oldHint")}</p>
                   </div>
                 )}
-                <div className={`${r.role === "user" ? "mt-3 pl-6 text-right" : "mt-1"} opacity-60`}>
-                  {toSegments(r.text).map((s, j) => (
-                    <p key={j} className="text-xs leading-5 text-ink-300">
-                      {s}
-                    </p>
-                  ))}
-                </div>
+                {/* 老记录也照新规矩：提问装进气泡、回答不套框，只是整体淡一档 = 只读 */}
+                {r.role === "user" ? (
+                  <div className="mt-3 flex justify-end pl-8 opacity-60">
+                    <p className={BUBBLE}>{r.text}</p>
+                  </div>
+                ) : (
+                  <div className="mt-1.5 opacity-60">
+                    {toSegments(r.text).map((s, j) => (
+                      <p key={j} className="text-sm leading-6 text-ink-300">
+                        {s}
+                      </p>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           }
@@ -530,10 +616,10 @@ export function QaChat({
               key={r.key}
               // 互动记录里点一个问题，要靠它找到这一轮（片 c0）
               data-turn-id={r.id ?? undefined}
-              className={`${i === 0 ? "" : "mt-4"} ${
-                // 追问缩进两格 + 一条细线，看一眼就知道它挂在上面那句下面
-                r.depth === 1 ? "border-l border-ink-700 pl-3" : ""
-              }`}
+              // 追问**不再缩进**（D72，创始人 2026-09-13：「应该并列，只要是在同一个时间点」）——
+              // 同一个时间点的几句平着排，头上共用一个 `@`（上面 `labelled` 那条 30 秒内不重复标的规矩正好做到这件事）。
+              // 追问关系照旧落库（`parent_id`），读屏照旧说一声「追问」
+              className={i === 0 ? "" : "mt-5"}
             >
               {r.depth === 1 && (
                 <span className="sr-only">{t("watch.qa.followUpAria")}</span>
@@ -545,25 +631,28 @@ export function QaChat({
                   type="button"
                   onClick={() => jumpTo(r.tS)}
                   aria-label={t("watch.qa.jumpTo", mmss(r.tS))}
-                  className="ui-mono mb-1 rounded px-1 py-0.5 text-[0.62rem] text-teal-300 transition-colors hover:bg-ink-700 hover:text-teal-200"
+                  className="ui-mono mb-1 rounded px-1 py-0.5 text-[0.7rem] text-teal-300 transition-colors hover:bg-ink-700 hover:text-teal-100"
                 >
                   @{mmss(r.tS)}
                 </button>
               )}
 
-              {/* 提问靠右、回答靠左 —— 2026-08-01 创始人真机反馈：全贴左边分不清谁说的 */}
-              <p className="pl-5 text-right text-xs leading-5 text-ink-100">{r.question}</p>
+              {/* 提问 = 靠右的一个气泡；回答不套框（见上面 BUBBLE 那段）。
+                  2026-08-01 创始人真机反馈：全贴左边分不清谁说的 → 靠右；2026-09-13：再装进气泡 */}
+              <div className="flex justify-end pl-8">
+                <p className={BUBBLE}>{r.question}</p>
+              </div>
 
-              <div className="mt-1.5">
+              <div className="mt-2">
                 {r.error ? (
                   <div role="alert">
-                    <p className="text-[0.68rem] leading-4 text-amber-300/90">{r.error}</p>
+                    <p className="text-xs leading-5 text-amber-300/90">{r.error}</p>
                     {r.id && (
                       <button
                         type="button"
                         onClick={() => void send(r.question, r.id!)}
                         disabled={sending}
-                        className="mt-1 h-7 rounded-lg border border-ink-700 px-2 text-[0.68rem] text-ink-200 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+                        className="mt-1 h-8 rounded-lg border border-ink-700 px-2.5 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
                       >
                         {t("watch.qa.retry")}
                       </button>
@@ -572,12 +661,12 @@ export function QaChat({
                 ) : body ? (
                   <>
                     {showingBrief && (
-                      <span className="mb-1 inline-block rounded bg-ink-700/70 px-1.5 py-0.5 text-[0.58rem] text-ink-300">
+                      <span className="mb-1 inline-block rounded bg-ink-700/70 px-1.5 py-0.5 text-[0.62rem] text-ink-300">
                         {t("watch.qa.shorterTag")}
                       </span>
                     )}
                     {toSegments(body).map((s, j) => (
-                      <p key={j} className="text-xs leading-5 text-ink-200">
+                      <p key={j} className="text-sm leading-6 text-ink-100">
                         {s}
                       </p>
                     ))}
@@ -602,7 +691,7 @@ export function QaChat({
                     type="button"
                     onClick={() => void send(t("watch.qa.whyQ"))}
                     disabled={sending}
-                    className="h-7 rounded-full border border-ink-700 px-2.5 text-[0.66rem] text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+                    className="h-8 rounded-full border border-ink-700 px-3 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
                   >
                     {t("watch.qa.why")}
                   </button>
@@ -610,7 +699,7 @@ export function QaChat({
                     type="button"
                     onClick={() => void send(t("watch.qa.relationQ"))}
                     disabled={sending}
-                    className="h-7 rounded-full border border-ink-700 px-2.5 text-[0.66rem] text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+                    className="h-8 rounded-full border border-ink-700 px-3 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
                   >
                     {t("watch.qa.relation")}
                   </button>
@@ -618,7 +707,7 @@ export function QaChat({
                     type="button"
                     onClick={() => void toggleBrief(r.id!, r.question)}
                     disabled={Boolean(brief?.busy)}
-                    className="h-7 rounded-full border border-ink-700 px-2.5 text-[0.66rem] text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+                    className="h-8 rounded-full border border-ink-700 px-3 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
                   >
                     {brief?.busy
                       ? t("watch.qa.shorterGoing")
@@ -627,7 +716,7 @@ export function QaChat({
                         : t("watch.qa.shorter")}
                   </button>
                   {brief?.error && (
-                    <p role="alert" className="w-full text-[0.62rem] leading-4 text-amber-300/90">
+                    <p role="alert" className="w-full text-[0.7rem] leading-4 text-amber-300/90">
                       {brief.error}
                     </p>
                   )}
@@ -649,7 +738,7 @@ export function QaChat({
               atBottomRef.current = true;
               setAtBottom(true);
             }}
-            className="mb-1 h-7 w-full rounded-lg bg-ink-700/70 text-[0.66rem] text-ink-200 transition-colors hover:text-teal-300"
+            className="mb-1 h-7 w-full rounded-lg bg-ink-700/70 text-xs text-ink-300 transition-colors hover:text-teal-300"
           >
             {t("watch.qa.toLatest")}
           </button>
@@ -667,6 +756,7 @@ export function QaChat({
             §F 原话本来就是「输入框**边上**一颗小按钮」—— 同一行才是它说的那个位置。 */}
         <div className="flex items-end gap-1.5">
           <textarea
+            ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -680,30 +770,29 @@ export function QaChat({
             }}
             rows={1}
             placeholder={t("watch.qa.placeholder")}
-            className="max-h-24 min-h-9 min-w-0 flex-1 resize-none rounded-xl border border-ink-700 bg-ink-900 px-2.5 py-2 text-xs leading-5 text-ink-100 placeholder:text-ink-500 focus:border-teal-400 focus:outline-none"
+            // 高度由上面那个 layout effect 按字数撑（到 INPUT_MAX_PX 为止）；`overflow-hidden` 是默认，长过上限才打开滚动
+            className="max-h-24 min-h-[42px] min-w-0 flex-1 resize-none overflow-hidden rounded-xl border border-ink-700 bg-ink-900 px-3 py-2 text-sm leading-6 text-ink-100 placeholder:text-ink-500 focus:border-teal-400 focus:outline-none"
           />
           {/* 「只记下这一刻」**搬到输入框边上了**（片 a 把它临时摆在空态里，§F 说的家就是这儿）。
               它是悬浮球在宽屏上的替身：先记下来，待会儿再问 —— 记完点点条上当场多一个点。 */}
-          <button
-            type="button"
-            onClick={onCaptureNow}
-            disabled={capturing}
-            className="min-h-9 shrink-0 rounded-xl border border-ink-700 px-2 text-[0.66rem] text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:pointer-events-none disabled:opacity-50"
-          >
-            {capturing ? t("watch.rail.capturing") : t("watch.rail.capture")}
-          </button>
+          <CaptureNowButton
+            onCapture={onCaptureNow}
+            capturing={capturing}
+            label={t("watch.rail.capture")}
+            busyLabel={t("watch.rail.capturing")}
+          />
           <button
             type="button"
             disabled={sending || !input.trim()}
             onClick={() => void send(input)}
-            className="min-h-9 shrink-0 rounded-xl bg-teal-400 px-3 text-xs font-semibold text-teal-950 transition-colors hover:bg-teal-300 disabled:opacity-40"
+            className="min-h-[42px] shrink-0 rounded-xl bg-teal-400 px-3.5 text-sm font-semibold text-teal-950 transition-colors hover:bg-teal-300 disabled:opacity-40"
           >
             {sending ? "…" : t("watch.qa.send")}
           </button>
         </div>
 
         {(captureError || sendError) && (
-          <p role="alert" className="mt-1.5 text-[0.66rem] leading-4 text-amber-300/90">
+          <p role="alert" className="mt-1.5 text-xs leading-5 text-amber-300/90">
             {captureError || sendError}
           </p>
         )}

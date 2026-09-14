@@ -55,7 +55,7 @@ function groundingInstruction(ctx: AskChatContext): string {
   const focus = windowText(ctx.segments, ctx.atS - WINDOW_BEFORE_S, ctx.atS + WINDOW_AFTER_S);
   const background = backgroundText(ctx.segments);
   const parts = [
-    `你是学习助手，正陪用户看 ${where}、边看边聊。直接、简洁地接着对话回答，扣住他现在看的这段和你们聊过的；别跑题、别编内容里没有的、别反问让他先猜。${answerLanguageRule(ctx.nativeLang)}` +
+    `你是学习助手，正陪用户看 ${where}、边看边聊。直接、简洁地接着对话回答，扣住他现在看的这段和你们聊过的；别跑题、别编内容里没有的、别反问让他先猜。` +
       `\n像面对面聊天一样自然地说：**不要用 markdown**——不要 ** 加粗、不要 * 或 - 或 1. 2. 这类列表符号、不要 # 标题。要分点就用短句加换行，别用符号。语气口语、干脆。`,
   ];
   if (ctx.priorSummary?.trim()) {
@@ -63,6 +63,9 @@ function groundingInstruction(ctx: AskChatContext): string {
   }
   parts.push(`\n【他现在看到的（约 ${mmss(ctx.atS)}）】\n${focus || "（这一刻附近没有字幕）"}`);
   parts.push(`\n【全文背景（参考，别硬塞）】\n${background || "（没有更多字幕）"}`);
+  // 语言规矩**放在最后、单占一段**，而且按他最新那句判好了语言再写（2026-09-13：「一定严格让 ai 根据问的语言回复」）——
+  // 原来它夹在第一段中文句子的尾巴上，整篇中文的指令把英文问句也带成了中文答案。判法见 gemini-ask.ts 的 `questionLanguage`
+  parts.push(`\n${answerLanguageRule(ctx.nativeLang, ctx.question)}`);
   return parts.join("\n");
 }
 
