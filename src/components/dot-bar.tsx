@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useCopy } from "@/components/copy-provider";
-import { CoverageFill } from "@/components/coverage-track";
+import { CoverageFill, PlayheadNeedle } from "@/components/coverage-track";
 import { mmss } from "@/lib/time";
 import type { InterruptRow } from "@/lib/types";
 import type { CoverageSource } from "@/lib/watch-events";
@@ -323,7 +323,7 @@ export function DotBar({
               <div className="relative h-11">
               {coverage ? (
                 // 片 c0（D71）：**宽屏上**这根线变成 8px 的轨，按「看了几遍」填色 ——
-                // 没看过 = 底色、看过 1 / 2 / 3 遍以上 = 越来越亮（为什么是 ink 不是 teal，见 coverage-track.tsx）。
+                // 没看过 = 底色、看过 1 / 2 / 3 遍以上 = 越来越深的绿（D73：2026-09-13 从 ink 灰阶换成叶绿，理由见 coverage-track.tsx）。
                 // `pointer-events-none`：它压在所有圆点底下，一下都不许挡
                 // （开工先量第 2 条：把它故意改成能点，121 个采样点被它挡掉 0 个；44px 的命中区原样在）。
                 <div
@@ -338,6 +338,11 @@ export function DotBar({
                   aria-hidden
                 />
               )}
+              {/* D73：「现在在哪」那根针 —— 跟着填色一起**只在宽屏**画（手机不传 coverage，这根轴一个像素不动）。
+                  排在圆点前面 = 压在圆点底下：播到一个点上时，那个点照样点得中 */}
+              {coverage ? (
+                <PlayheadNeedle getTime={getCurrentTime} durationS={durationS} className="top-1/2 h-4 -translate-y-1/2" />
+              ) : null}
               {clusters.map((c) => {
                 const many = c.points.length > 1;
                 const isOpen = open?.key === c.key;
@@ -361,7 +366,7 @@ export function DotBar({
                       className={`teal-halo rounded-full bg-teal-400 transition-transform group-hover:scale-150 group-active:scale-125 ${
                         many ? "h-3 w-3 ring-2 ring-teal-400/40" : "h-2.5 w-2.5"
                       } ${isOpen ? "scale-150 ring-2 ring-teal-200" : ""} ${
-                        // 片 c0：宽屏的轨有了填色，最亮那档（ink-100）上的青点得有一圈深色描边才认得出
+                        // 片 c0：宽屏的轨有了填色，浅色那档（D73 起是 leaf-300）上的青点得有一圈深色描边才认得出
                         // （开工先量第 3 条，lab 页上几套并排看过）。用 outline 不用 ring：不占位置，
                         // 也不和光晕 / 簇的那圈 ring 抢 box-shadow。展开的那颗自己有高亮，不描
                         coverage && !isOpen ? `outline outline-2 outline-ink-900 ${many ? "outline-offset-2" : ""}` : ""

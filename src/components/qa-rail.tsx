@@ -72,8 +72,6 @@ type ChatProps = React.ComponentProps<typeof QaChat>;
  * ③ 还是片 a 那个写法：切走那一刻记进 ref，切回来在 `useLayoutEffect` 里写回去。
  */
 export function QaRail({
-  tab,
-  onTab,
   onCaptureNow,
   capturing,
   captureError,
@@ -89,8 +87,6 @@ export function QaRail({
   eventsLoadFailed,
   chat,
 }: {
-  tab: QaTab;
-  onTab: (next: QaTab) => void;
   /**
    * 「只记下这一刻，先不问」。**这是悬浮球在宽屏上的替身**（§F）——
    * 片 b 已经把它挪到输入框边上了（`qa-chat.tsx` 里那颗），这里只负责往下传。
@@ -129,6 +125,14 @@ export function QaRail({
   >;
 }) {
   const t = useCopy();
+  /**
+   * 现在露在外面的是哪一栏。**每次进这一页都从「问答」开始** —— 记住上次选的是片 g 的事。
+   *
+   * ⚠️ **这个 state 住在这一层，不住在 watch-stage**（2026-09-13，INP）。片 a 把它放在 watch-stage 上，
+   * 于是点一下 tab 就是整页重画（几百行字幕、捕获轴、两个栏）—— lab 页上点一次 288ms（开发模式，其中处理 254ms）。
+   * watch-stage 除了把它递过来，从来没有别处读过它；挪进来之后，切 tab 只重画这三个栏。
+   */
+  const [tab, setTab] = useState<QaTab>("chat");
   const bodyRef = useRef<HTMLDivElement>(null);
   const takeawayScrollRef = useRef(0);
 
@@ -142,9 +146,9 @@ export function QaRail({
       if (next === tab) return;
       const el = bodyRef.current;
       if (el && tab === "takeaway") takeawayScrollRef.current = el.scrollTop;
-      onTab(next);
+      setTab(next);
     },
-    [tab, onTab],
+    [tab],
   );
 
   // ── D63：钉着的返回牌（**只留最近一次**）──
@@ -283,6 +287,8 @@ export function QaRail({
       <ActivityPanel
         hidden={tab !== "activity"}
         recorder={recorder}
+        // D73：顶上那条的「现在在哪」那根针直接问播放器
+        getCurrentTime={getCurrentTime}
         points={points}
         durationS={durationS}
         kind={sourceKind}

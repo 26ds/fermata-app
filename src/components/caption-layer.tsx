@@ -198,6 +198,11 @@ export function CaptionLayer({
   const [trTotal, setTrTotal] = useState(0);
   const [trNote, setTrNote] = useState(""); // 翻译失败/未翻完的人话
   /**
+   * 「重新加载译文」按一下 +1 —— 下面那条翻译 effect 认它，就再要一次（2026-09-13 创始人：「应该加上重新加载翻译按钮」）。
+   * 这是 D44 要的「人点得动的重试」：花钱的动作只由人点，代码自己永远不重试；服务端只补缺的，已经翻好的那几行不重花钱
+   */
+  const [trReload, setTrReload] = useState(0);
+  /**
    * 服务端亲口确认过的「原文语言」（`same-language` 那一条带回来的）。
    *
    * 为什么不只用 `contentLang` 这个 prop：那一列对 YouTube 常年是空的
@@ -332,6 +337,7 @@ export function CaptionLayer({
               note?: string | null;
               message?: string;
               sourceLang?: string;
+              complete?: boolean;
             };
             if (ev.type === "start") {
               if (ev.total) setTrTotal(ev.total);
@@ -342,7 +348,14 @@ export function CaptionLayer({
                 setTr(next);
                 setTrDone(ev.done ?? ev.translations.length);
               }
-              if (ev.type === "done" && ev.note) setTrNote(ev.note);
+              if (ev.type === "done") {
+                if (ev.note) setTrNote(ev.note);
+                // 没翻全、服务端又没说原因（预算到点那种「正常收尾」）—— 也得说出来，
+                // 不然看着就像「译文就这么多」（D44；2026-09-13 截断缓存那个 bug 就是这么藏了一个多月的）
+                else if (ev.complete === false) {
+                  setTrNote(t("cap.trPartial", ev.translations?.length ?? 0, segments.length));
+                }
+              }
             } else if (ev.type === "same-language") {
               setTr(new Map()); // 原文就是这个语言，不显示译文
               // 服务端能说得更具体就用它的（中文→中文那条走 D50，理由不一样）
@@ -371,8 +384,11 @@ export function CaptionLayer({
     // D44 的规矩是花钱的动作只由人点，界面语言不是那个开关。
     // 代价：切语言的那一刻若正好挂着一句翻译失败的提示，那句话会停在旧语言里。
     // 它是一条**已经发生过的事件**的记录，不是界面标签，停在原语言反而更诚实。
+    //
+    // `trReload` 进依赖是故意的：人按了「重新加载译文」—— D44 说花钱的动作只由人点，这颗按钮就是那个人点
+    // （服务端只补缺的那几行，已经翻好的不重花钱）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lang, sourceId, segments.length]);
+  }, [lang, sourceId, segments.length, trReload]);
 
   // 每 250ms 问一次时间，但**只有跨句时才 setState** ——
   // 一句字幕少说两三秒，于是重渲染从每秒 4 次降到每句 1 次。
@@ -742,7 +758,10 @@ export function CaptionLayer({
               value={lang}
               onChange={(e) => pickLang(e.target.value)}
               aria-label={t("cap.translationAria")}
-              className="h-8 rounded-lg border border-ink-700 bg-ink-900 px-2 text-ink-100 outline-none focus:border-teal-400"
+              // `lg:max-w-40`（2026-09-13）：宽屏上这一行原来刚好一行放下，加了 ↻ 就折成两行、字幕少 40px。
+              // 选择器按最长的那个选项撑到 245px，而选中后显示的只是「简体中文」这种短名 —— 收到 160px 这一行就又放得下了。
+              // 手机不设：那边这一行本来就折成两行，↻ 落在第二行里，一个像素不动（375×812 逐数量过）
+              className="h-8 rounded-lg border border-ink-700 bg-ink-900 px-2 text-ink-100 outline-none focus:border-teal-400 lg:max-w-40"
             >
               <option value="">{t("cap.translationOff")}</option>
               {TARGET_LANGS.map((l) => (
@@ -772,14 +791,41 @@ export function CaptionLayer({
                 >
                   {trOnlyCurrent ? t("cap.trOnlyCurrent") : t("cap.trEveryLine")}
                 </button>
-                {trRunning && (
+                {trRunning ? (
                   <span className="ui-mono text-teal-300/80">
                     {t("cap.translating", trPercent != null ? ` ${trPercent}%` : "…")}
                   </span>
+                ) : (
+                  // 2026-09-13 创始人：「怎么翻译没了？……应该加上重新加载翻译按钮」。
+                  // 那一回的根因在服务端（缓存里只存了前两分钟，见 /api/translate「缓存优先」那段），已修；
+                  // 这颗是给**任何**一种没翻全 / 没翻成的情况留的人工重来（D44：花钱只由人点，代码自己不重试）。
+                  // 翻译进行中不出现 —— 那时这个位置是进度，手机上这一行也就不会因为它多折一行
+                  <button
+                    type="button"
+                    onClick={() => setTrReload((n) => n + 1)}
+                    // 宽屏只露 ↻（字收进 sr-only：读屏照念，悬停有 title）—— 那一行再多几个字就折成两行、字幕少 40px（1512 宽量的）。
+                    // 手机上字照常显示：那边这一行本来就是两行，它落在第二行里
+                    title={t("cap.trReload")}
+                    className="flex h-8 items-center gap-1 rounded-lg px-2 text-ink-500 transition-colors hover:text-teal-300"
+                  >
+                    <svg viewBox="0 0 12 12" className="h-3 w-3 shrink-0" aria-hidden focusable="false">
+                      <path
+                        d="M10 6a4 4 0 1 1-1.2-2.85M10 1.6v2.6H7.4"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.3"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    <span className="lg:sr-only">{t("cap.trReload")}</span>
+                  </button>
                 )}
               </>
             )}
-            {trNote && !trRunning && <span className="text-ink-400">{trNote}</span>}
+            {/* 原来写的是调色板外的 ink「400」档 —— Tailwind 静默丢掉、字退回继承色（M3.15 日志 🐞 那一条）。
+                注释里别写那个类名的原样：日志里那条 grep 守门会把注释也当成一处错色 */}
+            {trNote && !trRunning && <span className="text-ink-300">{trNote}</span>}
           </div>
 
           {/* M3.10 / D45：字幕列表是划词的**第二个入口** —— D39 把暂停面板收成细条，

@@ -4,7 +4,12 @@ import { langLabel, normalizeLang } from "@/lib/lang";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { getCachedTranslation, putCachedTranslation } from "@/lib/translate/cache";
-import { translateSegments, TranslateError, type TranslateProgress } from "@/lib/translate/gemini-translate";
+import {
+  translateSegments,
+  TranslateError,
+  type TranslatedSegment,
+  type TranslateProgress,
+} from "@/lib/translate/gemini-translate";
 import { isSupportedLang } from "@/lib/translate/langs";
 import type { SourceRow, TranscriptSegment } from "@/lib/types";
 import { getLangPrefs } from "@/lib/settings";
@@ -201,13 +206,36 @@ export async function POST(request: Request) {
   }
 
   // === 缓存优先：(内容, 语言) 别人翻过就直接白拿 ===
+  //
+  // ⚠️ **缓存可能只有前两分钟**（2026-09-13 创始人真机：「怎么翻译没了？」）。转写是分片来的
+  // （首片 2 分钟抢首屏，D27）：字幕还没转完就开了译文 → 那一趟把「当时的全部」翻完、算 complete、写进缓存 →
+  // 之后字幕长全了，每一次打开都命中这份截断的缓存、原样返回、还说 complete ——
+  // **两分钟以后的每一行永远没有译文，而且一个字都不说**（D44 最不许的那种）。
+  // 他那支 Top Gun 是 135 行字幕、缓存 26 行；当天生产库 52 份译文缓存里有 13 份这样截断（最狠的 731 行只有 21 行）。
+  //
+  // 修法：缓存只当「已经翻好的那一截」用。**逐行核对**（同一个下标、同一个起点秒 —— 0005 里存 `start` 就是为了这一刻），
+  // 对得上的直接用；缺的 / 对不上的交给下面只补那几行（`translateSegments` 的 `existing` 本来就是断点续传），
+  // 补完整了写回去 —— **截断的旧缓存就在下一次有人打开它时自己长全**，不用另跑修数据的脚本，已经翻好的也不重花钱。
+  let existing: TranslatedSegment[] = [];
   if (contentKey) {
     const cached = await getCachedTranslation(supabase, contentKey, targetLang);
     if (cached) {
-      return ndjsonOnce([
-        { type: "start", total: cached.translations.length, existing: cached.translations.length, cached: true },
-        { type: "done", complete: true, translations: cached.translations, cached: true },
-      ]);
+      existing = cached.translations.filter(
+        (x) =>
+          Number.isInteger(x.i) &&
+          x.i >= 0 &&
+          x.i < segments.length &&
+          // 早期的缓存行万一没存 start，就只认下标（别为此把整篇重翻一遍）
+          (typeof x.start !== "number" || Math.abs(segments[x.i].start - x.start) < 0.01),
+      );
+      const have = new Set(existing.map((x) => x.i));
+      const missing = segments.some((s, i) => s.text.trim().length > 0 && !have.has(i));
+      if (!missing) {
+        return ndjsonOnce([
+          { type: "start", total: existing.length, existing: existing.length, cached: true },
+          { type: "done", complete: true, translations: existing, cached: true },
+        ]);
+      }
     }
   }
 
@@ -224,12 +252,18 @@ export async function POST(request: Request) {
         }
       };
 
-      push({ type: "start", total: segments.length, existing: 0 });
+      push({ type: "start", total: segments.length, existing: existing.length });
+      // 缓存里对得上的那一截先上屏 —— 不然补译的头一批回来之前（十来秒），本来就有的译文反而全空着
+      if (existing.length > 0) {
+        push({ type: "partial", translations: existing, done: existing.length, total: segments.length });
+      }
 
       try {
         const result = await translateSegments({
           segments,
           targetLang,
+          // 只补缺的：已经对得上的那几行不再花钱（2026-09-13 截断缓存的修法，见上面「缓存优先」那段）
+          existing,
           remainingMs,
           onPartial: async (progress: TranslateProgress) => {
             push({ type: "partial", ...progress });

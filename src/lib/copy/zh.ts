@@ -121,6 +121,13 @@ export const zh = {
   "act.listSep": "、",
   "act.segWatched": (n: number) => `看了 ${n} 遍`,
   "act.segUnwatched": "没看过",
+  // D73：颜色说明（三档绿 = 看了几遍，白针 = 现在播到哪）。颜色自己不会解释自己
+  "act.legend1": "1 遍",
+  "act.legend2": "2 遍",
+  "act.legend3": "3 遍+",
+  "act.legendNow": "现在",
+  // D72：「只看提问」按时间点分组 —— 给读屏用户的组名
+  "act.momentAria": (at: string, n: number) => `${at} 问的 ${n} 个问题`,
   "act.visitNow": "这一次",
   // 上线之前就有的点和问题：库里知道什么时候记的，但那一次怎么播、怎么跳，没人记过
   "act.earlier": "更早 · 那时还没有观看记录",
@@ -546,6 +553,11 @@ export const zh = {
   "cap.trNoResponse": "翻译服务没响应",
   "cap.trSameLang": "这条内容的原文就是这个语言。",
   "cap.trFailed": "翻译没成，稍后再试。",
+  // 2026-09-13 创始人：「应该加上重新加载翻译按钮」。按一下 = 再要一次译文：服务端只补缺的那几行，已经翻好的不重花钱
+  "cap.trReload": "重新加载译文",
+  // 没翻全就说出来（D44）：原来预算到点收尾时一个字都不说，看着像"就这么多了"
+  // 宽屏上那颗按钮只露一个 ↻（字收起来了，悬停看得到），所以这句话里两样都写
+  "cap.trPartial": (done: number, total: number) => `译文只翻到 ${done} / ${total} 行 —— 点 ↻（重新加载译文）接着翻`,
 
   // ── 观看页舞台（watch-stage）────────────────────────────────────────────
   "stage.noPlayer": (kind: string) => `这类内容（${kind}）的播放器还没做。`,
