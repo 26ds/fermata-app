@@ -12,9 +12,11 @@ import {
   coverageSegments,
   coverageSummary,
   questionMoments,
+  questionSessions,
   type ActivityGroup,
   type ActivityRow,
   type PointLite,
+  type QuestionMoment,
 } from "@/lib/watch-events";
 import type { WatchRecorder } from "@/lib/watch-recorder";
 
@@ -30,47 +32,57 @@ import type { WatchRecorder } from "@/lib/watch-recorder";
 // **永远挂着、切走只是 hidden**（和问答栏一样）：各记各的滚动位置。但**藏着的时候不订记录器** ——
 // D71：「正在播的那一段每秒更新一次，且只在这一栏打开时更新」。
 
-// ── 「全部 / 只看提问」记在这台机器上（D71：localStorage 就够）──────────────
+// ── 「全部 / 只看提问」「按视频时间 / 按提问先后」记在这台机器上（D71：localStorage 就够）──
 // 照 source-list.tsx / watch-stage 折叠开关的写法走 useSyncExternalStore：
 // 在 useEffect 里 setState 读 localStorage 会被 `react-hooks/set-state-in-effect` 拦下，而且多一轮级联渲染。
-const FILTER_KEY = "fermata.activity.filter";
-type Filter = "all" | "asks";
-let filterNow: Filter = "all";
-let filterLoaded = false;
-const filterListeners = new Set<() => void>();
-
-function getFilter(): Filter {
-  if (!filterLoaded) {
-    filterLoaded = true;
-    try {
-      filterNow = window.localStorage.getItem(FILTER_KEY) === "asks" ? "asks" : "all";
-    } catch {
-      // Safari 无痕模式下 localStorage 会抛。记不住比崩了强
-      filterNow = "all";
-    }
-  }
-  return filterNow;
-}
-const getFilterOnServer = (): Filter => "all";
-
-function subscribeFilter(cb: () => void): () => void {
-  filterListeners.add(cb);
-  return () => {
-    filterListeners.delete(cb);
+// 两个开关一模一样的脾气，所以共用一个小工厂（第二个开关是 2026-09-18 加的）。
+function localChoice<T extends string>(key: string, values: readonly T[], fallback: T) {
+  let now = fallback;
+  let loaded = false;
+  const listeners = new Set<() => void>();
+  return {
+    get(): T {
+      if (!loaded) {
+        loaded = true;
+        try {
+          const v = window.localStorage.getItem(key);
+          now = values.find((x) => x === v) ?? fallback;
+        } catch {
+          // Safari 无痕模式下 localStorage 会抛。记不住比崩了强
+          now = fallback;
+        }
+      }
+      return now;
+    },
+    getServer: (): T => fallback,
+    subscribe(cb: () => void): () => void {
+      listeners.add(cb);
+      return () => {
+        listeners.delete(cb);
+      };
+    },
+    set(next: T) {
+      loaded = true;
+      if (now === next) return;
+      now = next;
+      try {
+        window.localStorage.setItem(key, next);
+      } catch {
+        // 存不下就只在这一次观看里有效
+      }
+      for (const cb of listeners) cb();
+    },
   };
 }
 
-function setFilter(next: Filter) {
-  filterLoaded = true;
-  if (filterNow === next) return;
-  filterNow = next;
-  try {
-    window.localStorage.setItem(FILTER_KEY, next);
-  } catch {
-    // 存不下就只在这一次观看里有效
-  }
-  for (const cb of filterListeners) cb();
-}
+type Filter = "all" | "asks";
+const filterPref = localChoice<Filter>("fermata.activity.filter", ["all", "asks"], "all");
+/**
+ * 「只看提问」怎么排（D74，2026-09-18 创始人：「add the switch，默认应该是提问先后时间」）。
+ * 默认「按提问先后」；D72 那种「按视频时间」一点就换，记在这台机器上。
+ */
+type AskOrder = "asked" | "video";
+const orderPref = localChoice<AskOrder>("fermata.activity.askOrder", ["asked", "video"], "asked");
 
 // ── 小工具 ──────────────────────────────────────────────────────────────
 
@@ -356,6 +368,81 @@ function CoverageLegend({ t }: { t: Translate }) {
   );
 }
 
+/** 一排两颗的小开关 —— 「全部 / 只看提问」和「按视频时间 / 按提问先后」同一个样子 */
+function Segmented<T extends string>({
+  value,
+  options,
+  onPick,
+  label,
+}: {
+  value: T;
+  options: readonly (readonly [T, string])[];
+  onPick: (v: T) => void;
+  label: string;
+}) {
+  return (
+    <div role="group" aria-label={label} className="flex shrink-0 rounded-lg border border-ink-700 p-0.5">
+      {options.map(([v, text]) => (
+        <button
+          key={v}
+          type="button"
+          aria-pressed={value === v}
+          onClick={() => onPick(v)}
+          className={`h-6 rounded-md px-1.5 text-[0.62rem] transition-colors ${
+            value === v ? "bg-ink-700/70 text-teal-300" : "text-ink-500 hover:text-ink-300"
+          }`}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * 「只看提问」的一串串：时间只写一次，问题平铺在它右边（D72：不按追问缩进）。
+ * 两种排法都用它 —— 「按提问先后」里同一个时间点可能出现两次（隔开问的），所以 key 用那一串第一句的 id，不用时间。
+ */
+function MomentList({
+  moments,
+  t,
+  onJump,
+  onOpenTurn,
+  className = "",
+}: {
+  moments: readonly QuestionMoment[];
+  t: Translate;
+  onJump: (s: number) => void;
+  onOpenTurn: (id: string) => void;
+  className?: string;
+}) {
+  return (
+    <ul className={className}>
+      {moments.map((m) => (
+        <li key={m.items[0].id} className="flex gap-1.5 py-1 text-[0.7rem] leading-5">
+          <span className="shrink-0">
+            <TimeLink s={m.tS} at onJump={onJump} t={t} />
+          </span>
+          <ul aria-label={t("act.momentAria", mmss(m.tS), m.items.length)} className="min-w-0 flex-1">
+            {m.items.map((q) => (
+              <li key={q.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpenTurn(q.id)}
+                  aria-label={t("act.openTurn", q.question)}
+                  className="text-left text-ink-100 transition-colors hover:text-teal-300"
+                >
+                  {q.question}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ActivityPanel({
   hidden,
   recorder,
@@ -396,7 +483,8 @@ export function ActivityPanel({
   );
   const live = useSyncExternalStore(subscribe, recorder.getLive, recorder.getLive);
   const cover = useSyncExternalStore(subscribe, recorder.getCoverage, recorder.getCoverage);
-  const filter = useSyncExternalStore(subscribeFilter, getFilter, getFilterOnServer);
+  const filter = useSyncExternalStore(filterPref.subscribe, filterPref.get, filterPref.getServer);
+  const order = useSyncExternalStore(orderPref.subscribe, orderPref.get, orderPref.getServer);
 
   // 分两截算，**每秒那一下只动「这一次」**（开工先量第 4 条）：
   // ① 已经收口的全部事 —— 只在多了一件事时重算（不是每秒），以前几次的组对象身份不变，下面的 GroupView 直接跳过；
@@ -421,6 +509,8 @@ export function ActivityPanel({
   );
   // D72：「只看提问」按时间点分组、组里平铺（片 c0 是按提问先后排、追问缩进）
   const moments = useMemo(() => questionMoments(points), [points]);
+  // 2026-09-18：另一种排法 —— 按提问的真实先后，隔了半小时以上另起一段
+  const sessions = useMemo(() => (order === "asked" ? questionSessions(points) : []), [order, points]);
   const segs = useMemo(() => coverageSegments(cover, durationS), [cover, durationS]);
   const summary = useMemo(() => coverageSummary(segs, durationS), [segs, durationS]);
 
@@ -433,7 +523,7 @@ export function ActivityPanel({
     const el = scrollRef.current;
     if (!el || hidden) return;
     el.scrollTop = atBottomRef.current ? el.scrollHeight : keptRef.current;
-  }, [groups, moments, filter, hidden]);
+  }, [groups, moments, sessions, filter, order, hidden]);
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
@@ -470,21 +560,15 @@ export function ActivityPanel({
               ? t("act.watched", hms(summary.watchedS), hms(durationS), summary.pct)
               : t("act.watchedUnknown")}
           </p>
-          <div role="group" aria-label={t("act.filterAria")} className="flex shrink-0 rounded-lg border border-ink-700 p-0.5">
-            {(["all", "asks"] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                aria-pressed={filter === f}
-                onClick={() => setFilter(f)}
-                className={`h-6 rounded-md px-1.5 text-[0.62rem] transition-colors ${
-                  filter === f ? "bg-ink-700/70 text-teal-300" : "text-ink-500 hover:text-ink-300"
-                }`}
-              >
-                {f === "all" ? t("act.filter.all") : t("act.filter.asks")}
-              </button>
-            ))}
-          </div>
+          <Segmented
+            value={filter}
+            onPick={filterPref.set}
+            label={t("act.filterAria")}
+            options={[
+              ["all", t("act.filter.all")],
+              ["asks", t("act.filter.asks")],
+            ]}
+          />
         </div>
 
         <CoverageBar
@@ -547,30 +631,37 @@ export function ActivityPanel({
           moments.length === 0 ? (
             <p className="pt-3 text-xs leading-5 text-ink-500">{t("act.emptyAsks")}</p>
           ) : (
-            <ul className="pt-2">
-              {moments.map((m) => (
-                // D72：同一个时间点问的归成一组 —— 时间只写一次，问题平铺在它右边（不再按追问缩进）
-                <li key={m.tS} className="flex gap-1.5 py-1 text-[0.7rem] leading-5">
-                  <span className="shrink-0">
-                    <TimeLink s={m.tS} at onJump={onJump} t={t} />
-                  </span>
-                  <ul aria-label={t("act.momentAria", mmss(m.tS), m.items.length)} className="min-w-0 flex-1">
-                    {m.items.map((q) => (
-                      <li key={q.id}>
-                        <button
-                          type="button"
-                          onClick={() => onOpenTurn(q.id)}
-                          aria-label={t("act.openTurn", q.question)}
-                          className="text-left text-ink-100 transition-colors hover:text-teal-300"
-                        >
-                          {q.question}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              ))}
-            </ul>
+            <>
+              {/* D74（2026-09-18）：「1:33 那两个问题其实是我在 1:34、2:55 后面问的」—— 两种顺序都有用，给一个开关，默认按提问先后。
+                  开关上写着现在是哪一种顺序，这件事本身就把他那次的疑惑答掉了 */}
+              <div className="flex justify-end pt-2">
+                <Segmented
+                  value={order}
+                  onPick={orderPref.set}
+                  label={t("act.orderAria")}
+                  options={[
+                    ["asked", t("act.order.asked")],
+                    ["video", t("act.order.video")],
+                  ]}
+                />
+              </div>
+              {order === "video" ? (
+                // D72：同一个时间点问的归成一组，组与组按视频里的时间排
+                <MomentList moments={moments} t={t} onJump={onJump} onOpenTurn={onOpenTurn} className="pt-1" />
+              ) : (
+                // 按提问先后：隔了半小时以上另起一段，段头写那一刻的日期时间（和「全部」里每一次观看的段头同一个样子）
+                sessions.map((s) => (
+                  <section key={s.moments[0].items[0].id} aria-label={s.at ? when(s.at) : undefined}>
+                    {s.at ? (
+                      <h3 className="sticky top-0 z-[1] -mx-3 bg-ink-900 px-3 pb-1 pt-2 text-[0.62rem] font-semibold text-ink-500">
+                        {when(s.at)}
+                      </h3>
+                    ) : null}
+                    <MomentList moments={s.moments} t={t} onJump={onJump} onOpenTurn={onOpenTurn} />
+                  </section>
+                ))
+              )}
+            </>
           )
         ) : groups.length === 0 ? (
           <p className="pt-3 text-xs leading-5 text-ink-500">{t("act.empty")}</p>

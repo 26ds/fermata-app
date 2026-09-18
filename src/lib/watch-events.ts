@@ -560,14 +560,25 @@ export interface QuestionItem {
   tS: number;
   question: string;
   followUp: boolean;
+  /** 什么时候问的（`interrupts.created_at`）—— 「按提问先后」分段、段头的日期时间都用它 */
+  at: string | null;
 }
 
 export function questionList(points: readonly PointLite[]): QuestionItem[] {
   return points
     .filter((p) => (p.question ?? "").trim() && !p.id.startsWith("temp-"))
     .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
-    .map((p) => ({ id: p.id, tS: p.t_s, question: (p.question ?? "").trim(), followUp: Boolean(p.parent_id) }));
+    .map((p) => ({
+      id: p.id,
+      tS: p.t_s,
+      question: (p.question ?? "").trim(),
+      followUp: Boolean(p.parent_id),
+      at: p.created_at ?? null,
+    }));
 }
+
+/** 屏幕上的同一个 mm:ss（往下取整）—— 两种排法认「同一个时间点」用同一条口径 */
+const momentOf = (tS: number) => Math.max(0, Math.floor(tS));
 
 /** 「只看提问」的一组：同一个时间点问过的所有问题 */
 export interface QuestionMoment {
@@ -590,10 +601,52 @@ export interface QuestionMoment {
 export function questionMoments(points: readonly PointLite[]): QuestionMoment[] {
   const byS = new Map<number, QuestionItem[]>();
   for (const q of questionList(points)) {
-    const k = Math.max(0, Math.floor(q.tS));
+    const k = momentOf(q.tS);
     const list = byS.get(k);
     if (list) list.push(q);
     else byS.set(k, [q]);
   }
   return [...byS.entries()].sort((a, b) => a[0] - b[0]).map(([tS, items]) => ({ tS, items }));
+}
+
+/**
+ * 「只看提问 · 按提问先后」里，隔了多久没问就另起一段（段头写那一刻的日期时间）。
+ * 他 2026-09-18 的原话：「1:33 那两个问题其实是我在 1:34、2:55 后面问的，就是说我后面又回到了这个视频」——
+ * 「后来又回来」要一眼看得出来，才分段。按真实间隔判，不按观看记录的「一次打开」判：
+ * 片 c0 之前问的问题没有观看记录可对（`act.earlier` 那一组），这条规矩对新旧问题一视同仁。
+ */
+export const ASK_SESSION_GAP_MS = 30 * 60_000;
+
+/** 「按提问先后」的一段：一次坐下来连着问的那几句 */
+export interface QuestionSession {
+  /** 这一段第一句的提问时刻（ISO）。没有的话（理论上不会）就是 null，段头不写时间 */
+  at: string | null;
+  /** 段里按提问先后排；**挨着的**几句同一个时间点归一串、时间只写一次（和「按视频时间」一个样子） */
+  moments: QuestionMoment[];
+}
+
+/**
+ * 「只看提问」按**提问的真实先后**排（D74，2026-09-18 创始人：两种顺序都有用，给一个开关，**默认就是这一种**）。
+ *
+ * 「按视频时间」（D72，`questionMoments`）回答的是「我在视频的哪几处停下来问过什么」—— 同一个时间点的全摞在一起，
+ * 哪怕是隔天回来问的；这一种回答的是「我是按什么顺序问的」：回到 01:33 又问的那两句，排在 01:34、02:55 后面。
+ * 同一个时间点**隔开问**的（先问 00:11、再问 02:55、又回到 00:11）在这里是两串 —— 那正是他问的顺序，不合并。
+ */
+export function questionSessions(points: readonly PointLite[], gapMs = ASK_SESSION_GAP_MS): QuestionSession[] {
+  const out: QuestionSession[] = [];
+  let lastMs = -Infinity;
+  for (const q of questionList(points)) {
+    const ms = q.at ? Date.parse(q.at) : NaN;
+    let session = out[out.length - 1];
+    // 头一句、或者离上一句超过 gapMs：另起一段。取不到时间的就跟着上一段走，不凭空断开
+    if (!session || (Number.isFinite(ms) && ms - lastMs > gapMs)) {
+      session = { at: q.at, moments: [] };
+      out.push(session);
+    }
+    if (Number.isFinite(ms)) lastMs = ms;
+    const last = session.moments[session.moments.length - 1];
+    if (last && last.tS === momentOf(q.tS)) last.items.push(q);
+    else session.moments.push({ tS: momentOf(q.tS), items: [q] });
+  }
+  return out;
 }

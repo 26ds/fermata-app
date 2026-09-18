@@ -128,6 +128,10 @@ export const zh = {
   "act.legendNow": "现在",
   // D72：「只看提问」按时间点分组 —— 给读屏用户的组名
   "act.momentAria": (at: string, n: number) => `${at} 问的 ${n} 个问题`,
+  // 2026-09-18：「只看提问」两种排法的开关（按视频里的时间 / 按真的问的先后）
+  "act.orderAria": "问题怎么排",
+  "act.order.video": "按视频时间",
+  "act.order.asked": "按提问先后",
   "act.visitNow": "这一次",
   // 上线之前就有的点和问题：库里知道什么时候记的，但那一次怎么播、怎么跳，没人记过
   "act.earlier": "更早 · 那时还没有观看记录",
