@@ -34,6 +34,8 @@ export type PausePoint = Pick<
   created_at?: string | null;
   /** M3.15 片 b：追问挂在母问题下面（计划 §B.4）。迁移 0011 的列 */
   parent_id?: string | null;
+  /** M3.16（D75）：点「看画面再答」拿到的那一版。迁移 0013 的列，没跑时就是 undefined */
+  ai_answer_visual?: string | null;
 };
 
 /** 「那一刻的字幕」取这一刻前后各几秒。够唤起记忆即可，多了会把每行撑成一段文章 */

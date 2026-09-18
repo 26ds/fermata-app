@@ -122,6 +122,8 @@ export function QaRail({
     | "onCaptureNow"
     | "capturing"
     | "captureError"
+    | "canLook"
+    | "durationS"
   >;
 }) {
   const t = useCopy();
@@ -281,6 +283,9 @@ export function QaRail({
         onCaptureNow={onCaptureNow}
         capturing={capturing}
         captureError={captureError}
+        // M3.16（D75）：「看画面再答」只在 YouTube 上出现 —— 播客没有画面
+        canLook={sourceKind === "youtube"}
+        durationS={durationS}
       />
 
       {/* ② 互动记录：也**永远挂着**（各记各的滚动位置），但藏着的时候不订记录器、不每秒重画 */}

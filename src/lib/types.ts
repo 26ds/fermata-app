@@ -87,6 +87,9 @@ export interface InterruptRow {
   takeaway?: unknown;
   /** 勾进「知识点」清单了吗 */
   saved?: boolean | null;
+  // ── 迁移 0013（M3.16 看画面回答，D75）。可选：迁移没跑时这一列不存在 ──
+  /** 点「看画面再答」拿到的那一版。`ai_answer` 仍是只看字幕的那版，两列谁也不覆盖谁 */
+  ai_answer_visual?: string | null;
 }
 
 /** atoms 表行：统一知识原子（FSRS Card 字段一比一落库） */

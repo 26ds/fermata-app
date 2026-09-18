@@ -103,6 +103,15 @@ export const zh = {
   "watch.qa.shorterBack": "看回原来那版",
   "watch.qa.shorterTag": "短版",
   "watch.qa.shorterFailed": "短的这一版没写出来，点一下再试",
+  // M3.16（D75）：看画面再答 —— 用户自己点、点了才花钱；看了画面那版另存一列，和只看字幕那版来回切
+  "watch.qa.look": "看画面再答",
+  "watch.qa.lookTitle": "把这一刻前后十来秒的视频也交给 AI 看，再答一次 —— 会多花一点、多等几秒",
+  "watch.qa.lookGoing": (s: number) => `看画面中… ${s} 秒`,
+  "watch.qa.lookTag": (from: string, to: string) => `看了画面 · ${from}–${to}`,
+  "watch.qa.captionsTag": "只看了字幕",
+  "watch.qa.lookShowCaptions": "换成只看字幕的那版",
+  "watch.qa.lookShowVisual": "换成看了画面的那版",
+  "watch.qa.lookFailed": "看画面这一趟没答出来，点一下再试",
   // D62：老的沉浸聊天记录不搬家，只读混进来
   "watch.qa.oldTitle": "以前在沉浸聊天里聊过的",
   "watch.qa.oldHint": "只读 —— 这些是搬到这一栏之前留下的，在这儿不能接着追问。",
@@ -747,6 +756,12 @@ export const zh = {
   "err.noCaptionsChat": "这条内容还没有字幕，先生成字幕再聊。",
   "err.chatCreateFailed": "建立对话失败，请重试",
   "err.answerFailed": (detail: string) => `回答时出错了：${detail}`,
+  // M3.16（D75）：看画面再答那一趟的几种失败，各说各的（D44）
+  "err.lookNotVideo": "只有 YouTube 视频能「看画面再答」。",
+  "err.lookUnreadable":
+    "AI 看不了这支视频的画面 —— 只收公开的 YouTube 视频（不公开 / 私享 / 会员 / 地区限制的都不行）。只看字幕的那版回答还在。",
+  "err.lookNotSaved": "这一版答案没存上，刷新后就没了。",
+  "err.lookNotSavedDb": "这一版答案没存上（服务器的数据库还没升级），刷新后就没了。",
   "err.glossTimeout": "取解释超时了（20 秒没回来）。",
   "err.glossFailed": "取解释时出错了。",
   "err.lookupTimeout": "查这个词超时了。",

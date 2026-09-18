@@ -79,6 +79,15 @@ export const en = {
   "watch.qa.shorterBack": "Show the long one",
   "watch.qa.shorterTag": "Short",
   "watch.qa.shorterFailed": "The short version didn't come through — tap to try again",
+  "watch.qa.look": "Look at the video",
+  "watch.qa.lookTitle":
+    "Let the AI watch the ~12 seconds around this moment and answer again — costs a little more, takes a few seconds",
+  "watch.qa.lookGoing": (s: number) => `Watching the video… ${s}s`,
+  "watch.qa.lookTag": (from: string, to: string) => `Looked at the video · ${from}–${to}`,
+  "watch.qa.captionsTag": "Subtitles only",
+  "watch.qa.lookShowCaptions": "Show the subtitles-only answer",
+  "watch.qa.lookShowVisual": "Show the video answer",
+  "watch.qa.lookFailed": "The video answer didn't come through — tap to try again",
   "watch.qa.oldTitle": "From your earlier immersive chats",
   "watch.qa.oldHint": "Read-only — these predate this rail, so you can't follow up on them here.",
 
@@ -688,6 +697,11 @@ export const en = {
   "err.noCaptionsChat": "This item has no subtitles yet — generate them first, then chat.",
   "err.chatCreateFailed": "Couldn't start the conversation. Please try again.",
   "err.answerFailed": (detail: string) => `Something went wrong while answering: ${detail}`,
+  "err.lookNotVideo": "Only YouTube videos can be looked at.",
+  "err.lookUnreadable":
+    "The AI can't watch this video — only public YouTube videos work (not unlisted, private, members-only or region-locked). Your subtitles-only answer is still here.",
+  "err.lookNotSaved": "This answer wasn't saved — it will be gone after a reload.",
+  "err.lookNotSavedDb": "This answer wasn't saved (the server's database hasn't been upgraded yet) — it will be gone after a reload.",
   "err.glossTimeout": "Fetching the explanation timed out (no reply in 20 seconds).",
   "err.glossFailed": "Something went wrong fetching the explanation.",
   "err.lookupTimeout": "Looking up that word timed out.",

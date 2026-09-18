@@ -1,6 +1,6 @@
 import "server-only";
-import { GoogleGenAI } from "@google/genai";
-import { explainGeminiError } from "@/lib/transcript/gemini-youtube";
+import { GoogleGenAI, MediaResolution, type Part } from "@google/genai";
+import { explainGeminiError, isPermanentGeminiFailure } from "@/lib/transcript/gemini-youtube";
 import { langNameEn, normalizeLang } from "@/lib/lang";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
@@ -18,6 +18,12 @@ const MODEL = "gemini-2.5-flash";
 /** 单次问答最长等这么久 */
 const ANSWER_TIMEOUT_MS = 60_000;
 
+/**
+ * 「看画面再答」（M3.16，D75）多一步：模型要先去 YouTube 取那一段。**慢多少没量过**（计划「开工先量」第 1 条）——
+ * 界面上把秒数亮给他看、预览站上量；这里先给宽一点，别让一次本来能答出来的看画面被 60 秒掐掉
+ */
+const LOOK_TIMEOUT_MS = 90_000;
+
 /** 答案够用就行，别让它写论文；也压住 token 成本 */
 const MAX_OUTPUT_TOKENS = 2_048;
 
@@ -31,9 +37,17 @@ const FULL_TRANSCRIPT_CHAR_CAP = 24_000;
 const TIMED_TRANSCRIPT_CHAR_CAP = 32_000;
 
 export class AskError extends Error {
-  constructor(message: string) {
+  /**
+   * 视频本身读不了（不公开 / 私享 / 会员 / 地区限制）—— 重试一万次也一样。
+   * 只有「看画面再答」那一趟会碰到：路由拿它换一句专门的话（「AI 看不了这支视频的画面…原答案还在」），
+   * 而不是 `explainGeminiError` 那句「自动转写只收公开视频」—— 他点的不是转写（M3.16，D75）
+   */
+  readonly unreadable: boolean;
+
+  constructor(message: string, options?: { unreadable?: boolean }) {
     super(message);
     this.name = "AskError";
+    this.unreadable = options?.unreadable ?? false;
   }
 }
 
@@ -57,6 +71,20 @@ export interface AskContext {
    * ③ **不点就一分钱不花**（D44：花钱的动作只由人点）。
    */
   brief?: boolean;
+  /**
+   * M3.16「看画面再答」（D75）：**这一趟把提问前后那一段视频也交给模型看**。
+   * 喂法照抄自动转写（`gemini-youtube.ts`：`fileData.fileUri` = YouTube 链接 + `videoMetadata` 截一段），
+   * 只认公开的 YouTube 视频 —— 调用方负责只在 YouTube 上传它。
+   */
+  look?: {
+    /** YouTube 观看页链接（`sources.url`） */
+    url: string;
+    /** 看哪一段（整秒）—— `lib/look.ts` 的 `lookClip` 算的，界面角标上写的也是它 */
+    fromS: number;
+    toS: number;
+    /** 之前只看字幕给他的那版回答 —— 画面说明它不对或不全，就让模型直说 */
+    previousAnswer: string | null;
+  };
   /** 逐块回调：流式把答案吐给上层 */
   onChunk: (text: string) => void | Promise<void>;
 }
@@ -265,8 +293,14 @@ function buildPrompt(ctx: AskContext): string {
   const focus = timedLines(ctx.segments, ctx.windowStartS, ctx.windowEndS);
   const background = timedBackground(ctx.segments);
   const where = ctx.title ? `《${ctx.title}》` : "这段内容";
+  const look = ctx.look;
   return [
     `你是学习助手。用户正在看 ${where}，在 ${mmss(ctx.tS)} 处卡住了，想问你一句。`,
+    // M3.16（D75）：他点了「看画面再答」—— 告诉模型它这次看得到什么、他停在那一段的哪儿
+    look
+      ? `这一次**你看得到画面**：随这段话附上的视频，就是他卡住前后那一段（${mmss(look.fromS)}–${mmss(look.toS)}；` +
+        `他停在 ${mmss(ctx.tS)}，在这一段快结束的地方）。他特意点了「看画面再答」—— 多半问的是画面上发生的事，字幕里没有。`
+      : "",
     "（下面的字幕每行开头方括号里是那一句开始的时间。）",
     "",
     "【他刚听到的（回答的焦点，扣住这里）】",
@@ -277,6 +311,8 @@ function buildPrompt(ctx: AskContext): string {
     "",
     `【他的问题】\n${ctx.question}`,
     "",
+    // 看画面那一趟：把只看字幕那版一起给它 —— 他点这颗按钮，往往就是因为那版答偏了（他那次：画面上是导弹，那版说「敌机来了」）
+    look?.previousAnswer ? `【之前只看字幕给他的回答（没看画面，可能不对或不全）】\n${look.previousAnswer}\n` : "",
     // ── 答案的形状是**有顺序的**（计划 §B.5，创始人第一轮的原话）──
     //
     // 「先简要解释相关概念 → 再说视频前后哪里还讲到这件事并标出时间」。
@@ -291,8 +327,13 @@ function buildPrompt(ctx: AskContext): string {
     // 那两句套话**不再写死中文**（2026-09-13）：英文答案里夹一句「前面 02:44 还会讲到」就是破功；
     // 而「前面……还会讲到」本身也不通 —— 往前的是「讲过」。
     "要求：",
-    "① 先直接、简洁地回答他问的那件事，扣住他卡住的那几句；" +
-      "别跑题、别编内容里没有的、别反问让他先猜。",
+    look
+      ? "① 先说画面上看到了什么（谁、在做什么、有什么东西、怎么动），再直接回答他问的那件事；" +
+        "画面和字幕说的不一样时以画面为准，并说明是在画面里看到的。" +
+        "之前那版只看字幕的回答如果被画面证明不对或不全，直接指出来。" +
+        "看不清就说看不清，别编画面里没有的东西，别反问让他先猜。"
+      : "① 先直接、简洁地回答他问的那件事，扣住他卡住的那几句；" +
+        "别跑题、别编内容里没有的、别反问让他先猜。",
     "② 如果这条内容的**别处**确实还讲到这件事，答完之后另起一段指路：" +
       "往后的写「后面 MM:SS 还会讲到……」，往前的写「前面 MM:SS 讲过……」" +
       "（这两句也要换成回答所用的语言，英文就写 “Later at MM:SS …” / “Earlier at MM:SS …”），" +
@@ -318,12 +359,26 @@ function buildPrompt(ctx: AskContext): string {
 export async function askQuestion(ctx: AskContext): Promise<string> {
   const ai = clientFor();
   const prompt = buildPrompt(ctx);
+  const look = ctx.look;
+
+  // M3.16（D75）：看画面那一趟，视频放在提示词**前面**（先给材料、再给问题）。
+  // 喂法和自动转写那条一模一样（`gemini-youtube.ts` 的 transcribeChunk）—— 那条从 M2 起在生产上跑着；
+  // 不同的只有每秒 1 帧（转写是 0.05：它要的是话，这里要的正是画面）
+  const parts: Part[] = look
+    ? [
+        {
+          fileData: { fileUri: look.url },
+          videoMetadata: { startOffset: `${look.fromS}s`, endOffset: `${look.toS}s`, fps: 1 },
+        },
+        { text: prompt },
+      ]
+    : [{ text: prompt }];
 
   let answer = "";
   try {
     const stream = await ai.models.generateContentStream({
       model: MODEL,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      contents: [{ role: "user", parts }],
       config: {
         // 答案语言单独放进 systemInstruction —— 提示词正文是一整篇中文 + 一整篇字幕，
         // 只在正文末尾说一句，拗不过前面几千字（2026-09-13 真机：英文问句拿到过整段中文答案）
@@ -332,7 +387,9 @@ export async function askQuestion(ctx: AskContext): Promise<string> {
         maxOutputTokens: MAX_OUTPUT_TOKENS,
         // 通用问答不需要长链推理，思考预算砍掉省时省钱（与转写/翻译同款）
         thinkingConfig: { thinkingBudget: 0 },
-        abortSignal: AbortSignal.timeout(ANSWER_TIMEOUT_MS),
+        // 画面压到低档（每帧约 66 token，转写同一档）：12 秒 ≈ 1,200 token（计划里的估算）
+        ...(look ? { mediaResolution: MediaResolution.MEDIA_RESOLUTION_LOW } : {}),
+        abortSignal: AbortSignal.timeout(look ? LOOK_TIMEOUT_MS : ANSWER_TIMEOUT_MS),
       },
     });
     for await (const chunk of stream) {
@@ -343,7 +400,9 @@ export async function askQuestion(ctx: AskContext): Promise<string> {
       }
     }
   } catch (e) {
-    throw new AskError(explainGeminiError(e instanceof Error ? e.message : String(e)));
+    const raw = e instanceof Error ? e.message : String(e);
+    // 「视频读不了」这一类要单独认出来 —— 只在看画面那一趟才有意义（普通问答根本不碰视频）
+    throw new AskError(explainGeminiError(raw), { unreadable: Boolean(look) && isPermanentGeminiFailure(raw) });
   }
 
   const trimmed = answer.trim();

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useCopy } from "@/components/copy-provider";
 import type { PausePoint } from "@/components/pause-list";
 import { toSegments } from "@/lib/chat-text";
+import { lookClip } from "@/lib/look";
 import { mmss } from "@/lib/time";
 
 // M3.15 片 b —— 右栏第一栏「问答」的**本体**（计划 §B，D61 / D62 / D63 / D56）。
@@ -28,6 +29,11 @@ import { mmss } from "@/lib/time";
 // 「聊天框字体太小」「要把我们问的问题用气泡框框起来，ai 的回复不需要，这样用于区分」。
 // 字从 12px 提到 14px（问、答、输入框一起）；提问装进右边一个气泡、回答照旧不套框。
 // 那一轮还把追问缩进拿掉了（D72）—— 2026-09-18 他要回来了：「问答栏也缩进」，线再亮一点。
+//
+// ── M3.16「看画面再答」（D75，2026-09-18 冻结）────────────────────────────────
+// 答完之后三连旁边多一颗：**用户自己点、点了才花钱**，把提问前后十来秒的视频也交给模型看。
+// 看了画面那版**另存一列**（`ai_answer_visual`，迁移 0013），和只看字幕那版（`ai_answer`）**两版都留、来回切**，
+// 切换不花钱。花钱的那颗只挂最后一轮；切换哪一轮有画面版就挂在哪一轮。只在 YouTube 上出现。
 
 /** 连着几轮 `t_s` 挨得这么近就不重复标 `@`（D55 原有的防吵规则，计划 §B.2） */
 const REPEAT_LABEL_GAP_S = 30;
@@ -40,6 +46,12 @@ const REPEAT_LABEL_GAP_S = 30;
  */
 const BUBBLE =
   "min-w-0 whitespace-pre-wrap rounded-2xl rounded-br-md bg-ink-700 px-3 py-1.5 text-sm leading-6 text-ink-100 [overflow-wrap:anywhere]";
+
+/**
+ * 答案头上的小角标（「短版」、D75 的「看了画面 · 02:45–02:57」/「只看了字幕」）。
+ * 灰底不用青色：青色在这一页只答「能点 / 是个捕获点」，角标两样都不是
+ */
+const TAG = "inline-block rounded bg-ink-700/70 px-1.5 py-0.5 text-[0.62rem] text-ink-300";
 
 /** 输入框最多长到这么高（和它的 `max-h-24` 同一个数），再多才出滚动条 */
 const INPUT_MAX_PX = 96;
@@ -64,6 +76,8 @@ type Row =
       tS: number;
       question: string;
       answer: string;
+      /** 库里存着的「看了画面」那一版（D75，迁移 0013）。没有 = "" */
+      visual: string;
       /** 0 = 母问题，1 = 追问（缩进一格 + 细线；读屏另说一声「追问」） */
       depth: 0 | 1;
       /** 正在流式作答 */
@@ -89,14 +103,17 @@ function FermataDots() {
 /**
  * 读一条 `/api/ask` 的 NDJSON 流。每收到一块就把**到目前为止的全文**交给 `onPiece`。
  *
- * 抽成函数是因为它有两个调用方：正常问一句、以及「说短一点」重答一版。
- * 两边逐字复制会漂移 —— 而流式协议这种东西一漂移，症状是"偶尔少最后半句"，
+ * 抽成函数是因为它有三个调用方：正常问一句、「说短一点」重答一版、「看画面再答」（D75）。
+ * 几处逐字复制会漂移 —— 而流式协议这种东西一漂移，症状是"偶尔少最后半句"，
  * 最难查。
+ *
+ * `onWarn`：答案到了、但服务端有话要说（看画面那版**没存上** —— D44，答案照给、事情照说）。
  */
 async function streamAsk(
-  body: { interruptId: string; question: string; brief?: boolean },
+  body: { interruptId: string; question: string; brief?: boolean; look?: boolean },
   onPiece: (fullSoFar: string) => void,
   fallbackError: string,
+  onWarn?: (message: string) => void,
 ): Promise<string> {
   const res = await fetch("/api/ask", {
     method: "POST",
@@ -135,6 +152,8 @@ async function streamAsk(
         onPiece(full);
       } else if (ev.type === "error") {
         streamErr = ev.message ?? fallbackError;
+      } else if (ev.type === "warn" && ev.message) {
+        onWarn?.(ev.message);
       }
     }
   }
@@ -142,6 +161,21 @@ async function streamAsk(
   if (streamErr) throw new Error(streamErr);
   if (!full.trim()) throw new Error(fallbackError);
   return full;
+}
+
+/**
+ * 「看画面中… 5 秒」里那个一直在跑的秒数（D75）。
+ * **慢多少没人量过**（本地没 Gemini key，计划「开工先量」第 1 条）—— 让他自己看得见，他点一次就量到了。
+ * 自己每秒重画自己，不牵动整栏（问答栏里几十轮问答，别为一个数字每秒全画一遍）。
+ */
+function Elapsed({ since, render }: { since: number; render: (s: number) => string }) {
+  const [now, setNow] = useState(since);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return <>{render(Math.max(0, Math.floor((now - since) / 1000)))}</>;
 }
 
 /**
@@ -205,6 +239,8 @@ export function QaChat({
   captureError,
   answerFailedText,
   oldTurns,
+  canLook,
+  durationS,
 }: {
   /** 切到别的 tab 了。**不卸载、只 hidden** —— 见下面滚动位置那段 */
   hidden: boolean;
@@ -243,6 +279,10 @@ export function QaChat({
   answerFailedText: string;
   /** 老沉浸聊天的逐字记录（D62：老数据不搬家，只读混进来）。null = 还没取到 / 没有 */
   oldTurns: OldTurn[] | null;
+  /** 这条内容能不能「看画面再答」（D75：只有 YouTube；播客没有画面，那颗按钮不出现） */
+  canLook: boolean;
+  /** 内容时长 —— 角标上「看了画面 · 02:45–02:57」的终点要夹在片尾以内（和服务端同一个 `lookClip`） */
+  durationS: number;
 }) {
   const t = useCopy();
 
@@ -262,10 +302,24 @@ export function QaChat({
   /** 连点都没落上（`createPoint` 就失败了）—— 这时候流里连一行都没有，只能在输入框下面说 */
   const [sendError, setSendError] = useState("");
 
-  /** D56「说短一点」的短版，按轮次存。**只在内存里** —— 刷新就没，原答案永远是库里那份 */
+  /**
+   * D56「说短一点」的短版。**只在内存里** —— 刷新就没，原答案永远是库里那份。
+   * key 是 `轮次id:哪一版`（`captions` / `visual`）：D75 之后一轮最多有两版答案，**各有各的短版**，
+   * 看画面那版的短版也得带着画面去写（计划：「说短一点」跟着当前显示的那一版走）
+   */
   const [briefs, setBriefs] = useState<
     Map<string, { text: string; showing: boolean; busy: boolean; error: string }>
   >(() => new Map());
+
+  /**
+   * D75「看画面再答」—— 这一次观看里新要的画面版，按轮次存（库里原有的在 `points[].ai_answer_visual`）。
+   * `since`：开始等的时刻（秒数在跑）；`note`：答案到了但**没存上**，要一直挂着说（D44）
+   */
+  const [looks, setLooks] = useState<
+    Map<string, { text: string; busy: boolean; error: string; note: string; since: number }>
+  >(() => new Map());
+  /** 哪几轮被切回了只看字幕那版 —— 默认有画面版就先显示画面版（他点那颗按钮，就是因为字幕那版不够） */
+  const [captionsFirst, setCaptionsFirst] = useState<ReadonlySet<string>>(() => new Set());
 
   const [atBottom, setAtBottom] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -321,6 +375,7 @@ export function QaChat({
         tS: p.t_s,
         question: p.question ?? "",
         answer: p.ai_answer ?? "",
+        visual: p.ai_answer_visual ?? "",
         depth: p.parent_id ? 1 : 0,
         live: false,
         error: "",
@@ -336,6 +391,7 @@ export function QaChat({
         tS: flight.tS,
         question: flight.question,
         answer: flight.answer,
+        visual: "",
         depth: flight.parentId ? 1 : 0,
         live: !flight.error,
         error: flight.error,
@@ -369,12 +425,14 @@ export function QaChat({
 
   // ── 滚动 ──
   // 停在底部就跟最新；用户上滑看历史则不抢（和沉浸聊天同一条规矩）。
+  // `briefs` / `looks` 也算「最新」：短版、看画面那版是在原地流出来的，`rows` 不变 ——
+  // 不跟的话，点完「看画面再答」那颗按钮换成「看画面中… 3 秒」、折到下一行，就掉出视野了（2026-09-18 lab 页上撞到）
   useEffect(() => {
     if (hidden) return; // 藏着的时候 scrollHeight 是 0，这会儿写 scrollTop 等于把它清零
     if (atBottom && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [rows, atBottom, hidden]);
+  }, [rows, briefs, looks, atBottom, hidden]);
 
   /**
    * 片 c0：从互动记录点了一个问题过来 —— 滚到那一轮、闪一下（D71：**不动视频**）。
@@ -523,36 +581,101 @@ export function QaChat({
    * ③ **不点就一分钱不花**（D44）。
    */
   const toggleBrief = useCallback(
-    async (id: string, question: string) => {
-      const have = briefs.get(id);
+    async (id: string, question: string, basis: "captions" | "visual") => {
+      const key = `${id}:${basis}`;
+      const have = briefs.get(key);
       if (have?.busy) return;
       if (have && have.text) {
-        setBriefs((m) => new Map(m).set(id, { ...have, showing: !have.showing, error: "" }));
+        setBriefs((m) => new Map(m).set(key, { ...have, showing: !have.showing, error: "" }));
         return;
       }
-      setBriefs((m) => new Map(m).set(id, { text: "", showing: true, busy: true, error: "" }));
+      setBriefs((m) => new Map(m).set(key, { text: "", showing: true, busy: true, error: "" }));
       try {
-        const full = await streamAsk({ interruptId: id, question, brief: true }, (soFar) => {
-          setBriefs((m) => {
-            const cur = m.get(id);
-            return new Map(m).set(id, {
-              text: soFar,
-              showing: true,
-              busy: true,
-              error: cur?.error ?? "",
+        // 看画面那版的短版也带着画面去写（D75）—— 否则「短版」说的就不是屏幕上那件事了
+        const full = await streamAsk(
+          { interruptId: id, question, brief: true, look: basis === "visual" || undefined },
+          (soFar) => {
+            setBriefs((m) => {
+              const cur = m.get(key);
+              return new Map(m).set(key, {
+                text: soFar,
+                showing: true,
+                busy: true,
+                error: cur?.error ?? "",
+              });
             });
-          });
-        }, answerFailedText);
-        setBriefs((m) => new Map(m).set(id, { text: full, showing: true, busy: false, error: "" }));
+          },
+          answerFailedText,
+        );
+        setBriefs((m) => new Map(m).set(key, { text: full, showing: true, busy: false, error: "" }));
       } catch {
         // 说不出是哪一种失败也要说"失败了"，并且**留一条人点得动的重试**（D44）
         setBriefs((m) =>
-          new Map(m).set(id, { text: "", showing: false, busy: false, error: t("watch.qa.shorterFailed") }),
+          new Map(m).set(key, { text: "", showing: false, busy: false, error: t("watch.qa.shorterFailed") }),
         );
       }
     },
     [briefs, answerFailedText, t],
   );
+
+  /**
+   * D75「看画面再答」。三件事一起才算做对（和 D56 同一个脾气，只多了「存库」）：
+   * ① **只看字幕那版原地不动**（服务端只写 `ai_answer_visual`）；
+   * ② 两版**可来回切**，切换不再花钱（`captionsFirst` 只是换显示）；
+   * ③ **不点就一分钱不花**；点了之后秒数在跑，他看得见在等什么。
+   * 看砸了：说清楚是哪一种（看不了这支视频 / 别的），那颗按钮还在 —— 人点得动的重试（D44）。
+   */
+  const lookAgain = useCallback(
+    async (id: string, question: string) => {
+      if (looks.get(id)?.busy) return;
+      setLooks((m) => new Map(m).set(id, { text: "", busy: true, error: "", note: "", since: Date.now() }));
+      // 他刚点了要看画面 —— 画面版一到就显示它，哪怕他之前把这一轮切回过只看字幕
+      setCaptionsFirst((s) => {
+        if (!s.has(id)) return s;
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
+      let note = "";
+      try {
+        const full = await streamAsk(
+          { interruptId: id, question, look: true },
+          (soFar) => {
+            setLooks((m) => {
+              const cur = m.get(id);
+              return new Map(m).set(id, { text: soFar, busy: true, error: "", note: "", since: cur?.since ?? Date.now() });
+            });
+          },
+          t("watch.qa.lookFailed"),
+          (w) => {
+            note = w;
+          },
+        );
+        setLooks((m) => new Map(m).set(id, { text: full, busy: false, error: "", note, since: 0 }));
+      } catch (e) {
+        setLooks((m) =>
+          new Map(m).set(id, {
+            text: "",
+            busy: false,
+            error: e instanceof Error && e.message ? e.message : t("watch.qa.lookFailed"),
+            note: "",
+            since: 0,
+          }),
+        );
+      }
+    },
+    [looks, t],
+  );
+
+  /** 在两版之间切 —— **只换显示，不花钱**（D75） */
+  const flipBasis = useCallback((id: string) => {
+    setCaptionsFirst((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   // 三连只挂在**最后一轮**上（计划 §B.6：推力加在"看完答案那一刻"）。
   // 每一轮都挂三颗按钮，右栏会变成一面按钮墙 —— 那是噪音，不是推力。
@@ -606,10 +729,17 @@ export function QaChat({
             );
           }
 
-          const brief = r.id ? briefs.get(r.id) : undefined;
+          // D75：看了画面那一版 —— 这一次刚要的（正在流也算）优先，其次是库里存着的
+          const look = r.id ? looks.get(r.id) : undefined;
+          const lookBusy = Boolean(look?.busy);
+          const visual = look?.text || r.visual;
+          const basis: "captions" | "visual" = visual && !(r.id && captionsFirst.has(r.id)) ? "visual" : "captions";
+          const brief = r.id ? briefs.get(`${r.id}:${basis}`) : undefined;
           const showingBrief = Boolean(brief?.showing && (brief.text || brief.busy));
-          const body = showingBrief ? (brief?.text ?? "") : r.answer;
+          const body = showingBrief ? (brief?.text ?? "") : basis === "visual" ? visual : r.answer;
           const isLast = r.id !== null && r.id === lastAnsweredId;
+          // 角标上写的那一段，和服务端喂给模型的是同一个函数算的（lib/look.ts）
+          const clip = lookClip(r.tS, durationS);
 
           return (
             <div
@@ -661,17 +791,35 @@ export function QaChat({
                   </div>
                 ) : body ? (
                   <>
-                    {showingBrief && (
-                      <span className="mb-1 inline-block rounded bg-ink-700/70 px-1.5 py-0.5 text-[0.62rem] text-ink-300">
-                        {t("watch.qa.shorterTag")}
-                      </span>
+                    {/* 角标一行：这一版的依据（D75：看了画面 · 哪一段 / 只看了字幕）+ 短版 + 两版之间切换（不花钱）。
+                        只有这一轮真有两版时才出现 —— 没点过看画面的轮次和以前一模一样 */}
+                    {(visual || showingBrief) && (
+                      <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                        {visual ? (
+                          <span className={TAG}>
+                            {basis === "visual"
+                              ? t("watch.qa.lookTag", mmss(clip.fromS), mmss(clip.toS))
+                              : t("watch.qa.captionsTag")}
+                          </span>
+                        ) : null}
+                        {showingBrief && <span className={TAG}>{t("watch.qa.shorterTag")}</span>}
+                        {visual && r.answer && r.id && !lookBusy ? (
+                          <button
+                            type="button"
+                            onClick={() => flipBasis(r.id!)}
+                            className="rounded px-1 py-0.5 text-[0.62rem] text-ink-300 underline decoration-ink-500 underline-offset-2 transition-colors hover:text-teal-300"
+                          >
+                            {basis === "visual" ? t("watch.qa.lookShowCaptions") : t("watch.qa.lookShowVisual")}
+                          </button>
+                        ) : null}
+                      </div>
                     )}
                     {toSegments(body).map((s, j) => (
                       <p key={j} className="text-sm leading-6 text-ink-100">
                         {s}
                       </p>
                     ))}
-                    {(r.live || brief?.busy) && <FermataDots />}
+                    {(r.live || brief?.busy || (basis === "visual" && lookBusy)) && <FermataDots />}
                   </>
                 ) : (
                   <p className="flex items-center gap-2">
@@ -682,6 +830,19 @@ export function QaChat({
                   </p>
                 )}
               </div>
+
+              {/* D75：看画面那一趟的下落，跟着**这一轮**走（不跟着最后一轮那排按钮）——
+                  看砸了说是哪一种；答案到了但没存上，这一次观看里一直挂着说（D44） */}
+              {look?.error ? (
+                <p role="alert" className="mt-1.5 text-[0.7rem] leading-4 text-amber-300/90">
+                  {look.error}
+                </p>
+              ) : null}
+              {look?.note ? (
+                <p role="status" className="mt-1.5 text-[0.7rem] leading-4 text-amber-300/90">
+                  {look.note}
+                </p>
+              ) : null}
 
               {/* ── 答完之后的三连（计划 §B.6 + D56）──
                   为什么在**答案之后**而不是提问之前：人默认问浅问题，
@@ -706,8 +867,9 @@ export function QaChat({
                   </button>
                   <button
                     type="button"
-                    onClick={() => void toggleBrief(r.id!, r.question)}
-                    disabled={Boolean(brief?.busy)}
+                    onClick={() => void toggleBrief(r.id!, r.question, basis)}
+                    // 看画面那一趟还在流的时候先别写短版：那会儿显示的是哪一版还没定
+                    disabled={Boolean(brief?.busy) || lookBusy}
                     className="h-8 rounded-full border border-ink-700 px-3 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
                   >
                     {brief?.busy
@@ -716,6 +878,23 @@ export function QaChat({
                         ? t("watch.qa.shorterBack")
                         : t("watch.qa.shorter")}
                   </button>
+                  {/* D75「看画面再答」：只在 YouTube；这一轮已经有画面版了就不再摆（切换在角标那一行，不花钱）。
+                      等的时候秒数在跑 —— 慢多少没人量过，让他自己看得见 */}
+                  {canLook && (lookBusy || !visual) && (
+                    <button
+                      type="button"
+                      onClick={() => void lookAgain(r.id!, r.question)}
+                      disabled={lookBusy}
+                      title={t("watch.qa.lookTitle")}
+                      className="h-8 rounded-full border border-ink-700 px-3 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+                    >
+                      {lookBusy && look ? (
+                        <Elapsed since={look.since} render={(s) => t("watch.qa.lookGoing", s)} />
+                      ) : (
+                        t("watch.qa.look")
+                      )}
+                    </button>
+                  )}
                   {brief?.error && (
                     <p role="alert" className="w-full text-[0.7rem] leading-4 text-amber-300/90">
                       {brief.error}
