@@ -77,7 +77,7 @@ function NavArrow({
       aria-label={direction === 1 ? t("dots.next") : t("dots.prev")}
       // disabled 与 opacity 刻意都不写进 JSX —— 由 effect 直接改 DOM，见 DotBar 里的说明。
       // 写进来 React 就会在每次重渲染时把它覆盖回去。
-      className="relative z-10 flex h-11 w-8 shrink-0 items-center justify-center text-ink-500 transition-opacity hover:text-teal-300 active:text-teal-200 disabled:pointer-events-none"
+      className="relative z-10 flex h-11 w-8 shrink-0 items-center justify-center text-ink-500 transition-opacity hover:text-teal-300 active:text-teal-100 disabled:pointer-events-none"
     >
       <svg viewBox="0 0 10 12" className="h-3 w-2.5" aria-hidden>
         <path d={direction === 1 ? "M0 0 L10 6 L0 12 Z" : "M10 0 L0 6 L10 12 Z"} fill="currentColor" />
@@ -125,7 +125,7 @@ function CaptureHelp({ text, label }: { text: string; label: string }) {
       </button>
       {open && (
         // 气泡朝**右**上长：问号现在钉在整条的最左端，朝左会顶出屏幕（264px 宽，直接跑到负数去）
-        <p className="glass-card absolute bottom-full left-0 z-20 mb-1 w-64 rounded-xl px-3 py-2 text-[0.68rem] leading-5 text-ink-200">
+        <p className="glass-card absolute bottom-full left-0 z-20 mb-1 w-64 rounded-xl px-3 py-2 text-[0.68rem] leading-5 text-ink-100">
           {text}
         </p>
       )}
@@ -365,7 +365,7 @@ export function DotBar({
                     <span
                       className={`teal-halo rounded-full bg-teal-400 transition-transform group-hover:scale-150 group-active:scale-125 ${
                         many ? "h-3 w-3 ring-2 ring-teal-400/40" : "h-2.5 w-2.5"
-                      } ${isOpen ? "scale-150 ring-2 ring-teal-200" : ""} ${
+                      } ${isOpen ? "scale-150 ring-2 ring-teal-300" : ""} ${
                         // 片 c0：宽屏的轨有了填色，浅色那档（D73 起是 leaf-300）上的青点得有一圈深色描边才认得出
                         // （开工先量第 3 条，lab 页上几套并排看过）。用 outline 不用 ring：不占位置，
                         // 也不和光晕 / 簇的那圈 ring 抢 box-shadow。展开的那颗自己有高亮，不描

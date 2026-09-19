@@ -115,6 +115,7 @@ export function QaRail({
     | "points"
     | "getCurrentTime"
     | "onJump"
+    | "onJumpCard"
     | "pinBar"
     | "focusTurn"
     | "labelResets"
@@ -168,7 +169,7 @@ export function QaRail({
 
   /** 被我们的链接送走：**先记下他现在在哪**、立牌子，再跳（这一跳自己也在互动记录里记一行） */
   const jump = useCallback(
-    (toS: number, via: "at_link" | "record") => {
+    (toS: number, via: "at_link" | "record" | "card") => {
       // 记精确的秒数（片 b 这里四舍五入到整秒）：牌子上的「回到 00:36」要和互动记录那一行的「00:36 → …」
       // 对得上（mm:ss 一律往下取整，lab 页上两边差过 1 秒），点回去也回到分毫不差的那一刻
       const from = Math.max(0, getCurrentTime());
@@ -181,6 +182,8 @@ export function QaRail({
   );
   const jumpFromChat = useCallback((toS: number) => jump(toS, "at_link"), [jump]);
   const jumpFromRecord = useCallback((toS: number) => jump(toS, "record"), [jump]);
+  // 片 c 概述卡：`card` 早在片 c0 就进了 SEEK_VIAS 和 KEEPS_BACK_CARD（互动记录写「点概述卡」、牌子不撤）
+  const jumpFromCard = useCallback((toS: number) => jump(toS, "card"), [jump]);
 
   const goBack = useCallback(() => {
     if (pinned === null) return;
@@ -276,6 +279,7 @@ export function QaRail({
         points={points}
         getCurrentTime={getCurrentTime}
         onJump={jumpFromChat}
+        onJumpCard={jumpFromCard}
         pinBar={tab === "chat" ? pinBar : null}
         focusTurn={focusTurn}
         labelResets={labelResets}

@@ -15,6 +15,7 @@ import type { GlossState } from "@/components/selectable-line";
 import { ViewportLayer } from "@/components/viewport-layer";
 import { isWideNow, useIsWide } from "@/components/use-wide";
 import { useWordLookup } from "@/components/word-lookup";
+import type { AnswerRef } from "@/lib/answer-refs";
 import { DEFAULT_LANG_PREFS, type LangPrefs } from "@/lib/lang";
 import {
   isPhraseScan,
@@ -1215,10 +1216,19 @@ export function WatchStage({
    * **点点条、问题列表、`/library/[id]` 吃的是同一份** —— 不在这儿补，
    * 刚问完的那一条在点点条上还是个"只是停了一下"的空点，得刷新页面才对得上。
    */
-  const onQaAnswered = useCallback((id: string, question: string, answer: string) => {
+  const onQaAnswered = useCallback((id: string, question: string, answer: string, refs: AnswerRef[] | null) => {
     setPoints((prev) =>
       prev.map((p) =>
-        p.id === id ? { ...p, question, ai_answer: answer, question_mode: p.question_mode ?? "free" } : p,
+        p.id === id
+          ? {
+              ...p,
+              question,
+              ai_answer: answer,
+              question_mode: p.question_mode ?? "free",
+              // 片 c 概述卡跟着答案一起换（重试时旧答案的卡片不许挂到新答案下面；这一趟没推卡片 = 没有卡片）
+              refs,
+            }
+          : p,
       ),
     );
   }, []);

@@ -36,6 +36,11 @@ export type PausePoint = Pick<
   parent_id?: string | null;
   /** M3.16（D75）：点「看画面再答」拿到的那一版。迁移 0013 的列，没跑时就是 undefined */
   ai_answer_visual?: string | null;
+  /**
+   * M3.15 片 c：概述卡（`interrupts.refs`，jsonb —— 读的地方用 `readRefs` 校验形状）。
+   * 只有宽屏问答栏画它；这一页（历史页）照旧只显示 `ai_answer` 全文 —— 全文末尾本来就留着一份文字版
+   */
+  refs?: unknown;
 };
 
 /** 「那一刻的字幕」取这一刻前后各几秒。够唤起记忆即可，多了会把每行撑成一段文章 */
@@ -213,7 +218,7 @@ export function PauseList({
                               所以只有前两档（有问题 / 有答案）才补这段"那一刻在讲什么"。
                               另：line-clamp 自己就是 -webkit-box，别再叠 `block` —— 会把它压回普通块级、夹不住 */}
                           {caption && !reason.fromCaption && (
-                            <span className="mt-1 line-clamp-2 text-xs leading-5 text-ink-400">
+                            <span className="mt-1 line-clamp-2 text-xs leading-5 text-ink-500">
                               「{caption}」
                             </span>
                           )}

@@ -112,6 +112,14 @@ export const zh = {
   "watch.qa.lookShowCaptions": "换成只看字幕的那版",
   "watch.qa.lookShowVisual": "换成看了画面的那版",
   "watch.qa.lookFailed": "看画面这一趟没答出来，点一下再试",
+  // M3.15 片 c：概述卡（计划 §二 / D64）—— 答案里「视频别处还讲到」的那几处，一处一张卡，点了就地跳 + 留返回牌。
+  // 「后面 / 前面」是相对**这一问的那一秒**说的；核不上字幕的那张照出、灰着、不可点，写明是哪一种（D44）
+  "watch.qa.refsAria": "视频里别处还讲到",
+  "watch.qa.refLater": "后面",
+  "watch.qa.refEarlier": "前面",
+  "watch.qa.refJump": (at: string) => `跳到 ${at}（概述卡）`,
+  // 创始人 2026-09-07 的原话（D64）：「没找到，直接一点，而不是不给」
+  "watch.qa.refUnverified": "这一句我在字幕里没核对上，可能是 AI 记错了",
   // D62：老的沉浸聊天记录不搬家，只读混进来
   "watch.qa.oldTitle": "以前在沉浸聊天里聊过的",
   "watch.qa.oldHint": "只读 —— 这些是搬到这一栏之前留下的，在这儿不能接着追问。",
@@ -762,6 +770,9 @@ export const zh = {
     "AI 看不了这支视频的画面 —— 只收公开的 YouTube 视频（不公开 / 私享 / 会员 / 地区限制的都不行）。只看字幕的那版回答还在。",
   "err.lookNotSaved": "这一版答案没存上，刷新后就没了。",
   "err.lookNotSavedDb": "这一版答案没存上（服务器的数据库还没升级），刷新后就没了。",
+  // M3.15 片 c：普通一问写库失败（以前没人看返回值，写失败了也一声不吭 —— D44）
+  "err.answerNotSaved": "这一轮的回答没存上，刷新后就没了。",
+  "err.answerNotSavedDb": "这一轮的回答没存上（服务器的数据库还没升级），刷新后就没了。",
   "err.glossTimeout": "取解释超时了（20 秒没回来）。",
   "err.glossFailed": "取解释时出错了。",
   "err.lookupTimeout": "查这个词超时了。",
