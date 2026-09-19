@@ -59,7 +59,7 @@ export function PhraseText({
         className={`pointer-events-auto relative z-10 rounded px-0.5 transition-colors ${
           saved
             ? "bg-teal-400/85 text-teal-950"
-            : "bg-teal-400/15 text-teal-200 underline decoration-teal-400/60 decoration-dotted underline-offset-4 hover:bg-teal-400/30"
+            : "bg-teal-400/15 text-teal-300 underline decoration-teal-400/60 decoration-dotted underline-offset-4 hover:bg-teal-400/30"
         }`}
       >
         {hit}

@@ -149,7 +149,7 @@ export default async function WatchDetailPage({
               className="group inline-flex max-w-full items-center gap-1 hover:text-teal-300"
             >
               <span className="truncate">{source.title ?? tr("common.untitled")}</span>
-              <span aria-hidden className="shrink-0 text-ink-400 transition-colors group-hover:text-teal-300">↗</span>
+              <span aria-hidden className="shrink-0 text-ink-500 transition-colors group-hover:text-teal-300">↗</span>
             </a>
           ) : (
             (source.title ?? tr("common.untitled"))

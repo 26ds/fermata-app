@@ -218,7 +218,7 @@ export function PauseList({
                               所以只有前两档（有问题 / 有答案）才补这段"那一刻在讲什么"。
                               另：line-clamp 自己就是 -webkit-box，别再叠 `block` —— 会把它压回普通块级、夹不住 */}
                           {caption && !reason.fromCaption && (
-                            <span className="mt-1 line-clamp-2 text-xs leading-5 text-ink-400">
+                            <span className="mt-1 line-clamp-2 text-xs leading-5 text-ink-500">
                               「{caption}」
                             </span>
                           )}
