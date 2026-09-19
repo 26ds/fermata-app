@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { askQuestion, AskError } from "@/lib/ask/gemini-ask";
+import { pastTurns, RECENT_TURNS, type HistoryRow, type PastTurn } from "@/lib/ask/history";
 import { refsStream, settleAnswer, splitRefsBlock } from "@/lib/ask/refs";
+import { readRefs, splitAnswer } from "@/lib/answer-refs";
 import { lookClip } from "@/lib/look";
 import { getLangPrefs } from "@/lib/settings";
 import { conformSegments } from "@/lib/zh-convert";
@@ -65,6 +67,37 @@ function line(payload: unknown): Uint8Array {
   return new TextEncoder().encode(`${JSON.stringify(payload)}\n`);
 }
 
+/**
+ * D77：从 `interrupts` 取之前几轮 —— 母问题那一轮 + 这一轮**之前**最近三轮。挑、拆、截在 `lib/ask/history.ts`。
+ * 只取这一轮之前的：「说短一点」「看画面再答」点在老的一轮上时，带的是那一轮当时的上下文，不是后来才问的。
+ * `select("*")`：0013 没跑的库上没有 `ai_answer_visual`，点名要它整条查询就挂了（观看页取这张表也是 `*`）。
+ * 取不到不拦这一问（答案照给），但要说出来（D44）—— 调用方看 `failed`
+ */
+async function loadHistory(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  turn: { id: string; source_id: string; parent_id: string | null; created_at: string },
+): Promise<{ turns: PastTurn[]; failed: boolean }> {
+  const [recent, parent] = await Promise.all([
+    supabase
+      .from("interrupts")
+      .select("*")
+      .eq("source_id", turn.source_id)
+      .eq("user_id", userId)
+      .neq("id", turn.id)
+      .not("question", "is", null)
+      .not("ai_answer", "is", null)
+      .lt("created_at", turn.created_at)
+      .order("created_at", { ascending: false })
+      .limit(RECENT_TURNS),
+    turn.parent_id
+      ? supabase.from("interrupts").select("*").eq("id", turn.parent_id).eq("user_id", userId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+  if (recent.error || parent.error) return { turns: [], failed: true };
+  return { turns: pastTurns((recent.data ?? []) as HistoryRow[], (parent.data as HistoryRow | null) ?? null), failed: false };
+}
+
 export async function POST(request: Request) {
   const t = await getT();
   if (!supabaseConfigured) {
@@ -89,18 +122,26 @@ export async function POST(request: Request) {
   const { interruptId, question, brief, look, cards } = parsed.data;
   // 这一趟出概述卡吗：只有「按卡片问」的正经一问才出（短版不写第②段；看画面那版的卡片已经在只看字幕那版上）
   const withRefs = Boolean(cards) && !brief && !look;
+  // 宽屏问答栏来的吗：正经一问带 `cards`、「说短一点」带 `brief`、「看画面再答」带 `look` —— 手机暂停面板三样都不带，
+  // 它的请求和以前逐字节相同。只有这一路带上之前的对话（D77）、立「不许猜是谁说的」（D76）
+  const fromRail = Boolean(cards || brief || look);
 
   // 这条打断点（RLS + user_id 双保险，别人的点问不了）—— 窗口就从这行拿。
-  // `ai_answer` 是给「看画面再答」用的：把只看字幕那版一起交给模型（D75）
+  // `ai_answer` 是给「看画面再答」用的：把只看字幕那版一起交给模型（D75）；`refs` 用来拆掉它末尾的卡片文字版（D76）；
+  // `parent_id` / `created_at` 给 D77 挑之前几轮
   const { data: interrupt } = await supabase
     .from("interrupts")
-    .select("id, source_id, t_s, window_start_s, window_end_s, question_mode, ai_answer")
+    .select("id, source_id, t_s, window_start_s, window_end_s, question_mode, ai_answer, refs, parent_id, created_at")
     .eq("id", interruptId)
     .eq("user_id", user.id)
     .maybeSingle();
   if (!interrupt) {
     return NextResponse.json({ error: t("err.noInterruptPoint") }, { status: 404 });
   }
+  // D77：之前几轮，和下面取字幕、取语言设置同时跑 —— 别让每一问多等一趟数据库
+  const historyP = fromRail
+    ? loadHistory(supabase, user.id, interrupt).catch(() => ({ turns: [] as PastTurn[], failed: true }))
+    : null;
 
   // 内容的字幕
   const { data: srcRow } = await supabase
@@ -146,6 +187,11 @@ export async function POST(request: Request) {
       const splitter = cards ? refsStream((text) => push({ type: "chunk", text })) : null;
 
       try {
+        // D77：之前几轮没取到 —— 这一问照答（字幕都在），但它看不到前面聊过什么，得说出来（D44）。
+        // 排在最前面推：写库失败的那句要是也来了，会盖掉这一句（那一句更要紧）
+        const history = historyP ? await historyP : null;
+        if (history?.failed) push({ type: "warn", message: t("err.askNoHistory") });
+
         const tS = Number(interrupt.t_s);
         const raw = await askQuestion({
           question,
@@ -156,12 +202,22 @@ export async function POST(request: Request) {
           title: source.title,
           nativeLang: prefs.nativeLang,
           brief,
-          // 看哪一段由 `lib/look.ts` 算 —— 界面角标上写的「02:45–02:57」是同一个函数算的
+          // 看哪一段由 `lib/look.ts` 算 —— 界面角标上写的「02:45–02:57」是同一个函数算的。
+          // 上一版答案拆掉末尾的卡片文字版再给（D76）：那几行 note 正是猜说话人的重灾区（「Maverick 在催促 Rooster」），
+          // 这一趟又不写指路 —— 留着只会把猜错的名字带进画面版
           look:
             look && source.url
-              ? { url: source.url, ...lookClip(tS, source.duration_s), previousAnswer: interrupt.ai_answer ?? null }
+              ? {
+                  url: source.url,
+                  ...lookClip(tS, source.duration_s),
+                  previousAnswer: interrupt.ai_answer
+                    ? splitAnswer(interrupt.ai_answer, readRefs(interrupt.refs)).body
+                    : null,
+                }
               : undefined,
           cards,
+          history: history?.turns,
+          noSpeakerGuess: fromRail,
           onChunk: async (text) => (splitter ? splitter.push(text) : push({ type: "chunk", text })),
         });
         await splitter?.end();

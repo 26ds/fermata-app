@@ -1,6 +1,7 @@
 import "server-only";
 import { GoogleGenAI, MediaResolution, type Part } from "@google/genai";
 import { explainGeminiError, isPermanentGeminiFailure } from "@/lib/transcript/gemini-youtube";
+import type { PastTurn } from "@/lib/ask/history";
 import { langNameEn, normalizeLang } from "@/lib/lang";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
@@ -92,6 +93,16 @@ export interface AskContext {
    * （短版本来就不写第②段；看画面那版的指路卡片已经在只看字幕那版上了）。
    */
   cards?: boolean;
+  /**
+   * D77：之前几轮 —— 母问题那一轮 + 这一轮之前最近三轮（`lib/ask/history.ts` 挑、拆、截好的，按提问先后）。
+   * 只有宽屏问答栏的请求会带；没有或空数组 = 提示词里没有「之前的对话」那一节（手机暂停面板、这条内容的第一问）
+   */
+  history?: readonly PastTurn[];
+  /**
+   * D76：提示词里写死「字幕里没有说话人，不许猜是谁说的」。现在只有宽屏问答栏的请求带；
+   * 不带 = 这一句不出现（手机暂停面板要不要也加，等创始人一句话 —— M3.15-log 📌）
+   */
+  noSpeakerGuess?: boolean;
   /** 逐块回调：流式把答案吐给上层 */
   onChunk: (text: string) => void | Promise<void>;
 }
@@ -296,11 +307,53 @@ function timedBackground(segments: TranscriptSegment[]): string {
   return `${all.slice(0, TIMED_TRANSCRIPT_CHAR_CAP)}\n…（全文较长，仅取前段作背景）`;
 }
 
+/**
+ * D76（2026-09-19 创始人在预览站上验概述卡时报的，他选 C 的前一半）：**字幕里没有说话人，不许猜是谁说的**。
+ *
+ * 转写提示词写死了 `no speaker labels`、每 20 秒才看一帧（`gemini-youtube.ts`）—— 字幕里根本没有名字，
+ * 模型就凭「带队的是 Maverick」去猜：Top Gun 03:13「Come on, Rooster.」写成「Maverick 在催促 Rooster」（他看画面是地勤），
+ * 03:41 写成「Maverick 担心 Rooster」（其实是 Payback）。当时生产库里 13 条卡片说明，8 条点了字幕里没有的说话人。
+ * D64 的核对只管「这句在哪」，管不到「谁说的」—— 所以只能在提示词里立规矩。
+ * 看画面那一趟例外：它这一趟真的看得到那一段，看清了可以说（只限那一段）。
+ * 给字幕加说话人是 D76 的后一半，以后单做一步（先写计划、先量价钱）。
+ */
+function speakerRule(look: AskContext["look"]): string {
+  return (
+    "※ **是谁说的**：字幕里没有标说话人 —— 哪一句是谁说的，你其实不知道。" +
+    "只有字幕自己说清楚了（比如自报家门「I'm Alex」）才写出是谁" +
+    (look
+      ? `；这一趟随附的画面（${mmss(look.fromS)}–${mmss(look.toS)}）里看得清是谁在说的，也可以写` +
+        "（认得出是谁就写名字，认不出就描述看到的样子），这一段以外的台词照样不能猜"
+      : "") +
+    "。否则写「有人…」「一个声音…」（英文写 “someone …”），别凭剧情、角色身份、或者你以前知道的这段内容去猜。" +
+    "字幕里叫到的名字多半是**被叫的那个人**：「Come on, Alex.」是有人在叫 Alex，不是 Alex 在说。" +
+    "他在问题里自己说了是谁，可以照他的说法；「视频里说」「讲者」这类不点名的说法照常用。" +
+    "答案正文和指路那一段（包括每一行的 note）都守这一条。"
+  );
+}
+
+/**
+ * D77：「之前的对话」那一节的正文。每轮两行：`[他卡在哪] 他问：…` / `回答：…`（截过的）；
+ * 母问题那一轮、看了画面的那一版都标出来 —— 模型要知道这一串追问从哪儿起、那一版答案看没看过画面
+ */
+function historyText(turns: readonly PastTurn[]): string {
+  return turns
+    .map(
+      (h) =>
+        // `parent_id` 永远指一串追问的**第一问**（追问的追问也挂在它下面，qa-chat 的 send），不是紧挨着的上一轮 ——
+        // 所以写「这一串是从这儿开始的」；「这」「为什么会这样」指哪一轮，交给下面要求里那一句（最后那一轮）
+        `[${mmss(h.tS)}] 他问：${h.question}${h.parent ? "　← 他这一串追问就是从这一轮开始的" : ""}\n` +
+        `${h.visual ? "回答（看了画面的那一版）" : "回答"}：${h.answer}`,
+    )
+    .join("\n\n");
+}
+
 function buildPrompt(ctx: AskContext): string {
   const focus = timedLines(ctx.segments, ctx.windowStartS, ctx.windowEndS);
   const background = timedBackground(ctx.segments);
   const where = ctx.title ? `《${ctx.title}》` : "这段内容";
   const look = ctx.look;
+  const history = ctx.history ?? [];
   return [
     `你是学习助手。用户正在看 ${where}，在 ${mmss(ctx.tS)} 处卡住了，想问你一句。`,
     // M3.16（D75）：他点了「看画面再答」—— 告诉模型它这次看得到什么、他停在那一段的哪儿
@@ -316,6 +369,8 @@ function buildPrompt(ctx: AskContext): string {
     "【全文背景（仅供参考，别硬塞）】",
     background || "（没有更多字幕）",
     "",
+    // D77：他在这条内容里之前问过的几轮（字幕后面、他的问题前面 —— 先给材料，再给这一问）
+    history.length ? `【之前的对话（他在这条内容里问过的，按先后；答案截过）】\n${historyText(history)}` : "",
     `【他的问题】\n${ctx.question}`,
     "",
     // 看画面那一趟：把只看字幕那版一起给它 —— 他点这颗按钮，往往就是因为那版答偏了（他那次：画面上是导弹，那版说「敌机来了」）
@@ -356,6 +411,8 @@ function buildPrompt(ctx: AskContext): string {
           "t 只能照抄字幕里方括号标的时间，不许自己估；" +
           "quote 必须从上面的字幕里**一字不差地抄**，保持字幕原文的语言 —— 不翻译、不改词、不加自己的话，可以只抄一句里的一段；" +
           "note 用回答所用的语言写，一句话，不超过 20 个词；" +
+          // D76：他报的那两张卡错就错在这一句（生产库 13 条 note 里 8 条点了字幕里没有的说话人），规矩就近再说一遍
+          (ctx.noSpeakerGuess ? "note 里也不许猜是谁说的（见下面「是谁说的」那一条）；" : "") +
           "不要写「后面 / 前面 / Later / Earlier」这类方向词，也不要写时间（卡片上已经标了）。" +
           "别处没讲到、或者拿不准，就**整段不写**（连 [[REFS]] 也不写）—— 宁可没有，也不要给一个对不上的。"
         : "② 如果这条内容的**别处**确实还讲到这件事，答完之后另起一段指路：" +
@@ -368,6 +425,12 @@ function buildPrompt(ctx: AskContext): string {
     ctx.brief
       ? "③ 这一版**要短**：只留最要紧的那一层意思，三句以内；不铺垫、不复述他的问题、不列点。" +
         "第②段这一版**不写**。"
+      : "",
+    ctx.noSpeakerGuess ? speakerRule(look) : "",
+    // D77：快捷按钮「为什么会这样？」「这跟他刚才讲的那一段是什么关系？」离开上一个答案不成话 —— 告诉它「这」指的是哪儿
+    history.length
+      ? "※ **之前的对话**只作上下文：他这一问里的「这」「他」「为什么会这样」多半说的是最后那一轮在讲的事 —— 接着它往下答，" +
+        "别把答过的再复述一遍；这一问和之前的对话不相干，就当新问题答。之前的回答不一定对（尤其是「谁说的」），别当成事实沿用。"
       : "",
     // 语言规矩压在最后一行、并且 systemInstruction 里再放一遍（见 askQuestion）
     answerLanguageRule(ctx.nativeLang, ctx.question),
