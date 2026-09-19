@@ -709,6 +709,8 @@ export const en = {
   "err.lookNotSavedDb": "This answer wasn't saved (the server's database hasn't been upgraded yet) — it will be gone after a reload.",
   "err.answerNotSaved": "This answer wasn't saved — it will be gone after a reload.",
   "err.answerNotSavedDb": "This answer wasn't saved (the server's database hasn't been upgraded yet) — it will be gone after a reload.",
+  "err.askNoHistory":
+    "This answer couldn't see your earlier questions (loading them failed) — if it doesn't follow on from them, ask again.",
   "err.glossTimeout": "Fetching the explanation timed out (no reply in 20 seconds).",
   "err.glossFailed": "Something went wrong fetching the explanation.",
   "err.lookupTimeout": "Looking up that word timed out.",

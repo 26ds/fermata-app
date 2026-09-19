@@ -773,6 +773,8 @@ export const zh = {
   // M3.15 片 c：普通一问写库失败（以前没人看返回值，写失败了也一声不吭 —— D44）
   "err.answerNotSaved": "这一轮的回答没存上，刷新后就没了。",
   "err.answerNotSavedDb": "这一轮的回答没存上（服务器的数据库还没升级），刷新后就没了。",
+  // D77：之前几轮没取到 —— 答案照给，但它没看到前面聊过什么（D44：要说出来）
+  "err.askNoHistory": "这一问没带上之前的对话（读取失败）—— 答案要是接不上前面，再问一次。",
   "err.glossTimeout": "取解释超时了（20 秒没回来）。",
   "err.glossFailed": "取解释时出错了。",
   "err.lookupTimeout": "查这个词超时了。",
