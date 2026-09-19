@@ -180,6 +180,13 @@ export const en = {
   "home.toWatch": "Find something to watch",
   "home.toLibrary": "See what I've watched →",
 
+  // ── Phone temporarily off (D78) — the "open this on a computer" screen ─
+  "desktopOnly.eyebrow": "desktop first",
+  "desktopOnly.title": "Open Fermata on a computer.",
+  "desktopOnly.lede":
+    "The phone version is switched off for now. Fermata puts the video, the transcript and your questions on one screen, and a small screen can't hold all three — so it lives on your computer (Windows or Mac) for the moment.",
+  "desktopOnly.widen": "Already on a computer? Widen the browser window (past 1024px) and it comes straight back.",
+
   // ── 404 ────────────────────────────────────────────────────────────────
   "nf.title": "This page isn't here.",
   "nf.lede":
