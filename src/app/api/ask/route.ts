@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { askQuestion, AskError } from "@/lib/ask/gemini-ask";
+import { refsStream, settleAnswer, splitRefsBlock } from "@/lib/ask/refs";
 import { lookClip } from "@/lib/look";
 import { getLangPrefs } from "@/lib/settings";
 import { conformSegments } from "@/lib/zh-convert";
@@ -38,6 +39,13 @@ const bodySchema = z.object({
    * 创始人选的是「两版都留、来回切、都存库」。`look + brief` 是看画面那版的短版：照 D56，一个字都不写。
    */
   look: z.boolean().optional(),
+  /**
+   * M3.15 片 c（D64）：「视频别处还讲到」要成**概述卡**（只有宽屏问答栏传）。
+   * 模型把指路写成答案后面一段结构化的东西；这里把它挡在流外面、拿原句去字幕里核对、
+   * 吸附后存进 `interrupts.refs`，全文末尾再留一份文字版（历史页那些不画卡片的地方照样看得见）。
+   * 手机上的暂停面板不传 —— 它拿到的答案和以前一个字都不差。
+   */
+  cards: z.boolean().optional(),
 });
 
 /**
@@ -78,7 +86,9 @@ export async function POST(request: Request) {
       { status: 400 },
     );
   }
-  const { interruptId, question, brief, look } = parsed.data;
+  const { interruptId, question, brief, look, cards } = parsed.data;
+  // 这一趟出概述卡吗：只有「按卡片问」的正经一问才出（短版不写第②段；看画面那版的卡片已经在只看字幕那版上）
+  const withRefs = Boolean(cards) && !brief && !look;
 
   // 这条打断点（RLS + user_id 双保险，别人的点问不了）—— 窗口就从这行拿。
   // `ai_answer` 是给「看画面再答」用的：把只看字幕那版一起交给模型（D75）
@@ -131,9 +141,13 @@ export async function POST(request: Request) {
         }
       };
 
+      // 按卡片问的那两趟（正经一问 / 看画面）：指路那一段（`[[REFS]]` 起）**不上屏** ——
+      // 它会变成卡片；看画面那趟本来就叫模型别写，万一写了也不让它漏出去
+      const splitter = cards ? refsStream((text) => push({ type: "chunk", text })) : null;
+
       try {
         const tS = Number(interrupt.t_s);
-        const answer = await askQuestion({
+        const raw = await askQuestion({
           question,
           segments,
           windowStartS: Number(interrupt.window_start_s),
@@ -147,8 +161,15 @@ export async function POST(request: Request) {
             look && source.url
               ? { url: source.url, ...lookClip(tS, source.duration_s), previousAnswer: interrupt.ai_answer ?? null }
               : undefined,
-          onChunk: async (text) => push({ type: "chunk", text }),
+          cards,
+          onChunk: async (text) => (splitter ? splitter.push(text) : push({ type: "chunk", text })),
         });
+        await splitter?.end();
+
+        // 片 c：拆出指路 → 拿原句去字幕里核对、吸附（D64）→ 要落库的全文 = 正文 + 每张卡一行字。
+        // 核对用的是上面喂给模型的**同一份**字幕（D50 字形转换过的），否则简体问句引繁体字幕永远核不上
+        const settled = withRefs ? settleAnswer(raw, segments, source.duration_s) : null;
+        const answer = settled ? settled.stored : cards ? splitRefsBlock(raw).body : raw;
 
         // 答完整才落库：写回这条打断点的问题与答案，复习时要用（WORKORDER 283）。
         // question_mode 之前空着的话，标成 free（自由提问）。
@@ -172,17 +193,31 @@ export async function POST(request: Request) {
             });
           }
         } else if (!brief) {
-          await supabase
+          // 片 c：按卡片问的这一趟连概述卡一起写（`refs`，迁移 0011 就留好的列）。
+          // `[]` 也写：它和 null 不一样 —— [] = 按卡片问过、别处没讲到；null = 老数据 / 手机上问的
+          const { error: saveError } = await supabase
             .from("interrupts")
             .update({
               question,
               ai_answer: answer,
               question_mode: interrupt.question_mode ?? "free",
+              ...(settled ? { refs: settled.refs } : {}),
             })
             .eq("id", interruptId)
             .eq("user_id", user.id);
+          // 写失败了要说出来（D44）—— 以前这里的返回值没人看：界面照样显示答案，刷新之后那一问的答案就没了，
+          // 一个字都不说（M3.15-log 🐞 3，片 c 在改这一行时一起补上）。答案照样推：钱已经花了。
+          // 手机上的暂停面板不认 `warn`（它只读 chunk / done / error），那边照旧 —— 手机一个字不变
+          if (saveError) {
+            push({
+              type: "warn",
+              message: isMissingColumn(saveError) ? t("err.answerNotSavedDb") : t("err.answerNotSaved"),
+            });
+          }
         }
 
+        // 概述卡排在 done 前面：界面收到 done 时手里已经有卡片，全文末尾那几行字才拆得掉（`splitAnswer`）
+        if (settled) push({ type: "refs", refs: settled.refs });
         push({ type: "done", answer });
       } catch (e) {
         // 看画面那一趟撞上「视频读不了」：说的是**这一种**，而且告诉他只看字幕那版还在（D75）——

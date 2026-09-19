@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useCopy } from "@/components/copy-provider";
 import type { PausePoint } from "@/components/pause-list";
+import { RefCards } from "@/components/ref-cards";
+import { type AnswerRef, readRefs, splitAnswer } from "@/lib/answer-refs";
 import { toSegments } from "@/lib/chat-text";
 import { lookClip } from "@/lib/look";
 import { mmss } from "@/lib/time";
@@ -34,6 +36,12 @@ import { mmss } from "@/lib/time";
 // 答完之后三连旁边多一颗：**用户自己点、点了才花钱**，把提问前后十来秒的视频也交给模型看。
 // 看了画面那版**另存一列**（`ai_answer_visual`，迁移 0013），和只看字幕那版（`ai_answer`）**两版都留、来回切**，
 // 切换不花钱。花钱的那颗只挂最后一轮；切换哪一轮有画面版就挂在哪一轮。只在 YouTube 上出现。
+//
+// ── M3.15 片 c：概述卡（计划 §二 / D64）──────────────────────────────────────
+// 答案里「视频别处还讲到」那一段**不再是一段话，是卡片**（`ref-cards.tsx`）：服务端拿原句去字幕里核对、吸附，
+// 核对上的可点（就地跳 + 返回牌，互动记录记「点概述卡」），核不上的灰着说清楚。
+// 卡片跟着**这一轮**走：只看字幕那版、看画面那版下面都挂（它们指的是视频里的地方，不是哪一版答案）；短版下面不挂（短版本来就不写这一段）。
+// 全文末尾还留着一份文字版给历史页（`answer-refs.ts` 文件头），这里用 `splitAnswer` 拆掉、换成卡片。
 
 /** 连着几轮 `t_s` 挨得这么近就不重复标 `@`（D55 原有的防吵规则，计划 §B.2） */
 const REPEAT_LABEL_GAP_S = 30;
@@ -78,6 +86,8 @@ type Row =
       answer: string;
       /** 库里存着的「看了画面」那一版（D75，迁移 0013）。没有 = "" */
       visual: string;
+      /** 概述卡（片 c，`interrupts.refs`）。null = 这一轮不是按卡片问的（老数据 / 片 c 之前） */
+      refs: AnswerRef[] | null;
       /** 0 = 母问题，1 = 追问（缩进一格 + 细线；读屏另说一声「追问」） */
       depth: 0 | 1;
       /** 正在流式作答 */
@@ -107,13 +117,14 @@ function FermataDots() {
  * 几处逐字复制会漂移 —— 而流式协议这种东西一漂移，症状是"偶尔少最后半句"，
  * 最难查。
  *
- * `onWarn`：答案到了、但服务端有话要说（看画面那版**没存上** —— D44，答案照给、事情照说）。
+ * `on.warn`：答案到了、但服务端有话要说（这一版**没存上** —— D44，答案照给、事情照说）。
+ * `on.refs`：概述卡（片 c）。服务端保证它排在 `done` 前面 —— done 带来的全文末尾那几行字要靠它才拆得掉。
  */
 async function streamAsk(
-  body: { interruptId: string; question: string; brief?: boolean; look?: boolean },
+  body: { interruptId: string; question: string; brief?: boolean; look?: boolean; cards?: boolean },
   onPiece: (fullSoFar: string) => void,
   fallbackError: string,
-  onWarn?: (message: string) => void,
+  on?: { warn?: (message: string) => void; refs?: (refs: AnswerRef[]) => void },
 ): Promise<string> {
   const res = await fetch("/api/ask", {
     method: "POST",
@@ -138,7 +149,7 @@ async function streamAsk(
       const raw = buf.slice(0, nl).trim();
       buf = buf.slice(nl + 1);
       if (!raw) continue;
-      let ev: { type?: string; text?: string; answer?: string; message?: string };
+      let ev: { type?: string; text?: string; answer?: string; message?: string; refs?: unknown };
       try {
         ev = JSON.parse(raw);
       } catch {
@@ -147,13 +158,15 @@ async function streamAsk(
       if (ev.type === "chunk" && ev.text) {
         full += ev.text;
         onPiece(full);
+      } else if (ev.type === "refs") {
+        on?.refs?.(readRefs(ev.refs) ?? []);
       } else if (ev.type === "done") {
         if (typeof ev.answer === "string") full = ev.answer;
         onPiece(full);
       } else if (ev.type === "error") {
         streamErr = ev.message ?? fallbackError;
       } else if (ev.type === "warn" && ev.message) {
-        onWarn?.(ev.message);
+        on?.warn?.(ev.message);
       }
     }
   }
@@ -225,6 +238,7 @@ export function QaChat({
   hidden,
   points,
   onJump,
+  onJumpCard,
   getCurrentTime,
   pauseVideo,
   createPoint,
@@ -252,12 +266,14 @@ export function QaChat({
    * 它先记下"他现在在哪"、立牌子，再以 `via = at_link` 跳。
    */
   onJump: (t: number) => void;
+  /** 点一张概述卡（片 c）：和 `onJump` 一样就地跳 + 立返回牌，只是互动记录里记作「点概述卡」（`via = card`） */
+  onJumpCard: (t: number) => void;
   getCurrentTime: () => number;
   pauseVideo: () => void;
   /** 落一个新捕获点，返回真 id（乐观点由调用方画，失败它自己撤） */
   createPoint: (tS: number, parentId: string | null) => Promise<string>;
-  /** 一轮答完，把问题与答案回填进那份 `points`（点点条 / 问题列表吃的是同一份） */
-  onAnswered: (id: string, question: string, answer: string) => void;
+  /** 一轮答完，把问题、答案（和片 c 的概述卡）回填进那份 `points`（点点条 / 问题列表吃的是同一份） */
+  onAnswered: (id: string, question: string, answer: string, refs: AnswerRef[] | null) => void;
   /**
    * 播放器**播起来过几次**。追问的判据（计划 §B.4）写死成
    * 「发送时，距上一轮答完之间播放器**有没有播过**」——
@@ -298,9 +314,16 @@ export function QaChat({
     error: string;
     /** 发出去那一刻，这一问之前跳过没有（`@` 标注从这儿重新算）—— 还没落库，记录器那份 Set 里还没有它 */
     reset: boolean;
+    /** 概述卡（片 c）—— 服务端在 done 之前推过来 */
+    refs: AnswerRef[] | null;
   } | null>(null);
   /** 连点都没落上（`createPoint` 就失败了）—— 这时候流里连一行都没有，只能在输入框下面说 */
   const [sendError, setSendError] = useState("");
+  /**
+   * 答案到了、但**没存上**（片 c 起服务端会说 —— 以前这一步的返回值没人看，写失败了一声不吭，D44）。
+   * 按轮次挂在那一轮下面，这一次观看里一直在；那一轮重试成功就撤掉
+   */
+  const [saveNotes, setSaveNotes] = useState<ReadonlyMap<string, string>>(() => new Map());
 
   /**
    * D56「说短一点」的短版。**只在内存里** —— 刷新就没，原答案永远是库里那份。
@@ -376,6 +399,7 @@ export function QaChat({
         question: p.question ?? "",
         answer: p.ai_answer ?? "",
         visual: p.ai_answer_visual ?? "",
+        refs: readRefs(p.refs),
         depth: p.parent_id ? 1 : 0,
         live: false,
         error: "",
@@ -392,6 +416,7 @@ export function QaChat({
         question: flight.question,
         answer: flight.answer,
         visual: "",
+        refs: flight.refs,
         depth: flight.parentId ? 1 : 0,
         live: !flight.error,
         error: flight.error,
@@ -499,6 +524,15 @@ export function QaChat({
     [onJump],
   );
 
+  /** 点一张概述卡（片 c）：和 `@` 同一个脾气 —— 跳过去、立返回牌、这一栏跟到最新；只是 via 记作 `card` */
+  const jumpToCard = useCallback(
+    (toS: number) => {
+      onJumpCard(toS);
+      setAtBottom(true);
+    },
+    [onJumpCard],
+  );
+
   /** 真正把一句话发出去。`retryId` 有值 = 这一轮的点早就落好了，别再落一个 */
   const send = useCallback(
     async (raw: string, retryId?: string) => {
@@ -525,7 +559,7 @@ export function QaChat({
         const followUp = last && lastAnswerTickRef.current === getPlayTick();
         // 追问的追问仍然挂在**同一个母问题**下面 —— 只缩一格，不无限往右退
         parentId = followUp ? (last.parent_id ?? last.id) : null;
-        setFlight({ id: null, tS, question, answer: "", parentId, error: "", reset: peekReset() });
+        setFlight({ id: null, tS, question, answer: "", parentId, error: "", reset: peekReset(), refs: null });
         try {
           id = await createPoint(tS, parentId);
         } catch (e) {
@@ -542,16 +576,40 @@ export function QaChat({
         }
         setFlight((f) => (f ? { ...f, id } : f));
       } else {
-        setFlight((f) => (f ? { ...f, answer: "", error: "" } : f));
+        setFlight((f) => (f ? { ...f, answer: "", error: "", refs: null } : f));
       }
 
+      // 回调里收到的东西先放在这儿（不用 `let`：TS 看不见回调里的赋值，会把它当成永远是初值）
+      const got: { refs: AnswerRef[] | null; note: string } = { refs: null, note: "" };
       try {
-        const full = await streamAsk({ interruptId: id!, question }, (soFar) => {
-          setFlight((f) => (f ? { ...f, answer: soFar } : f));
-        }, answerFailedText);
+        // `cards`：「视频别处还讲到」要成概述卡（片 c）—— 服务端核对原句、在 done 之前把卡片推过来
+        const full = await streamAsk(
+          { interruptId: id!, question, cards: true },
+          (soFar) => {
+            setFlight((f) => (f ? { ...f, answer: soFar } : f));
+          },
+          answerFailedText,
+          {
+            refs: (refs) => {
+              got.refs = refs;
+              setFlight((f) => (f ? { ...f, refs } : f));
+            },
+            warn: (message) => {
+              got.note = message;
+            },
+          },
+        );
         // 答完了：交给上面那份 points（点点条 / 问题列表吃同一份），本地这条就退场
         lastAnswerTickRef.current = getPlayTick();
-        onAnswered(id!, question, full);
+        // 没存上就一直挂在这一轮下面说（D44）；这一轮重试存上了就撤掉
+        setSaveNotes((m) => {
+          if (!got.note && !m.has(id!)) return m;
+          const next = new Map(m);
+          if (got.note) next.set(id!, got.note);
+          else next.delete(id!);
+          return next;
+        });
+        onAnswered(id!, question, full, got.refs);
         setFlight(null);
       } catch (e) {
         // ⚠️ **点留着，问题文字只活在这一次观看里**：`/api/ask` 一直是"答完整才落库"
@@ -638,8 +696,9 @@ export function QaChat({
       });
       let note = "";
       try {
+        // `cards`：这一趟不写「别处还讲到」（卡片已经挂在只看字幕那版上），万一写了服务端也挡在流外面（片 c）
         const full = await streamAsk(
-          { interruptId: id, question, look: true },
+          { interruptId: id, question, look: true, cards: true },
           (soFar) => {
             setLooks((m) => {
               const cur = m.get(id);
@@ -647,8 +706,10 @@ export function QaChat({
             });
           },
           t("watch.qa.lookFailed"),
-          (w) => {
-            note = w;
+          {
+            warn: (w) => {
+              note = w;
+            },
           },
         );
         setLooks((m) => new Map(m).set(id, { text: full, busy: false, error: "", note, since: 0 }));
@@ -736,7 +797,10 @@ export function QaChat({
           const basis: "captions" | "visual" = visual && !(r.id && captionsFirst.has(r.id)) ? "visual" : "captions";
           const brief = r.id ? briefs.get(`${r.id}:${basis}`) : undefined;
           const showingBrief = Boolean(brief?.showing && (brief.text || brief.busy));
-          const body = showingBrief ? (brief?.text ?? "") : basis === "visual" ? visual : r.answer;
+          // 片 c：全文末尾那几行「05:12 · … “…”」是给历史页的文字版，这里拆掉、换成卡片
+          const split = splitAnswer(r.answer, r.refs);
+          const body = showingBrief ? (brief?.text ?? "") : basis === "visual" ? visual : split.body;
+          const saveNote = r.id ? saveNotes.get(r.id) : undefined;
           const isLast = r.id !== null && r.id === lastAnsweredId;
           // 角标上写的那一段，和服务端喂给模型的是同一个函数算的（lib/look.ts）
           const clip = lookClip(r.tS, durationS);
@@ -820,6 +884,8 @@ export function QaChat({
                       </p>
                     ))}
                     {(r.live || brief?.busy || (basis === "visual" && lookBusy)) && <FermataDots />}
+                    {/* 片 c 概述卡：跟着这一轮走，两版答案下面都挂；短版下面不挂（短版本来就不写这一段） */}
+                    {!showingBrief && <RefCards refs={split.refs} fromS={r.tS} onJump={jumpToCard} />}
                   </>
                 ) : (
                   <p className="flex items-center gap-2">
@@ -841,6 +907,12 @@ export function QaChat({
               {look?.note ? (
                 <p role="status" className="mt-1.5 text-[0.7rem] leading-4 text-amber-300/90">
                   {look.note}
+                </p>
+              ) : null}
+              {/* 这一轮的回答没存上（片 c 起服务端会说，D44）—— 和上面那句同一个样子 */}
+              {saveNote ? (
+                <p role="status" className="mt-1.5 text-[0.7rem] leading-4 text-amber-300/90">
+                  {saveNote}
                 </p>
               ) : null}
 
