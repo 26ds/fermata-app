@@ -42,8 +42,26 @@ export const isWideNow = () => window.matchMedia(QUERY).matches;
  * 那一帧的空窗比宽屏上一闪而过的多余元素更刺眼。
  */
 const onServer = () => false;
+const onServerWide = () => true;
 
 /** ≥1024px 吗。**只回答宽窄，不回答"是什么设备"** */
 export function useIsWide(): boolean {
   return useSyncExternalStore(subscribe, isWideNow, onServer);
+}
+
+/**
+ * 同一个判据，但**服务端与水合首帧一律 true（当成宽屏）**。
+ * **只给 `<DesktopOnly>`（D78 的拦截层）用**，别拿去当普通的宽窄判断。
+ *
+ * 为什么它得和上面那个反着来：拦截层上面那个默认值会让**电脑上先闪一下
+ * 「请到电脑上打开」**（首帧当窄屏 → 渲染拦截页 → 水合完才换回应用）。
+ * 反过来当宽屏，闪的那一帧落在手机上 —— 手机反正下一帧就要被拦住了，
+ * 而电脑上一帧都不闪。这是 `手机暂时关闭-2026-09-19.md` §2 点名的那个坑。
+ *
+ * ⚠️ **不去改 `useIsWide` 本身**：它的 false 是片 a 故意选的方向
+ * （窄屏"全都在"，首帧当窄屏 = 多出来的东西闪一下就没，而不是手机上悬浮球晚一帧才出现）。
+ * 两个默认值服务的是两件相反的事，**但 media query 串仍然只有上面那一份**。
+ */
+export function useIsWideAssumeWide(): boolean {
+  return useSyncExternalStore(subscribe, isWideNow, onServerWide);
 }

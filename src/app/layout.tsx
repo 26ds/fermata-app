@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
 import { CopyProvider } from "@/components/copy-provider";
+import { DesktopOnly } from "@/components/desktop-only";
 import { getT, getUiLang } from "@/lib/ui-lang";
 import "./globals.css";
 
@@ -71,7 +72,13 @@ export default async function RootLayout({
       className={`h-full antialiased ${inter.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable}`}
     >
       <body className="min-h-full flex flex-col">
-        <CopyProvider lang={uiLang}>{children}</CopyProvider>
+        {/* D78（2026-09-19）——「手机暂时全关」的**唯一一层壳**。
+            全站每一页都从这里的 `{children}` 出来，所以拦在这儿只有一处判据；
+            要把手机重新打开，**删掉这一层就行**（手机那套代码一行没删）。
+            细节和放行名单在 `components/desktop-only.tsx`。 */}
+        <CopyProvider lang={uiLang}>
+          <DesktopOnly>{children}</DesktopOnly>
+        </CopyProvider>
       </body>
     </html>
   );
