@@ -48,16 +48,19 @@ export async function getLangPrefs(
 export async function getWatchPrefs(
   supabase: SupabaseClient,
   userId: string,
-): Promise<{ lang: LangPrefs; play: PlayPrefs; autoScan: boolean }> {
+): Promise<{ lang: LangPrefs; play: PlayPrefs; autoScan: boolean; atHintSeen: boolean }> {
   try {
     const settings = await getSettings(supabase, userId);
     return {
       lang: readLangPrefs(settings),
       play: readPlayPrefs(settings),
       autoScan: readAutoScan(settings),
+      // M3.15 片 d（D69）：`@` 那张单子自动弹过一次了吗。**这一条和上面那个默认方向相反**：
+      // 自动扫描默认关（怕花钱），这一句默认"没弹过"（它不花钱，而创始人点名要「让用户知道这个功能」）
+      atHintSeen: settings.atHintSeen === true,
     };
   } catch {
     // 取不到设置就当自动扫描是关的 —— **默认必须偏向"不花钱"**（D45）
-    return { lang: DEFAULT_LANG_PREFS, play: DEFAULT_PLAY_PREFS, autoScan: false };
+    return { lang: DEFAULT_LANG_PREFS, play: DEFAULT_PLAY_PREFS, autoScan: false, atHintSeen: false };
   }
 }

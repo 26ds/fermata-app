@@ -1,13 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AtPicker } from "@/components/at-picker";
 import { useCopy } from "@/components/copy-provider";
 import type { PausePoint } from "@/components/pause-list";
 import { RefCards } from "@/components/ref-cards";
 import { type AnswerRef, readRefs, splitAnswer } from "@/lib/answer-refs";
+import { atEntries, isTypingAt, readAt, withAt, withoutAt } from "@/lib/at-time";
 import { toSegments } from "@/lib/chat-text";
 import { lookClip } from "@/lib/look";
-import { mmss } from "@/lib/time";
+import { hms, mmss } from "@/lib/time";
 
 // M3.15 片 b —— 右栏第一栏「问答」的**本体**（计划 §B，D61 / D62 / D63 / D56）。
 //
@@ -255,6 +257,8 @@ export function QaChat({
   oldTurns,
   canLook,
   durationS,
+  atHintSeen,
+  onAtHintSeen,
 }: {
   /** 切到别的 tab 了。**不卸载、只 hidden** —— 见下面滚动位置那段 */
   hidden: boolean;
@@ -297,8 +301,15 @@ export function QaChat({
   oldTurns: OldTurn[] | null;
   /** 这条内容能不能「看画面再答」（D75：只有 YouTube；播客没有画面，那颗按钮不出现） */
   canLook: boolean;
-  /** 内容时长 —— 角标上「看了画面 · 02:45–02:57」的终点要夹在片尾以内（和服务端同一个 `lookClip`） */
+  /**
+   * 内容时长 —— 角标上「看了画面 · 02:45–02:57」的终点要夹在片尾以内（和服务端同一个 `lookClip`）。
+   * 片 d 起它还是 `@` 那道闸的尺子：敲一个超出时长的时间要**当场**说不对（计划 §J 第 3 条）。
+   */
   durationS: number;
+  /** 片 d：`@` 那张单子**自动弹过一次了吗**（存在 `user_settings.atHintSeen`，全站一次，不是每条内容一次） */
+  atHintSeen: boolean;
+  /** 自动弹的那一次被关掉了 —— 记下来，以后不再自动弹（计划 §J「怎么让用户知道」⒝） */
+  onAtHintSeen: () => void;
 }) {
   const t = useCopy();
 
@@ -364,6 +375,16 @@ export function QaChat({
   useLayoutEffect(() => {
     const el = inputRef.current;
     if (!el) return;
+    // ⚠️ **空的时候一律回到最矮那一档，不去量 scrollHeight**（2026-09-19，片 d 量到的）：
+    // Blink 下空 textarea 的 `scrollHeight` 把**占位符**也算进去了 —— 片 d 给占位符加了
+    // 「（打 @ 可以换个时间点）」，于是右栏一窄，占位符折成两行，**空着的输入框就永远是两行高**，
+    // 白吃掉消息流一行的位置（lab 页 1512×900 上量的：42 → 66px）。
+    // 空 = 一行，这本来就是对的；顺带把占位符的长短和输入框的高度彻底脱钩。
+    if (!el.value) {
+      el.style.height = "";
+      el.style.overflowY = "hidden";
+      return;
+    }
     el.style.height = "auto";
     const border = el.offsetHeight - el.clientHeight; // border-box：scrollHeight 里不含上下边框
     const want = el.scrollHeight + border;
@@ -380,6 +401,61 @@ export function QaChat({
       .slice()
       .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
   }, [points]);
+
+  // ── 片 d：在输入框里打 `@` 指定另一个时间点（计划 §J / D69）──────────────────
+  // **判据只有一份**，在 `lib/at-time.ts`（纯函数 + 37 条单元测试）。这一层只管把它接到输入框上。
+  /** 这句话读出来：指定了第几秒 + 真正要问的那句 + 写歪了没有 */
+  const at = useMemo(() => readAt(input, durationS), [input, durationS]);
+  /** 正在打那个时间（`@`、`@12:`…，还没跟空格）—— 单子该浮着。**只看 value 不看按键**（中文输入法，见 at-time.ts 文件头） */
+  const typingAt = isTypingAt(input);
+  /** Esc / 点到外面：这一段 `@` 先别再弹了（他打的字留着，不替他删） */
+  const [atSuppressed, setAtSuppressed] = useState(false);
+  /** 自动弹的那一次（第一次问完之后），比上面那种多带一行说明 —— **只此一次**（计划 §J⒝） */
+  const [atIntroOpen, setAtIntroOpen] = useState(false);
+  /** 这一次挂载里还该不该自动弹。初值 = 库里那个「看过了」 */
+  const [atIntroDone, setAtIntroDone] = useState(atHintSeen);
+
+  // 「打完这一段 `@` 就把压制清掉」和「答完第一句自己弹一次」——
+  // 都写成**渲染时对一眼**，不写 useEffect 里 setState（本仓库 `react-hooks/set-state-in-effect`
+  // 拦过好几次；React 官方给「外部值变了顺手改一个 state」的写法就是这个，qa-rail 的 seenSeekTick 同款）
+  const [wasTypingAt, setWasTypingAt] = useState(typingAt);
+  if (typingAt !== wasTypingAt) {
+    setWasTypingAt(typingAt);
+    if (!typingAt && atSuppressed) setAtSuppressed(false);
+  }
+  // ⚠️ **拿这一次挂载时的轮数当起点**：他上次来已经问过三轮，这次一进门不该迎头弹一张单子出来。
+  // 只有「在他眼皮底下又多了一轮」才算「刚问完第一句」
+  const [turnsSeen, setTurnsSeen] = useState(liveTurns.length);
+  if (liveTurns.length !== turnsSeen) {
+    const grew = liveTurns.length > turnsSeen;
+    setTurnsSeen(liveTurns.length);
+    if (grew && !atIntroDone) {
+      setAtIntroDone(true);
+      setAtIntroOpen(true);
+    }
+  }
+
+  const atOpen = (typingAt && !atSuppressed) || atIntroOpen;
+  /**
+   * 关掉单子。**自动弹的那一次被关掉 = 以后不再自动弹**（落进 `user_settings`，计划 §J⒝）——
+   * 写在这儿不写在渲染里：那是一次网络请求，渲染里不许有副作用
+   */
+  const closeAt = useCallback(() => {
+    if (atIntroOpen) {
+      setAtIntroOpen(false);
+      onAtHintSeen();
+    }
+    setAtSuppressed(true);
+  }, [atIntroOpen, onAtHintSeen]);
+
+  /** 写歪了那句话**打字打到一半不说** —— `@12:` 还没敲完就红一下是在骂人。跟上空格、算是写完了，才说 */
+  const atError = typingAt ? null : at.error;
+
+  /**
+   * 单子里都有谁：**和问题列表同一份 `points`**（计划 §J 第 1 条：不另存一份）。
+   * 单子开着才算 —— 关着的时候 `points` 一变就白算一遍（这一栏每收到一块答案都重画）
+   */
+  const atList = useMemo(() => (atOpen ? atEntries(points, getCurrentTime()) : []), [atOpen, points, getCurrentTime]);
 
   // 一条流里的所有行：老聊天在最前（只读），然后问答轮次按落库时间排（liveTurns 已经排好了）。
   // 跳转记录不在这条流里了 —— 片 c0 搬进了「互动记录」（D71）
@@ -536,9 +612,17 @@ export function QaChat({
   /** 真正把一句话发出去。`retryId` 有值 = 这一轮的点早就落好了，别再落一个 */
   const send = useCallback(
     async (raw: string, retryId?: string) => {
-      const question = raw.trim();
+      // 片 d：行首那个 `@12:34` 是**指定时间点**，不是问题的一部分。
+      // ⚠️ 重试那一路不解析：那一轮的点早就落好了，而库里存的问句本来就已经摘干净了
+      const read = retryId ? { at: null, question: raw.trim(), error: null as null } : readAt(raw, durationS);
+      // D44：写歪了**当场说**，不许闷着按当前播放头算 —— 那会把问题记到错的一秒上，而且谁都看不出来
+      if (read.error) {
+        setSendError(read.error === "range" ? t("watch.at.outOfRange", hms(durationS)) : t("watch.at.badTime"));
+        return;
+      }
+      const question = read.question;
       if (!question || sending) return;
-      pauseVideo(); // 提问必先暂停（D33 的老规矩，计划 §B.1）
+      pauseVideo(); // 提问必先暂停（D33 的老规矩，计划 §B.1）。**指定了时间点也照暂停** —— 暂停不等于跳走
       setSendError("");
       setSending(true);
       setAtBottom(true);
@@ -550,13 +634,18 @@ export function QaChat({
         setInput("");
         // 往下取整（片 b 是四舍五入）：播放器的时钟、互动记录里的「停在 02:03」都是往下取整的，
         // 四舍五入会让紧跟着的那一问写成「@02:04」—— 片 c0 的 lab 页上并排出现过，看着像又跳了一秒
-        const tS = Math.max(0, Math.floor(getCurrentTime()));
+        // 片 d：指定了就记在那一秒（**视频不动** —— 他是在回头问那一段，不是要跳过去看，计划 §J）。
+        // 服务端拿这一秒算上下文窗口 `[t−15s, t+3s]`（`/api/interrupts` 里那两条 D5 的常数），
+        // 所以喂给 AI 的字幕**自己就搬过去了**，这条路上一行特殊代码都不用写
+        const tS = read.at ?? Math.max(0, Math.floor(getCurrentTime()));
         // ── 追问判据（计划 §B.4）：**上一轮答完之后播放器有没有播过** ──
         // 写死成"有没有播过"而不是"隔了几秒"是创始人定的口径：
         // 盯着答案读了两分钟再追问，那仍然是追问；看了十秒视频再问，那是新问题。
         // 顺带白捡「他问了几个回合才接着看」这份数据 —— 就是一串子问题的长度，不另埋点。
         const last = liveTurns[liveTurns.length - 1];
-        const followUp = last && lastAnswerTickRef.current === getPlayTick();
+        // **指定了别处的时间点就不算追问**（片 d 的偏离，写进了交付日志）：追问缩进说的是
+        // 「顺着刚才那一问接着问」，而他刚把话头挪到 12:34 —— 挂在上一问下面会把两件事说成一件
+        const followUp = read.at === null && last && lastAnswerTickRef.current === getPlayTick();
         // 追问的追问仍然挂在**同一个母问题**下面 —— 只缩一格，不无限往右退
         parentId = followUp ? (last.parent_id ?? last.id) : null;
         setFlight({ id: null, tS, question, answer: "", parentId, error: "", reset: peekReset(), refs: null });
@@ -568,7 +657,8 @@ export function QaChat({
           // ⚠️ **把他打的那句话放回输入框**（2026-09-09 实测补的）：
           // 上面 `setInput("")` 已经清空了，不还回去的话，他写的那句就这么没了 ——
           // 报错说得再清楚，让人重打一遍也还是把 D44 的「给一条人点得动的重试」丢了。
-          setInput(question);
+          // **还原成他打的那一句原样**（含行首的 `@12:34`）—— 只还问题不还时间，等于让他重挑一次
+          setInput(raw);
           setFlight(null);
           setSendError(e instanceof Error ? e.message : answerFailedText);
           setSending(false);
@@ -629,6 +719,8 @@ export function QaChat({
       onAnswered,
       answerFailedText,
       peekReset,
+      durationS,
+      t,
     ],
   );
 
@@ -1001,11 +1093,64 @@ export function QaChat({
       {pinBar}
 
       {/* ── 输入条 ── */}
-      <div className="shrink-0 border-t border-ink-700 px-2 py-2">
+      {/* `relative`：片 d 那张单子是**贴着这一条往上浮**的（`bottom-full`），锚点就是它 */}
+      <div className="relative shrink-0 border-t border-ink-700 px-2 py-2">
+        {/* ── 片 d：打 `@` 浮出来的那张单子（计划 §J / D69）。
+             **贴着输入条往上浮**（绝对定位，锚点是外面这一层 `relative`）—— 三版才量对，为什么在 `at-picker.tsx` 里写着。
+             它一个 seek 都不发 —— `@` 只问不动，要动是点点条的事（创始人自己定的分工）── */}
+      {atOpen && (
+        <AtPicker
+          entries={atList}
+          nowS={getCurrentTime()}
+          intro={atIntroOpen}
+          onPick={(label) => {
+            setInput((v) => withAt(v, label));
+            if (atIntroOpen) {
+              setAtIntroOpen(false);
+              onAtHintSeen();
+            }
+            inputRef.current?.focus();
+          }}
+          onNow={() => {
+            setInput((v) => withoutAt(v));
+            if (atIntroOpen) {
+              setAtIntroOpen(false);
+              onAtHintSeen();
+            }
+            inputRef.current?.focus();
+          }}
+          onClose={closeAt}
+          anchorRef={inputRef}
+        />
+      )}
+
         {/* 一行三样：输入框 · 「只记下这一刻」 · 发送。
             **它们在同一行是量出来的，不是排版偏好**：1512×859 上这一栏总共只有 269px，
             把捕获按钮单摆一行，能滚的消息流只剩 133px（≈5 行字）。并进这一行之后是 167px。
             §F 原话本来就是「输入框**边上**一颗小按钮」—— 同一行才是它说的那个位置。 */}
+
+        {/* 片 d：指定好了就挂一枚芯片 —— **看得见才算数**。
+            那半句「视频不动」不是废话：他刚挑了 12:34 而画面停在 25:03，不说一声他会以为没生效 */}
+        {at.at !== null && !typingAt && (
+          <div className="mb-1.5 flex items-center gap-1.5">
+            <span className="ui-mono inline-flex items-center gap-1 rounded-lg bg-teal-400/15 px-2 py-0.5 text-[0.66rem] text-teal-300">
+              {t("watch.at.chip", mmss(at.at))}
+            </span>
+            <span className="text-[0.62rem] text-ink-500">{t("watch.at.chipHint")}</span>
+            <button
+              type="button"
+              onClick={() => {
+                setInput((v) => withoutAt(v));
+                inputRef.current?.focus();
+              }}
+              aria-label={t("watch.at.clear")}
+              className="flex h-5 w-5 items-center justify-center rounded text-ink-500 transition-colors hover:bg-ink-700 hover:text-ink-100"
+            >
+              <span aria-hidden>✕</span>
+            </button>
+          </div>
+        )}
+
         <div className="flex items-end gap-1.5">
           <textarea
             ref={inputRef}
@@ -1018,6 +1163,11 @@ export function QaChat({
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 void send(input);
+              }
+              // 片 d：Esc 收起那张单子。**他打的字一个不动** —— 替用户删字是最招人恨的一种"贴心"
+              if (e.key === "Escape" && atOpen) {
+                e.preventDefault();
+                closeAt();
               }
             }}
             rows={1}
@@ -1035,7 +1185,8 @@ export function QaChat({
           />
           <button
             type="button"
-            disabled={sending || !input.trim()}
+            // 片 d：时间写歪了就按不动 —— 让他先改对，而不是按下去才知道（错的话下面那行正写着是哪一种）
+            disabled={sending || !at.question.trim() || atError !== null}
             onClick={() => void send(input)}
             className="min-h-[42px] shrink-0 rounded-xl bg-teal-400 px-3.5 text-sm font-semibold text-teal-950 transition-colors hover:bg-teal-300 disabled:opacity-40"
           >
@@ -1043,9 +1194,14 @@ export function QaChat({
           </button>
         </div>
 
-        {(captureError || sendError) && (
+        {/* 片 d 的两句在最前面：他眼下正在改的就是那一行字，别让老的报错压着它 */}
+        {(atError || captureError || sendError) && (
           <p role="alert" className="mt-1.5 text-xs leading-5 text-amber-300/90">
-            {captureError || sendError}
+            {atError
+              ? atError === "range"
+                ? t("watch.at.outOfRange", hms(durationS))
+                : t("watch.at.badTime")
+              : captureError || sendError}
           </p>
         )}
       </div>

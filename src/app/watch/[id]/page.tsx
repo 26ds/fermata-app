@@ -102,7 +102,7 @@ export default async function WatchDetailPage({
   // M3.7 / D42：三个语言（母语 / 目标语言 / 译文语言）。
   // 词库要标什么、AI 用哪门语言答、字幕译成什么，全从这里推 —— 不许硬编码。
   // 同一行 jsonb 里还存着倍速与「一跳几秒」，一次查齐（getWatchPrefs）。
-  const { lang: prefs, play, autoScan } = await getWatchPrefs(supabase, user.id);
+  const { lang: prefs, play, autoScan, atHintSeen } = await getWatchPrefs(supabase, user.id);
 
   // D50：字幕字形跟他的语言走，**在送到浏览器之前就转好**。
   // 转换在服务端做（词库 1MB，不该让每个用户下载一遍），所以客户端拿到的
@@ -173,6 +173,7 @@ export default async function WatchDetailPage({
           prefs={prefs}
           play={play}
           autoScan={autoScan}
+          atHintSeen={atHintSeen}
           savedAtoms={savedAtoms}
           watchEvents={watchEvents}
           watchEventsTrouble={watchEventsTrouble}

@@ -61,7 +61,7 @@ export const en = {
   "watch.rail.capturing": "Marking…",
 
   // ── Watch page · the Ask rail itself (M3.15 slice b, D61/D62) ──────────
-  "watch.qa.placeholder": "Ask about this moment…",
+  "watch.qa.placeholder": "Ask about this moment… (type @ for another timestamp)",
   "watch.qa.send": "Send",
   "watch.qa.thinking": "Thinking…",
   "watch.qa.jumpTo": (at: string) => `Jump to ${at}`,
@@ -95,6 +95,20 @@ export const en = {
   "watch.qa.refUnverified": "I couldn't find this line in the captions — the AI may have misremembered it.",
   "watch.qa.oldTitle": "From your earlier immersive chats",
   "watch.qa.oldHint": "Read-only — these predate this rail, so you can't follow up on them here.",
+
+  // ── Watch page · type `@` to ask about another timestamp (M3.15 slice d, D69) ──
+  "watch.at.aria": "Pick a timestamp to ask about",
+  "watch.at.now": (at: string) => `@now ${at}`,
+  "watch.at.nowHint": "the default, with or without @",
+  "watch.at.paused": "paused here, didn't ask",
+  "watch.at.typeHint": "Or type your own: @12:34 or @754",
+  "watch.at.empty": "No other timestamps here yet — type your own: @12:34 or @754",
+  "watch.at.intro": "Want to ask about somewhere else in the video? Type @ and pick a timestamp — the video stays put.",
+  "watch.at.chip": (at: string) => `Asking about ${at}`,
+  "watch.at.chipHint": "video stays put",
+  "watch.at.clear": "Drop the timestamp",
+  "watch.at.badTime": "I can't read that time — try @12:34 or @754",
+  "watch.at.outOfRange": (len: string) => `This one is only ${len} long — there is no such second`,
 
   // ── Watch page · the “Activity” tab (M3.15 slice c0, D71) ─────────────
   "act.watched": (watched: string, total: string, pct: number) => `Watched ${watched} of ${total} (${pct}%)`,
