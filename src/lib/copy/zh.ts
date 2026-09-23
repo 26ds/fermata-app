@@ -626,6 +626,9 @@ export const zh = {
   "layout.focusHint": "字幕在右栏上半，问答在它下面（原来的样子）",
   "layout.narrow": "沉浸 · 窄",
   "layout.narrowHint": "字幕缩成三行放到视频下面，右栏整条给问答",
+  // 片 g2：③ —— 字号大一档是计划 §D 第 3 条（行太长的解药是字更大）
+  "layout.wide": "沉浸 · 宽",
+  "layout.wideHint": "字幕放大成三行，横跨整个屏幕的下面；问答在视频右边",
 
   // ── 观看页舞台（watch-stage）────────────────────────────────────────────
   "stage.noPlayer": (kind: string) => `这类内容（${kind}）的播放器还没做。`,

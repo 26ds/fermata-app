@@ -80,8 +80,17 @@ const CAP_SPARE_PX = 16;
 const CAP_FLOOR_PX = 280;
 /** 量出来的上限和上一次差不到这么多就不写回去 —— 挡住「写 → 回流 → 再量」的抖动 */
 const CAP_EPSILON_PX = 4;
-/** 片 g「沉浸 · 窄」里视频那一栏最窄占 grid 的多少（见 measureCap 里那道底）。1280 宽的笔记本上约 405px */
+/** 片 g「沉浸 · 窄」/「沉浸 · 宽」里视频那一栏最窄占 grid 的多少（见 measureCap 里那道底）。1280 宽的笔记本上约 405px */
 const NARROW_VIDEO_MIN = 1 / 3;
+
+/**
+ * 片 g：三行字幕是不是摆在视频**下面**（②「沉浸 · 窄」和 ③「沉浸 · 宽」都是）。
+ * 是的话，视频的高度上限要把那一块算进去、窗口太矮时那一块自己滚（measureCap / fitCaps）。读的是 grid 上的属性，不是 React state
+ */
+function threeBelow(grid: HTMLElement): boolean {
+  const l = grid.dataset.layout;
+  return l === "narrow" || l === "wide";
+}
 
 // ── 播放控制条能折叠（创始人 2026-09-06）───────────────────────────────
 //
@@ -719,7 +728,8 @@ export function WatchStage({
       // ⚠️ 量的是它**本来有多高**（`scrollHeight`），不是它现在的矩形：它在 CSS 里有 `max-height: 100%`（播客那一档防撑出屏幕），
       // 视频一大、第二行一窄，矩形就被夹小了 —— 拿夹小的矩形去算，等于「视频大所以字幕没地方所以视频还能这么大」，
       // 自己证明自己（第一版就这么写的，1512×900 上三行被切掉一半、视频一个像素没让）
-      if (grid.dataset.layout === "narrow") {
+      // 片 g2 ③「沉浸 · 宽」：三行在视频**和右栏**下面（grid 第二行、横跨整幅）—— 对视频来说一样是「下面占掉的」，同一个量法
+      if (threeBelow(grid)) {
         const box = capsBoxRef.current;
         if (box && box.scrollHeight > 0) {
           // +2px 余量：字号 × 0.87 这种算式出来是小数（174.07px），外框正好卡在第二行的高度上时，
@@ -731,10 +741,9 @@ export function WatchStage({
       // 片 g「沉浸 · 窄」：视频最窄只让到 grid 宽度的三分之一（1280 宽的笔记本上约 405px）。
       // 不设这道底，窗口一矮、视频那一栏一窄，卡片里的字就折行、卡片变高、视频再让 —— 一路让到 280px 的底（英文界面真撞过）。
       // 真放不下时，宁可视频下面那三行在自己框里滚，也不把视频挤成邮票（计划「开工先量」第 2 条：视频太小 ② 就不成立）
-      const floor =
-        grid.dataset.layout === "narrow"
-          ? Math.max(CAP_FLOOR_PX, Math.round(grid.getBoundingClientRect().width * NARROW_VIDEO_MIN))
-          : CAP_FLOOR_PX;
+      const floor = threeBelow(grid)
+        ? Math.max(CAP_FLOOR_PX, Math.round(grid.getBoundingClientRect().width * NARROW_VIDEO_MIN))
+        : CAP_FLOOR_PX;
       const next = Math.max(floor, Math.round((room * 16) / 9));
       if (Math.abs(next - capRef.current) < CAP_EPSILON_PX) return;
       capRef.current = next;
@@ -774,7 +783,7 @@ export function WatchStage({
      */
     const fitCaps = () => {
       const box = capsBoxRef.current;
-      if (!box || gridRef.current?.dataset.layout !== "narrow" || window.innerWidth < LG_PX) return;
+      if (!box || !gridRef.current || !threeBelow(gridRef.current) || window.innerWidth < LG_PX) return;
       if (box.scrollHeight - box.clientHeight <= 1) {
         if (box.scrollTop !== 0) box.scrollTop = 0;
         return;
@@ -1953,6 +1962,8 @@ export function WatchStage({
       // 播放器永远在左栏那个 div 里，切布局它一个父节点都不换（换了 = YouTube iframe 重载、视频回到 0，D33 死线）。
       // `data-layout` 在 JSX 里永远是进页时那个值，之后由 chooseLayout 直接写 DOM（为什么见 layoutAtMount 那段）
       data-layout={layoutAtMount}
+      // 片 g2：有没有 16:9 的视频（= 有没有高度上限，见 capsHeight）。③ 在播客上要倒过来排（globals.css 的 `:not([data-video])`）
+      data-video={capsHeight ? "" : undefined}
       className="watch-grid flex flex-col gap-3 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[min(var(--split-video),var(--video-cap))_1.5rem_1fr] lg:gap-x-0"
       style={
         {
@@ -1960,10 +1971,13 @@ export function WatchStage({
           // 播客那一档给一个**永远夹不住**的值（见 capsHeight）。
           // 片 g：进页时就是「沉浸 · 窄」的，估算里再减掉视频下面那三行字幕（约 182px + 一道 12px 的缝 ≈ 12rem）——
           // 不减的话水合前那一帧视频按「专注字幕」的大小画，量尺一跑再缩回来，进页时视频会跳一下
+          // 片 g2：③ 的三行字号大一档（约 +2rem），一样先减掉
           "--video-cap": capsHeight
             ? layoutAtMount === "narrow"
               ? "calc((100dvh - 32rem) * 16 / 9)"
-              : "calc((100dvh - 20rem) * 16 / 9)"
+              : layoutAtMount === "wide"
+                ? "calc((100dvh - 34rem) * 16 / 9)"
+                : "calc((100dvh - 20rem) * 16 / 9)"
             : "100%",
           // 右栏收到视频下沿（见 measureRightH）。这里的初值只活到量尺跑完那一帧 ——
           // 用的是和 `--video-cap` 同一个估算（视频上下之外还剩多少高），

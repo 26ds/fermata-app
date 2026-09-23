@@ -27,12 +27,19 @@ function LayoutIcon({ kind }: { kind: WatchLayout }) {
           <path d="M10 2.6h4M10 4.3h4M10 6h3" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
           <rect x="10" y="7.6" width="4" height="2.6" rx="0.5" fill="none" stroke="currentColor" strokeWidth="0.9" />
         </>
-      ) : (
+      ) : kind === "narrow" ? (
         <>
           {/* ② 视频在左、字幕三行在视频下面；右栏整条是问答 */}
           <rect x="2" y="2" width="6.6" height="4.4" rx="0.6" fill="currentColor" opacity="0.55" />
           <path d="M2.2 7.8h6.2M2.2 9.6h5" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
           <rect x="10" y="2" width="4" height="8.2" rx="0.5" fill="none" stroke="currentColor" strokeWidth="0.9" />
+        </>
+      ) : (
+        <>
+          {/* ③ 视频在左、问答在右（一样高）；字幕三行横跨整幅、居中，在它们下面 */}
+          <rect x="2" y="2" width="6.6" height="4.4" rx="0.6" fill="currentColor" opacity="0.55" />
+          <rect x="10" y="2" width="4" height="4.4" rx="0.5" fill="none" stroke="currentColor" strokeWidth="0.9" />
+          <path d="M2.4 8h11.2M4 9.8h8" stroke="currentColor" strokeWidth="1" strokeLinecap="round" />
         </>
       )}
     </svg>
@@ -42,8 +49,12 @@ function LayoutIcon({ kind }: { kind: WatchLayout }) {
 export function LayoutPicker({ store, onPick }: { store: LayoutStore; onPick: (next: WatchLayout) => void }) {
   const t = useCopy();
   const layout = useSyncExternalStore(store.subscribe, store.get, store.getServer);
-  const name: Record<WatchLayout, string> = { focus: t("layout.focus"), narrow: t("layout.narrow") };
-  const hint: Record<WatchLayout, string> = { focus: t("layout.focusHint"), narrow: t("layout.narrowHint") };
+  const name: Record<WatchLayout, string> = { focus: t("layout.focus"), narrow: t("layout.narrow"), wide: t("layout.wide") };
+  const hint: Record<WatchLayout, string> = {
+    focus: t("layout.focusHint"),
+    narrow: t("layout.narrowHint"),
+    wide: t("layout.wideHint"),
+  };
   return (
     <div role="radiogroup" aria-label={t("layout.aria")} className="hidden items-center rounded-lg border border-ink-700 p-0.5 lg:flex">
       {WATCH_LAYOUTS.map((l) => {

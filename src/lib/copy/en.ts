@@ -564,6 +564,8 @@ export const en = {
   "layout.focusHint": "captions at the top of the right column, Q&A below them (the original layout)",
   "layout.narrow": "Immersive · narrow",
   "layout.narrowHint": "three caption lines under the video; the whole right column goes to Q&A",
+  "layout.wide": "Immersive · wide",
+  "layout.wideHint": "three larger caption lines across the full width at the bottom; Q&A beside the video",
 
   // ── Watch stage ────────────────────────────────────────────────────────
   "stage.noPlayer": (kind: string) => `There's no player for this kind of content (${kind}) yet.`,

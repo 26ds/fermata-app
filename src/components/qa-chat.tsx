@@ -1276,7 +1276,9 @@ export function QaChat({
             rows={1}
             placeholder={t("watch.qa.placeholder")}
             // 高度由上面那个 layout effect 按字数撑（到 INPUT_MAX_PX 为止）；`overflow-hidden` 是默认，长过上限才打开滚动
-            className="max-h-24 min-h-[42px] min-w-0 flex-1 resize-none overflow-hidden rounded-xl border border-ink-700 bg-ink-900 px-3 py-2 text-sm leading-6 text-ink-100 placeholder:text-ink-500 focus:border-teal-400 focus:outline-none"
+            // `placeholder:truncate`（片 g2）：栏窄时占位符折成两三行，第二行的上半截从框的下内边距里露出来（1280 宽的 ① 上量到：
+            // 框 40px 高、占位符 88px）。一行放不下就省略号收住。框只有一行高是片 d 定的（占位符不许把空输入框撑成两行）
+            className="max-h-24 min-h-[42px] min-w-0 flex-1 resize-none overflow-hidden rounded-xl border border-ink-700 bg-ink-900 px-3 py-2 text-sm leading-6 text-ink-100 placeholder:truncate placeholder:text-ink-500 focus:border-teal-400 focus:outline-none"
           />
           {/* 「只记下这一刻」**搬到输入框边上了**（片 a 把它临时摆在空态里，§F 说的家就是这儿）。
               它是悬浮球在宽屏上的替身：先记下来，待会儿再问 —— 记完点点条上当场多一个点。 */}

@@ -135,7 +135,7 @@ select:focus-visible {
  * 下面的规则**不进 Tailwind 的 layer**（故意）：它们要压过元素上那几个 `lg:` 类（`mt-3`、`lg:h-[var(--right-h)]`、`flex`）。
  */
 
-/* 「字幕在视频下面」那三行：只在「沉浸 · 窄」里露出来；其余时候一直渲染着、藏着 —— 切布局字幕栏一次都不重画 */
+/* 「三行字幕」：只在 ②「沉浸 · 窄」和 ③「沉浸 · 宽」里露出来；其余时候一直渲染着、藏着 —— 切布局字幕栏一次都不重画 */
 .wl-three {
   display: none;
   /* 不出滚动条：选词时长出来的「收下 / 取消」那截，由 caption-layer 程序化地滚过去给他看 */
@@ -201,6 +201,69 @@ select:focus-visible {
   }
   .watch-grid[data-layout="narrow"] .wl-three {
     display: block;
+  }
+
+  /* ③「沉浸 · 宽」（片 g2，D67）：第一行 = 视频那一栏 + 右边三个栏，**右栏收在视频那一栏的下沿**（不往下倒 —— 下面是整幅字幕）；
+     第二行 = 字幕三行**横跨整幅**、居中（字号自动大一档，见 caption-layer 的 `WIDE_BUMP`）。中缝只管第一行 */
+  .watch-grid[data-layout="wide"] {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .watch-grid[data-layout="wide"] > .wl-left {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .watch-grid[data-layout="wide"] > .wl-handle {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .watch-grid[data-layout="wide"] > .wl-right {
+    display: contents;
+  }
+  .watch-grid[data-layout="wide"] .wl-rail {
+    grid-column: 3;
+    grid-row: 1;
+    margin-top: 0;
+    padding-right: 0.25rem;
+    /* 第一行多高**只听左栏的**：问答攒了几十轮，消息流的内容不许把第一行撑高、把字幕挤出屏幕。
+       `contain: size` = 这一格里装了什么不参与算尺寸；它自己照样被拉到整行那么高，里面照常滚 */
+    contain: size;
+  }
+  .watch-grid[data-layout="wide"] .wl-caps {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    align-self: start;
+    height: auto;
+    /* 和 ② 同一个脾气：窗口太矮、视频已经让到底了，三行就在自己框里滚（fitCaps 把正在说的那行摆进来），不许撑出屏幕 */
+    max-height: 100%;
+    scrollbar-width: none;
+  }
+  .watch-grid[data-layout="wide"] .wl-caps::-webkit-scrollbar {
+    display: none;
+  }
+  .watch-grid[data-layout="wide"] .wl-list-only {
+    display: none;
+  }
+  .watch-grid[data-layout="wide"] .wl-three {
+    display: block;
+  }
+  /* 「跨整幅居中」（计划 §D 的表）：字居中；行首时间和行尾 ✓ 留在两头 */
+  .watch-grid[data-layout="wide"] .wl-three-text {
+    text-align: center;
+  }
+  /* 一行有一千多 px 宽：选词长出来的「收下 / 取消」和词义解释框（selectable-line 的 `data-pick-actions`）别跟着拉满整幅
+     —— 拉满就是一条一千三百 px 的绿按钮（lab 页量到的）。收成一栏、居中；解释是一段话，照常靠左读 */
+  .watch-grid[data-layout="wide"] .wl-three [data-pick-actions] {
+    max-width: 36rem;
+    margin-inline: auto;
+    text-align: left;
+  }
+  /* 没有视频的那几档（播客）：左栏只有一张 137px 的控制卡 —— 照「收在左栏下沿」，右边三个栏只剩两百来 px（g1 修过的同一个病）。
+     倒过来排：字幕贴屏幕底（最多半屏，长句在自己框里滚），上面剩下的整块都给三个栏 */
+  .watch-grid[data-layout="wide"]:not([data-video]) {
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+  .watch-grid[data-layout="wide"]:not([data-video]) .wl-caps {
+    max-height: 45dvh;
   }
 }
 
