@@ -1184,7 +1184,7 @@ export function WatchStage({
    * 乐观先画点：**点点条上当场就多一个点**（片 b 的第一条交付判据），落库回来换真 id。
    */
   const createPointForAsk = useCallback(
-    async (tS: number, parentId: string | null): Promise<string> => {
+    async (tS: number, parentId: string | null, pinned: boolean): Promise<string> => {
       const tempId = `temp-${Date.now()}`;
       // ⚠️ **标成 transition，别在按 Enter 的那一拍里整页重画**（2026-09-13 创始人真机：Vercel 工具条报
       // 「输入框上的事件处理挡住界面 218ms」）。这句 setPoints 原来是同步的：按下 Enter →
@@ -1214,8 +1214,9 @@ export function WatchStage({
         startTransition(() => {
           setPoints((prev) => prev.map((p) => (p.id === tempId ? saved : p)));
         });
-        // 片 c0：「?」那一行 —— 这一轮落成点的这一刻就记，并立刻送一批（保证「先跳后问」的顺序落得住）
-        recorder.ask(saved.id, tS);
+        // 片 c0：「?」那一行 —— 这一轮落成点的这一刻就记，并立刻送一批（保证「先跳后问」的顺序落得住）。
+        // `pinned`（🐞6）：用 `@` 指定了时间点的一问，问答栏头上的 `@` 从这一问起重新标（见 recorder.ask）
+        recorder.ask(saved.id, tS, Date.now(), pinned);
         return saved.id;
       } catch (e) {
         startTransition(() => {
