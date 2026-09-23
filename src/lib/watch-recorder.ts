@@ -104,7 +104,7 @@ export class WatchRecorder implements CoverageSource {
   private pending: { from: number; to: number; at: number } | null = null;
   /** 刚问完的那一轮：接下来的「停住」算在它头上（「?」那一行末尾的「停了 X」） */
   private askAttr: string | null = null;
-  /** 上一问之后跳过没有（问答栏 `@` 标注从哪儿重新算）。这一次观看的第一问算"跳过" */
+  /** 上一问之后跳过没有（问答栏 `@` 标注从哪儿重新算）。这一次观看的第一问算"跳过"；上一问用 `@` 指定了时间点也算（🐞6，见 `ask`） */
   private seekSinceAsk = true;
   private trouble: SaveTrouble = null;
   private dropped = 0;
@@ -347,10 +347,17 @@ export class WatchRecorder implements CoverageSource {
     this.pending = { from: this.pos, to: toS, at: now };
   }
 
-  /** 问了一句（这一轮已经落成捕获点了，D62）。**立刻送一批** —— 保证「先跳后问」的顺序落得住 */
-  ask(interruptId: string, tS: number, now = Date.now()) {
-    const reset = this.seekSinceAsk;
-    this.seekSinceAsk = false;
+  /**
+   * 问了一句（这一轮已经落成捕获点了，D62）。**立刻送一批** —— 保证「先跳后问」的顺序落得住。
+   *
+   * `pinned` = 这一问用 `@` 指定了别的时间点（片 d / 🐞6）。问答栏的 `@` 标注本来是「30 秒内不重复标」，
+   * 但指定了时间点的那一问**头上的 `@` 必须露出来**（他指定的就是那一秒），**下一问也得重新标** ——
+   * 否则紧跟着在播放头上问的那句，因为和 `@` 那一秒挨得近而不标，看上去就像也问在那一秒。
+   * 所以当成一次「跳」处理：这一问 `reset`、并且下一问也 `reset`。落在同一个 `meta.reset` 里，**零迁移**，刷新之后照样对。
+   */
+  ask(interruptId: string, tS: number, now = Date.now(), pinned = false) {
+    const reset = this.seekSinceAsk || pinned;
+    this.seekSinceAsk = pinned;
     this.append({
       at: iso(now),
       kind: "ask",
