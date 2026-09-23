@@ -12,7 +12,6 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { activeSegmentIndex, parseTranscript } from "@/lib/captions";
-import { LayoutPicker } from "@/components/layout-picker";
 import { PhraseCheck } from "@/components/phrase-line";
 import { SelectableLine, type GlossState } from "@/components/selectable-line";
 import { Toggle } from "@/components/toggle";
@@ -25,7 +24,7 @@ import { putSettings } from "@/lib/settings-client";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
 import { TARGET_LANGS } from "@/lib/translate/langs";
-import type { LayoutStore, WatchLayout } from "@/lib/watch-layout";
+import type { LayoutStore } from "@/lib/watch-layout";
 import { useCopy } from "@/components/copy-provider";
 
 // M1d — 字幕层（D4）：开关 + 字号 14–28px（存 localStorage）+ 行宽自适应（.caption-copy）
@@ -232,12 +231,11 @@ interface CaptionLayerProps {
   scanning?: boolean;
   /**
    * M3.15 片 g（D67）：观看页宽屏的布局仓库。**只有宽屏观看页传**。
-   * 字幕栏头上的选择器订它；切回「专注字幕」时这里要把字幕列表滚回当前行（藏起来那会儿 `scrollTop` 被浏览器清零了）。
-   * 「字幕在视频下面」那三行**一直渲染着**，显不显示由 `globals.css` 按 grid 上的 `data-layout` 决定 —— 切布局这一栏一次都不重画
+   * 切回「专注字幕」时这里要把字幕列表滚回当前行（藏起来那会儿 `scrollTop` 被浏览器清零了）；进出 ③ 时字号跟着换一档。
+   * 「字幕在视频下面」那三行**一直渲染着**，显不显示由 `globals.css` 按 grid 上的 `data-layout` 决定 —— 切布局这一栏一次都不重画。
+   * （片 g3：选择器从这一栏头上搬进了页头 —— 创始人要它「一直固定在右上角那一个位置」，见 layout-picker.tsx）
    */
   layoutStore?: LayoutStore;
-  /** 选了一种布局（watch-stage 负责改 grid 上的属性 + 存进 user_settings） */
-  onLayout?: (next: WatchLayout) => void;
 }
 
 export function CaptionLayer({
@@ -260,7 +258,6 @@ export function CaptionLayer({
   onToggleAutoScan,
   scanning = false,
   layoutStore,
-  onLayout,
 }: CaptionLayerProps) {
   const t = useCopy();
   // YouTube 视频自己带 CC，用户粘贴过来免费又快；只有没 CC 的才值得花钱走 Gemini。
@@ -1046,8 +1043,6 @@ export function CaptionLayer({
                 {t("cap.translating", trPercent != null ? ` ${trPercent}%` : "…")}
               </span>
             )}
-            {/* 片 g（D67）：布局选择器 —— 只在宽屏观看页出现（组件自己 `hidden lg:flex`） */}
-            {layoutStore && onLayout && <LayoutPicker store={layoutStore} onPick={onLayout} />}
             {/* `wl-list-only`：三行那种排法里没有「跟随」这回事（永远是当前那句在中间），那时藏起来（globals.css） */}
             <button
               type="button"

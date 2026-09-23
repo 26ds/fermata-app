@@ -59,6 +59,11 @@ export const en = {
     "Key points from each answer show up here; tick one to add it to your notes. Generated only when you open this tab, so ignoring it costs nothing (not built yet).",
   "watch.rail.capture": "Just mark this moment",
   "watch.rail.capturing": "Marking…",
+  // M3.15 slice g3: the “Font − +” at the right end of the tab row. Only the conversation text follows it
+  "watch.rail.font": "Font",
+  "watch.rail.fontAria": (px: number) => `Chat text size, now ${px}px`,
+  "watch.rail.fontSmaller": "Smaller text",
+  "watch.rail.fontLarger": "Larger text",
 
   // ── Watch page · the Ask rail itself (M3.15 slice b, D61/D62) ──────────
   "watch.qa.placeholder": "Ask about this moment… (type @ for another timestamp)",

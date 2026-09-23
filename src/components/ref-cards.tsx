@@ -13,6 +13,9 @@ import { mmss } from "@/lib/time";
 // **核不上字幕的那张（D64）：照出、灰着、不可点，写明是哪一种** ——
 // 创始人 2026-09-07：「没找到，直接一点，而不是不给」。闷着不给等于替 AI 圆谎，他还以为 AI 什么都没说。
 // 颜色一物一义：青色只给「能点的时间」，所以核不上那张的时间是灰的、边框是虚线。
+//
+// 片 g3：字号一律写 em —— 卡片长在问答栏的消息流里，跟着那一层的 `--chat-fs` 一起变大变小（「字体 − +」）。
+// 比例照抄原来的 rem 写法（按 14px 算），字号一变整张卡按比例缩放。AI 那一句和原句用问答栏的字体（`font-chat`），时间照旧等宽
 
 export function RefCards({
   refs,
@@ -36,19 +39,19 @@ export function RefCards({
         // 原句最多两行，再长的截掉（点过去就听得到全句）
         const words = (
           <>
-            <span className="block text-sm leading-6">
-              <span aria-hidden className={`ui-mono mr-1.5 text-[0.72rem] ${r.ok ? "text-teal-300" : "text-ink-500"}`}>
+            <span className="block text-[1em] leading-[1.7143]">
+              <span aria-hidden className={`ui-mono mr-1.5 text-[0.8229em] ${r.ok ? "text-teal-300" : "text-ink-500"}`}>
                 {at === null ? "--:--" : mmss(at)}
               </span>
               {at !== null && (
-                <span aria-hidden className="mr-1.5 text-[0.62rem] text-ink-500">
+                <span aria-hidden className="mr-1.5 text-[0.7086em] text-ink-500">
                   {at >= fromS ? t("watch.qa.refLater") : t("watch.qa.refEarlier")}
                 </span>
               )}
-              <span className={r.ok ? "text-ink-100" : "text-ink-300"}>{r.note}</span>
+              <span className={`font-chat ${r.ok ? "text-ink-100" : "text-ink-300"}`}>{r.note}</span>
             </span>
             {quote && (
-              <span className="line-clamp-2 block text-[0.8rem] leading-5 text-ink-300 [overflow-wrap:anywhere]">
+              <span className="font-chat line-clamp-2 block text-[0.9143em] leading-[1.5625] text-ink-300 [overflow-wrap:anywhere]">
                 “{quote}”
               </span>
             )}
@@ -72,7 +75,7 @@ export function RefCards({
         return (
           <li key={i} className="rounded-xl border border-dashed border-ink-700 px-3 py-1.5">
             {words}
-            <span className="mt-0.5 block text-[0.7rem] leading-4 text-ink-500">{t("watch.qa.refUnverified")}</span>
+            <span className="mt-0.5 block text-[0.8em] leading-[1.4286] text-ink-500">{t("watch.qa.refUnverified")}</span>
           </li>
         );
       })}

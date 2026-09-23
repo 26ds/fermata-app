@@ -6,6 +6,7 @@ import { LangBootstrap } from "@/components/lang-bootstrap";
 import { SetupNotice } from "@/components/setup-notice";
 import { SettingsLink } from "@/components/settings-link";
 import { LangToggle } from "@/components/lang-toggle";
+import { LayoutPicker, WatchLayoutProvider } from "@/components/layout-picker";
 import { getT } from "@/lib/ui-lang";
 import { WatchStage } from "@/components/watch-stage";
 import type { PausePoint } from "@/components/pause-list";
@@ -124,63 +125,68 @@ export default async function WatchDetailPage({
   const tr = await getT();
 
   return (
-    // M3.12 片 a：宽屏下**整页不滚**（`lg:h-dvh`），滚的只有右栏 ——
-    // 「视频不动、右边滚」就是桌面版的全部意义。
-    // ⚠️ 不许改用 `position: sticky` 来实现：这个根节点是 `overflow-hidden`，
-    // 它会成为 sticky 的滚动容器，于是 sticky 安安静静地什么都不做（D47⑩⒜）。
-    <div className="relative flex min-h-dvh flex-col overflow-hidden lg:h-dvh">
-      <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-48 opacity-50" />
-      {/* D18：页头压到最薄，标题并进这一行 —— 原本"返回 / 字幕状态"一行 + 标题一行
-          白占掉约 44px 的纵向空间，而那正是视频画面想要的。字幕状态挪进了播放器
-          下方的状态条（WatchStage 里），不再单占位置。 */}
-      <header className="relative flex items-center gap-3 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-8">
-        {/* 返回退一层，不是回首页 —— 从哪儿来退回哪儿去，规则在 lib/nav.ts */}
-        <Link href={back.href} aria-label={tr(back.labelKey)} className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300">
-          <span aria-hidden>←</span>
-        </Link>
-        {/* 标题点一下回到原网页（YouTube 观看页 / 小宇宙单集页）。取不到就是纯文字。 */}
-        <h1 className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-ink-100">
-          {origin ? (
-            <a
-              href={origin}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={tr("common.openOrigin", source.title ?? tr("common.untitled"))}
-              className="group inline-flex max-w-full items-center gap-1 hover:text-teal-300"
-            >
-              <span className="truncate">{source.title ?? tr("common.untitled")}</span>
-              <span aria-hidden className="shrink-0 text-ink-500 transition-colors group-hover:text-teal-300">↗</span>
-            </a>
-          ) : (
-            (source.title ?? tr("common.untitled"))
-          )}
-        </h1>
-        {/* 创始人 2026-09-09：语言开关每个界面都要有 */}
-        <LangToggle />
-        <SettingsLink from="player" sid={source.id} />
-      </header>
+    // M3.15 片 g3：布局仓库包在整页外面 —— 选择器在页头、grid 在 WatchStage 里，两边要的是同一个仓库（见 layout-picker.tsx）
+    <WatchLayoutProvider initial={layout}>
+      {/* M3.12 片 a：宽屏下**整页不滚**（`lg:h-dvh`），滚的只有右栏 ——
+          「视频不动、右边滚」就是桌面版的全部意义。
+          ⚠️ 不许改用 `position: sticky` 来实现：这个根节点是 `overflow-hidden`，
+          它会成为 sticky 的滚动容器，于是 sticky 安安静静地什么都不做（D47⑩⒜）。 */}
+      <div className="relative flex min-h-dvh flex-col overflow-hidden lg:h-dvh">
+        <div className="ambient-grid pointer-events-none absolute inset-x-0 top-0 h-48 opacity-50" />
+        {/* D18：页头压到最薄，标题并进这一行 —— 原本"返回 / 字幕状态"一行 + 标题一行
+            白占掉约 44px 的纵向空间，而那正是视频画面想要的。字幕状态挪进了播放器
+            下方的状态条（WatchStage 里），不再单占位置。 */}
+        <header className="relative flex items-center gap-3 px-5 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-8">
+          {/* 返回退一层，不是回首页 —— 从哪儿来退回哪儿去，规则在 lib/nav.ts */}
+          <Link href={back.href} aria-label={tr(back.labelKey)} className="group flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-ink-500/60 text-base text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300">
+            <span aria-hidden>←</span>
+          </Link>
+          {/* 标题点一下回到原网页（YouTube 观看页 / 小宇宙单集页）。取不到就是纯文字。 */}
+          <h1 className="min-w-0 flex-1 truncate text-sm font-semibold leading-5 text-ink-100">
+            {origin ? (
+              <a
+                href={origin}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={tr("common.openOrigin", source.title ?? tr("common.untitled"))}
+                className="group inline-flex max-w-full items-center gap-1 hover:text-teal-300"
+              >
+                <span className="truncate">{source.title ?? tr("common.untitled")}</span>
+                <span aria-hidden className="shrink-0 text-ink-500 transition-colors group-hover:text-teal-300">↗</span>
+              </a>
+            ) : (
+              (source.title ?? tr("common.untitled"))
+            )}
+          </h1>
+          {/* M3.15 片 g3：三种布局的选择器**钉在右上角**（创始人 2026-09-23）—— 页头是唯一一行不随布局动的地方。
+              只在宽屏出现（组件自己 `hidden lg:flex`），窄屏页头一个像素不变 */}
+          <LayoutPicker />
+          {/* 创始人 2026-09-09：语言开关每个界面都要有 */}
+          <LangToggle />
+          <SettingsLink from="player" sid={source.id} />
+        </header>
 
-      {/* 宽屏下松开那根 `max-w-2xl` 的居中柱子 —— **这一片真正要改的只有这里**。
-          页头不用动：`<header>` 在 `<main>` 外面，本来就是通栏的（D47⑩⒝）。
-          `lg:min-h-0` 是给下面的右栏留的：flex 子项不写它就不肯缩，`overflow-y-auto` 会失效。 */}
-      <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8 lg:max-w-none lg:min-h-0 lg:pb-4">
-        <LangBootstrap prefs={prefs} />
-        <WatchStage
-          source={source}
-          interrupts={interrupts}
-          startAtS={startAtS}
-          startInChat={chat === "1"}
-          prefs={prefs}
-          play={play}
-          autoScan={autoScan}
-          atHintSeen={atHintSeen}
-          layout={layout}
-          savedAtoms={savedAtoms}
-          watchEvents={watchEvents}
-          watchEventsTrouble={watchEventsTrouble}
-          watchEventsCapped={watchEventsCapped}
-        />
-      </main>
-    </div>
+        {/* 宽屏下松开那根 `max-w-2xl` 的居中柱子 —— **这一片真正要改的只有这里**。
+            页头不用动：`<header>` 在 `<main>` 外面，本来就是通栏的（D47⑩⒝）。
+            `lg:min-h-0` 是给下面的右栏留的：flex 子项不写它就不肯缩，`overflow-y-auto` 会失效。 */}
+        <main className="page-enter relative mx-auto flex w-full max-w-2xl flex-1 flex-col px-5 pb-12 sm:px-8 lg:max-w-none lg:min-h-0 lg:pb-4">
+          <LangBootstrap prefs={prefs} />
+          <WatchStage
+            source={source}
+            interrupts={interrupts}
+            startAtS={startAtS}
+            startInChat={chat === "1"}
+            prefs={prefs}
+            play={play}
+            autoScan={autoScan}
+            atHintSeen={atHintSeen}
+            savedAtoms={savedAtoms}
+            watchEvents={watchEvents}
+            watchEventsTrouble={watchEventsTrouble}
+            watchEventsCapped={watchEventsCapped}
+          />
+        </main>
+      </div>
+    </WatchLayoutProvider>
   );
 }

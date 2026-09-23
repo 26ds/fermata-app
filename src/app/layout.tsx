@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Instrument_Serif, JetBrains_Mono } from "next/font/google";
+import { Inter, Instrument_Serif, JetBrains_Mono, Source_Serif_4 } from "next/font/google";
 import { CopyProvider } from "@/components/copy-provider";
 import { DesktopOnly } from "@/components/desktop-only";
 import { getT, getUiLang } from "@/lib/ui-lang";
@@ -9,7 +9,8 @@ import "./globals.css";
 //   Inter        — 全局 UI 无衬线，比系统栈更稳、字重更实
 //   Instrument   — 标题衬线，撑住"影院感"
 //   JetBrains    — 模型名/计时/徽章等技术字段，等宽不跳动
-// 中文由系统字体接管（见 globals.css 的 --font-sans 回退链）。
+//   Source Serif — 问答栏里要读的字（M3.15 片 g3，创始人要「和界面的字体区分一下」），中文那一半配宋体
+// 中文由系统字体接管（见 globals.css 的 --font-sans / --font-chat 回退链）。
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
@@ -24,6 +25,13 @@ const instrumentSerif = Instrument_Serif({
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-jetbrains",
+  display: "swap",
+});
+// 片 g3：只有拉丁字母那一半走网络字体（约几十 KB，构建时自包含）。中文宋体用系统自带的 ——
+// 思源宋体做成网络字体要把上百个切片塞进构建（lab 页实测一条回答就拉了 12 片、约 900KB），为一个字体不值
+const sourceSerif = Source_Serif_4({
+  subsets: ["latin"],
+  variable: "--font-chat-latin",
   display: "swap",
 });
 
@@ -69,7 +77,7 @@ export default async function RootLayout({
   return (
     <html
       lang={uiLang}
-      className={`h-full antialiased ${inter.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable}`}
+      className={`h-full antialiased ${inter.variable} ${instrumentSerif.variable} ${jetbrainsMono.variable} ${sourceSerif.variable}`}
     >
       <body className="min-h-full flex flex-col">
         {/* D78（2026-09-19）——「手机暂时全关」的**唯一一层壳**。

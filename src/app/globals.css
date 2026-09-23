@@ -34,6 +34,12 @@
   --font-quote: var(--font-instrument), Georgia, "Songti SC", "Noto Serif SC", serif;
   --font-mono-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo,
     monospace;
+  /* 片 g3：问答栏里要读的那些字（提问气泡、回答、概述卡）—— 创始人 2026-09-23：「聊天框的那个地方稍微和这个界面的字体区分一下，
+     换一种比较好看的、舒服的字体」。界面是无衬线（Inter + 苹方），问答换成**衬线 = 书本的样子**：英文 Source Serif 4（next/font 注入），
+     中文宋体 —— Mac 自带的「宋体-简」（和标题衬线 --font-quote 用的是同一个）；Linux 常见的思源宋体；
+     Windows 自带的宋体（SimSun）14px 上发虚，所以那边退到微软雅黑（舒服比统一要紧） */
+  --font-chat: var(--font-chat-latin), "Songti SC", "Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC",
+    "Microsoft YaHei", serif;
 }
 
 body {
@@ -204,9 +210,13 @@ select:focus-visible {
   }
 
   /* ③「沉浸 · 宽」（片 g2，D67）：第一行 = 视频那一栏 + 右边三个栏，**右栏收在视频那一栏的下沿**（不往下倒 —— 下面是整幅字幕）；
-     第二行 = 字幕三行**横跨整幅**、居中（字号自动大一档，见 caption-layer 的 `WIDE_BUMP`）。中缝只管第一行 */
+     第二行 = 字幕三行**横跨整幅**、居中（字号自动大一档，见 caption-layer 的 `WIDE_BUMP`）。中缝只管第一行。
+     片 g3（中缝在每种布局里都能拖）：第二行**贴着屏幕底**，第一行吃掉其余的 ——
+     视频是自动大小时两种写法一个样（视频的高度上限就是按「刚好放满」算的）；他把视频拖小了，省出来的高度归右边的问答，
+     不再在屏幕底下留一条空带、问答反倒跟着视频一起变矮（g2 的 `auto minmax(0, 1fr)` 就是那样）。
+     第一行至少装得下左栏（`min-content`）：窗口太矮时让位的是第二行 —— 三行在自己框里滚（fitCaps），和 g2 一样 */
   .watch-grid[data-layout="wide"] {
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: minmax(min-content, 1fr) minmax(0, auto);
   }
   .watch-grid[data-layout="wide"] > .wl-left {
     grid-column: 1;
@@ -257,11 +267,8 @@ select:focus-visible {
     margin-inline: auto;
     text-align: left;
   }
-  /* 没有视频的那几档（播客）：左栏只有一张 137px 的控制卡 —— 照「收在左栏下沿」，右边三个栏只剩两百来 px（g1 修过的同一个病）。
-     倒过来排：字幕贴屏幕底（最多半屏，长句在自己框里滚），上面剩下的整块都给三个栏 */
-  .watch-grid[data-layout="wide"]:not([data-video]) {
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
+  /* 没有视频的那几档（播客）：左栏只有一张 137px 的控制卡 —— 右边三个栏靠上面那条「第一行吃掉其余的」撑满（g2 时这里单独倒过来排过，
+     片 g3 起视频那一档也是这么排，这一条只剩下限高）。字幕不固定高：最多半屏，长句在自己框里滚 */
   .watch-grid[data-layout="wide"]:not([data-video]) .wl-caps {
     max-height: 45dvh;
   }

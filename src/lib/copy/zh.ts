@@ -73,6 +73,11 @@ export const zh = {
   // 悬浮球在宽屏上的替身（计划 §F）。**先不问、只记下这一刻**
   "watch.rail.capture": "只记下这一刻",
   "watch.rail.capturing": "记着…",
+  // M3.15 片 g3：tab 那一行最右边的「字体 − +」（创始人 2026-09-23 点名要写「字体」两个字）。只管消息流里的字
+  "watch.rail.font": "字体",
+  "watch.rail.fontAria": (px: number) => `问答栏字号，现在 ${px}px`,
+  "watch.rail.fontSmaller": "字小一点",
+  "watch.rail.fontLarger": "字大一点",
 
   // ── 观看页 · 右栏第一栏「问答」的本体（M3.15 片 b，D61/D62）──────────────
   // 只在宽屏出现。**手机上一个字都没变** —— 那边照旧走暂停面板 + 沉浸聊天两条路。
