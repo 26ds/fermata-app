@@ -38,6 +38,7 @@ import type {
   TranscriptStatus,
 } from "@/lib/types";
 import { KEEPS_BACK_CARD, type SeekVia, type WatchEvent } from "@/lib/watch-events";
+import { createLayoutStore, DEFAULT_WATCH_LAYOUT, type WatchLayout } from "@/lib/watch-layout";
 import { WatchRecorder } from "@/lib/watch-recorder";
 
 /** 进度回写节流：播放中最快 10 秒存一次，别把网络当秒表用 */
@@ -79,6 +80,8 @@ const CAP_SPARE_PX = 16;
 const CAP_FLOOR_PX = 280;
 /** 量出来的上限和上一次差不到这么多就不写回去 —— 挡住「写 → 回流 → 再量」的抖动 */
 const CAP_EPSILON_PX = 4;
+/** 片 g「沉浸 · 窄」里视频那一栏最窄占 grid 的多少（见 measureCap 里那道底）。1280 宽的笔记本上约 405px */
+const NARROW_VIDEO_MIN = 1 / 3;
 
 // ── 播放控制条能折叠（创始人 2026-09-06）───────────────────────────────
 //
@@ -198,6 +201,7 @@ export function WatchStage({
   watchEventsTrouble = null,
   watchEventsCapped = false,
   atHintSeen = false,
+  layout = DEFAULT_WATCH_LAYOUT,
 }: {
   source: SourceRow;
   interrupts: PausePoint[];
@@ -231,6 +235,11 @@ export function WatchStage({
   atHintSeen?: boolean;
   /** 记录太多、被截过 */
   watchEventsCapped?: boolean;
+  /**
+   * M3.15 片 g（D67）：宽屏选的是哪种布局（`user_settings.watchLayout`，零新迁移）。
+   * **只在进这一页时读一次** —— 之后以页面里那个小仓库为准（`layoutStore`），见下面那段
+   */
+  layout?: WatchLayout;
 }) {
   // 只问"用哪个壳"。这条链接是什么平台、叫什么名字，是服务端 registry 的活（M1d）
   const shell = playerFor(source.kind);
@@ -363,6 +372,17 @@ export function WatchStage({
     setAtHintDone(true);
     void putSettings({ atHintSeen: true });
   }, []);
+  /**
+   * M3.15 片 g（D67）：宽屏布局。**不是这一层的 React state** —— 切一下就整页重画（几百行字幕、捕获轴、两个栏）
+   * 是修补轮的 INP 教训。这里只有一个小仓库（`lib/watch-layout.ts`）：
+   * grid 上的 `data-layout` 由 `chooseLayout` 直接写 DOM，真的要跟着变的只有字幕栏头上的选择器（它自己订仓库）。
+   *
+   * `layoutAtMount` 是 JSX 里写在 grid 上的那个初值，**这一页的一生里永远不变** ——
+   * 于是 React 以后再渲染也不会去碰那个属性（React 只在 prop 值变了时才改 DOM），手动写进去的值不会被冲掉。
+   * （服务端 `router.refresh()` 带回来一个新的 `layout` prop 也不理它：页面里那个仓库才是真身。）
+   */
+  const [layoutAtMount] = useState(layout);
+  const [layoutStore] = useState(() => createLayoutStore(layout));
   /** D42：内容不是他母语、又没问过 —— 有值时面板上弹那一句问询。答完即定 */
   const [needTargetLang, setNeedTargetLang] = useState("");
   /** 已收进词库的：词组原文 → atom id（取消勾选要用 id） */
@@ -446,6 +466,53 @@ export function WatchStage({
   const gridRef = useRef<HTMLDivElement>(null);
   const leftColRef = useRef<HTMLDivElement>(null);
   const handleElRef = useRef<HTMLDivElement>(null);
+  /** 片 g：字幕那一块的外框（「沉浸 · 窄」里它搬到视频下面，视频的高度上限要把它算进去） */
+  const capsBoxRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * 片 g：选了一种布局。**先写 grid 上的属性、再改仓库**：仓库一改，字幕栏会去把整份字幕列表滚回当前行 ——
+   * 那时候列表得已经显示出来了（藏着的元素量不出位置）。
+   * 存进 `user_settings`（D67：跟人走）。存不上不说话 —— 和别的偏好一样，记不住不该拦着人看视频，下次进来回到上次存上的那种
+   */
+  /**
+   * 片 g：右边三个栏**在每种布局里各停在哪儿**（计划 §六 片 g 的交付判据：「来回切十次……三个栏各自的滚动位置都还在」）。
+   * 为什么要自己记：栏在「沉浸 · 窄」里变高，内容一放得下，浏览器就把 `scrollTop` 夹成 0；切回来它不会自己回到原处 ——
+   * lab 页上「互动记录」滚到 300、切过去再切回来，停在了 0。按布局分开记，回到一种布局就回到在那种布局里停的地方。
+   * WeakMap：栏被换掉（卸载重挂）时旧的记录自己作废。
+   */
+  const railScrollMemo = useRef<Partial<Record<WatchLayout, WeakMap<Element, { top: number; atBottom: boolean }>>>>({});
+  const chooseLayout = useCallback(
+    (next: WatchLayout) => {
+      const prev = layoutStore.get();
+      if (prev === next) return;
+      const grid = gridRef.current;
+      // 眼下露着的那几个能滚的框（问答的消息流 / 互动记录那一栏）。藏着的 tab 高度是 0，不记（qa-rail 切 tab 时自己记）
+      const scrollers = grid
+        ? [...grid.querySelectorAll<HTMLElement>(".wl-rail .overflow-y-auto")].filter((el) => el.clientHeight > 0)
+        : [];
+      const memoPrev = (railScrollMemo.current[prev] ??= new WeakMap());
+      const was = new Map<HTMLElement, { top: number; atBottom: boolean }>();
+      for (const el of scrollers) {
+        // 「在最底下」只在真的能滚时才算数 —— 内容整个放得下时，它既在顶也在底，那不叫「停在最新」
+        const overflows = el.scrollHeight > el.clientHeight + 1;
+        const at = { top: el.scrollTop, atBottom: overflows && el.scrollHeight - el.scrollTop - el.clientHeight < 40 };
+        memoPrev.set(el, at);
+        was.set(el, at);
+      }
+      grid?.setAttribute("data-layout", next);
+      layoutStore.set(next);
+      void putSettings({ watchLayout: next });
+      const memoNext = railScrollMemo.current[next];
+      requestAnimationFrame(() => {
+        for (const el of scrollers) {
+          const saved = memoNext?.get(el);
+          if (was.get(el)?.atBottom) el.scrollTop = el.scrollHeight; // 本来停在最新 → 换了布局也停在最新
+          else if (saved) el.scrollTop = saved.atBottom ? el.scrollHeight : saved.top; // 回到来过的布局 → 回到在那儿停的地方
+        }
+      });
+    },
+    [layoutStore],
+  );
   const splitKind = splitKindOf(source.kind);
   const defaultSplit = SPLIT_DEFAULT[splitKind];
   /**
@@ -459,6 +526,13 @@ export function WatchStage({
    */
   const capsHeight = source.kind === "youtube";
   const splitRef = useRef(defaultSplit);
+  /**
+   * 片 g：他**想要**的比例（拖完 / 方向键 / 双击复位 / 上次存下的）—— 和实际正在用的 `splitRef` 分开记。
+   * 高度上限收紧时（窗口变矮、或者换到「沉浸 · 窄」—— 视频下面多了三行字幕），实际用的会被夹得比它小；
+   * **上限一松开就回到它**。原来只有「往小里夹」没有「放回去」：从「沉浸 · 窄」切回「专注字幕」，
+   * 视频停在被夹过的 792px、回不到 896px（lab 页 1512×900 量到的）。窗口先变矮再拉高也是同一个病，顺带一起好了
+   */
+  const prefSplitRef = useRef(defaultSplit);
   /** 量出来的高度上限（px）。0 = 还没量到（窄屏 / 首帧），那时用 CSS 里那个估算兜底 */
   const capRef = useRef(0);
   const [dragging, setDragging] = useState(false);
@@ -468,6 +542,14 @@ export function WatchStage({
     gridRef.current?.style.setProperty("--split-video", `${pct}%`);
     handleElRef.current?.setAttribute("aria-valuenow", String(Math.round(pct)));
   }, []);
+  /** 他自己动了缝（拖 / 方向键 / 双击 / 读回上次存的）—— 记成「想要的」再用上。上限收紧时的自动夹不走这里 */
+  const choosePreferredSplit = useCallback(
+    (pct: number) => {
+      prefSplitRef.current = pct;
+      applySplit(pct);
+    },
+    [applySplit],
+  );
 
   /**
    * 这一刻中缝最右能到哪儿：78% 与**高度上限换算成的百分比**取小的那个。
@@ -493,9 +575,9 @@ export function WatchStage({
     (clientX: number) => {
       const r = gridRef.current?.getBoundingClientRect();
       if (!r || r.width <= 0) return;
-      applySplit(clampSplit(((clientX - r.left) / r.width) * 100, r.width));
+      choosePreferredSplit(clampSplit(((clientX - r.left) / r.width) * 100, r.width));
     },
-    [applySplit, clampSplit],
+    [choosePreferredSplit, clampSplit],
   );
 
   const commitSplit = useCallback(() => {
@@ -506,6 +588,8 @@ export function WatchStage({
   const resetSplit = useCallback(() => {
     const r = gridRef.current?.getBoundingClientRect();
     applySplit(clampSplit(defaultSplit, r?.width ?? 0));
+    // 想要的是默认值本身（此刻被上限夹住也一样）—— 上限松开时回到它
+    prefSplitRef.current = defaultSplit;
     writeSplit(splitKind, defaultSplit);
   }, [applySplit, clampSplit, defaultSplit, splitKind]);
 
@@ -521,18 +605,18 @@ export function WatchStage({
       e.preventDefault();
       const r = gridRef.current?.getBoundingClientRect();
       const next = clampSplit(splitRef.current + delta, r?.width ?? 0);
-      applySplit(next);
+      choosePreferredSplit(next);
       writeSplit(splitKind, next);
     },
-    [applySplit, clampSplit, resetSplit, splitKind],
+    [choosePreferredSplit, clampSplit, resetSplit, splitKind],
   );
 
   // 上次拖到哪儿就从哪儿开始。**在 effect 里直改 DOM，不 setState** ——
   // 服务端渲染不出 localStorage，走 state 就是一次必然的水合不一致。
   useEffect(() => {
     const stored = readSplit(splitKind);
-    if (stored != null) applySplit(stored);
-  }, [splitKind, applySplit]);
+    if (stored != null) choosePreferredSplit(stored);
+  }, [splitKind, choosePreferredSplit]);
 
   /**
    * 按住缝开始拖。监听挂在 **window** 上而不是那条缝上 —— 指针一动就滑出那 24px 了。
@@ -630,16 +714,37 @@ export function WatchStage({
       for (let el = wrap.nextElementSibling; el; el = el.nextElementSibling) {
         below = Math.max(below, el.getBoundingClientRect().bottom - w.bottom);
       }
+      // 片 g「沉浸 · 窄」：字幕三行搬到了视频下面（grid 的第二行，不是左栏里的兄弟节点，上面那一圈量不到它）。
+      // 它的高度和视频多大无关（YouTube 那一档是按字号算死的固定高，见 globals.css），所以照样一步收敛
+      // ⚠️ 量的是它**本来有多高**（`scrollHeight`），不是它现在的矩形：它在 CSS 里有 `max-height: 100%`（播客那一档防撑出屏幕），
+      // 视频一大、第二行一窄，矩形就被夹小了 —— 拿夹小的矩形去算，等于「视频大所以字幕没地方所以视频还能这么大」，
+      // 自己证明自己（第一版就这么写的，1512×900 上三行被切掉一半、视频一个像素没让）
+      if (grid.dataset.layout === "narrow") {
+        const box = capsBoxRef.current;
+        if (box && box.scrollHeight > 0) {
+          // +2px 余量：字号 × 0.87 这种算式出来是小数（174.07px），外框正好卡在第二行的高度上时，
+          // 浏览器会为 0.0005px 的「溢出」冒一根滚动条出来（1512×900 开了译文时真冒过）。只在这种排法里加 —— 「专注字幕」一个像素不动
+          below = Math.max(below, box.getBoundingClientRect().top + box.scrollHeight - w.bottom + 2);
+        }
+      }
       const room = window.innerHeight - above - Math.max(0, below) - CAP_SPARE_PX;
-      const next = Math.max(CAP_FLOOR_PX, Math.round((room * 16) / 9));
+      // 片 g「沉浸 · 窄」：视频最窄只让到 grid 宽度的三分之一（1280 宽的笔记本上约 405px）。
+      // 不设这道底，窗口一矮、视频那一栏一窄，卡片里的字就折行、卡片变高、视频再让 —— 一路让到 280px 的底（英文界面真撞过）。
+      // 真放不下时，宁可视频下面那三行在自己框里滚，也不把视频挤成邮票（计划「开工先量」第 2 条：视频太小 ② 就不成立）
+      const floor =
+        grid.dataset.layout === "narrow"
+          ? Math.max(CAP_FLOOR_PX, Math.round(grid.getBoundingClientRect().width * NARROW_VIDEO_MIN))
+          : CAP_FLOOR_PX;
+      const next = Math.max(floor, Math.round((room * 16) / 9));
       if (Math.abs(next - capRef.current) < CAP_EPSILON_PX) return;
       capRef.current = next;
       grid.style.setProperty("--video-cap", `${next}px`);
       // 上限收紧之后，存着的比例可能已经越界了 —— 把缝拉回它现在能到的地方，
       // **但不回写 localStorage**：窗口只是暂时矮了，他调好的那个数得留着。
+      // 片 g：夹的是**他想要的**那个数（`prefSplitRef`），不是眼下正在用的 —— 上限松开时这一句就把缝放回去
       const gw = grid.getBoundingClientRect().width;
-      const clamped = clampSplit(splitRef.current, gw);
-      if (Math.abs(clamped - splitRef.current) > 0.5) applySplit(clamped);
+      const want = clampSplit(prefSplitRef.current, gw);
+      if (Math.abs(want - splitRef.current) > 0.5) applySplit(want);
     };
 
     /**
@@ -661,8 +766,30 @@ export function WatchStage({
       if (h > CAP_FLOOR_PX / 2) grid.style.setProperty("--right-h", `${h}px`);
     };
 
+    /**
+     * 片 g「沉浸 · 窄」：窗口太矮、视频已经让到底了，下面三行字幕放不全 —— 框里自己滚，**先让正在说的那一行整个露出来**
+     * （贴着下沿，先牺牲头上那一行设置和上一句）。那一行在三行里的位置是固定的（中间那行，换的只是里面的字），
+     * 所以只在尺寸变了的时候对一次就够，不用每句字幕都来一遍。放得下就回到顶上。
+     * 1280×620 上量到过：不对这一下，正在说的那句整行在框外面。
+     */
+    const fitCaps = () => {
+      const box = capsBoxRef.current;
+      if (!box || gridRef.current?.dataset.layout !== "narrow" || window.innerWidth < LG_PX) return;
+      if (box.scrollHeight - box.clientHeight <= 1) {
+        if (box.scrollTop !== 0) box.scrollTop = 0;
+        return;
+      }
+      const cur = box.querySelector<HTMLElement>(".wl-row-cur");
+      if (!cur) return;
+      const b = box.getBoundingClientRect();
+      const r = cur.getBoundingClientRect();
+      if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom + 2;
+      else if (r.top < b.top) box.scrollTop -= b.top - r.top + 2;
+    };
+
     const measure = () => {
       measureCap();
+      fitCaps();
       const card = stageRef.current?.getBoundingClientRect();
       const video = videoWrapRef.current?.getBoundingClientRect();
       measureRightH(video);
@@ -684,17 +811,28 @@ export function WatchStage({
     if (stageRef.current) ro.observe(stageRef.current);
     // 左栏也要盯着：拖中缝会改它的宽 → 视频高跟着变 → 台面底缘和高度上限都得重算
     if (leftColRef.current) ro.observe(leftColRef.current);
+    // 片 g：字幕那一块也盯着 —— 「沉浸 · 窄」里它在视频下面，调字号 / 开译文会改它的高度
+    if (capsBoxRef.current) ro.observe(capsBoxRef.current);
+    // 片 g：换了布局就重量一次（换布局本身不一定改变上面几块的尺寸，ResizeObserver 未必叫得醒）。
+    // 等这一帧排完再量 —— 仓库一改，字幕栏那边还要跟着动
+    let raf = 0;
+    const offLayout = layoutStore.subscribe(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(measure);
+    });
     window.addEventListener("resize", measure);
     // 播放器加载 / 手机地址栏收放都会引起回流，兜底轮询一小会儿
     const t = window.setInterval(measure, 400);
     const stop = window.setTimeout(() => window.clearInterval(t), 4000);
     return () => {
       ro.disconnect();
+      offLayout();
+      cancelAnimationFrame(raf);
       window.removeEventListener("resize", measure);
       window.clearInterval(t);
       window.clearTimeout(stop);
     };
-  }, [capsHeight, applySplit, clampSplit]);
+  }, [capsHeight, applySplit, clampSplit, layoutStore]);
 
   // 服务端数据变了（router.refresh 之后）就跟着换。渲染期校正，不用 effect
   const [seen, setSeen] = useState(interrupts);
@@ -1811,16 +1949,29 @@ export function WatchStage({
     // `--video-cap` 的初值是片 a 那个 CSS 估算 —— 只活到量尺跑完的那一帧（见 measureCap）。
     <div
       ref={gridRef}
-      className="flex flex-col gap-3 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[min(var(--split-video),var(--video-cap))_1.5rem_1fr] lg:gap-x-0"
+      // 片 g（D67）：`watch-grid` + `data-layout` —— 三种排法**同一棵 DOM 树**，只靠 CSS 换位置（globals.css）。
+      // 播放器永远在左栏那个 div 里，切布局它一个父节点都不换（换了 = YouTube iframe 重载、视频回到 0，D33 死线）。
+      // `data-layout` 在 JSX 里永远是进页时那个值，之后由 chooseLayout 直接写 DOM（为什么见 layoutAtMount 那段）
+      data-layout={layoutAtMount}
+      className="watch-grid flex flex-col gap-3 lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[min(var(--split-video),var(--video-cap))_1.5rem_1fr] lg:gap-x-0"
       style={
         {
           "--split-video": `${defaultSplit}%`,
-          // 播客那一档给一个**永远夹不住**的值（见 capsHeight）
-          "--video-cap": capsHeight ? "calc((100dvh - 20rem) * 16 / 9)" : "100%",
+          // 播客那一档给一个**永远夹不住**的值（见 capsHeight）。
+          // 片 g：进页时就是「沉浸 · 窄」的，估算里再减掉视频下面那三行字幕（约 182px + 一道 12px 的缝 ≈ 12rem）——
+          // 不减的话水合前那一帧视频按「专注字幕」的大小画，量尺一跑再缩回来，进页时视频会跳一下
+          "--video-cap": capsHeight
+            ? layoutAtMount === "narrow"
+              ? "calc((100dvh - 32rem) * 16 / 9)"
+              : "calc((100dvh - 20rem) * 16 / 9)"
+            : "100%",
           // 右栏收到视频下沿（见 measureRightH）。这里的初值只活到量尺跑完那一帧 ——
           // 用的是和 `--video-cap` 同一个估算（视频上下之外还剩多少高），
-          // 所以首帧就已经接近真值，不会先撑满再跳一下。播客不收，给 auto。
-          "--right-h": capsHeight ? "calc(100dvh - 20rem)" : "auto",
+          // 所以首帧就已经接近真值，不会先撑满再跳一下。
+          // 播客：没有视频下沿可收。原来给的是 `auto`（字幕吃满整栏）—— 片 a 在字幕底下加了三个栏之后，
+          // **播客的问答栏被整个挤出了屏幕**（2026-09-23 片 g 开工先量时量到的：1512×900 上字幕框 814px，
+          // 问答那排 tab 落在 885px、消息流 0px —— 播客上根本问不了）。改成字幕占右栏的 55%，剩下的给三个栏。
+          "--right-h": capsHeight ? "calc(100dvh - 20rem)" : "55%",
         } as React.CSSProperties
       }
     >
@@ -1833,7 +1984,7 @@ export function WatchStage({
           视频是 16:9，宽度一涨高度跟着涨，桌面真正的天花板是**窗口有多高**而不是多宽。
           不夹这一下，1280×620 这种矮窗口上左栏会比窗口高 49px，点点条直接被
           `overflow-hidden` 剪掉。片 b 已把片 a 那个估算常数换成量出来的真值（measureCap）。*/}
-      <div ref={leftColRef} className="flex min-w-0 flex-col gap-3 lg:min-h-0">
+      <div ref={leftColRef} className="wl-left flex min-w-0 flex-col gap-3 lg:min-h-0">
         {/* D18：画面越大越好 —— 手机上让播放器顶掉页面左右内边距，整整宽出 40px。
             sm 以上回到圆角卡片（桌面宽度富余，全出血反而失衡） */}
         <div ref={videoWrapRef} className="-mx-5 sm:mx-0">
@@ -1935,7 +2086,7 @@ export function WatchStage({
         onPointerDown={startDrag}
         onDoubleClick={resetSplit}
         onKeyDown={onHandleKeyDown}
-        className={`group hidden select-none touch-none lg:flex lg:cursor-col-resize lg:items-center lg:justify-center ${
+        className={`wl-handle group hidden select-none touch-none lg:flex lg:cursor-col-resize lg:items-center lg:justify-center ${
           dragging ? "" : "focus-visible:outline-none"
         }`}
       >
@@ -1955,13 +2106,15 @@ export function WatchStage({
           （创始人 2026-09-06 在截图上画的那条线）。这个数由 measureRightH 量出来；
           播客那一档是 `auto`，照旧吃满整行（左边那张控制卡只有 137px 高，
           照它收字幕等于把主战场砍没了）。 */}
-      <div className="flex min-w-0 flex-col lg:min-h-0 lg:pr-1">
+      {/* 片 g：`wl-right` 在「沉浸 · 窄」里变成 `display: contents` —— 自己这一层消失，里面的字幕框和三个栏
+          各自直接落进外面那个 grid（字幕去视频下面、三个栏整条竖下来）。**DOM 一个节点都没挪** */}
+      <div className="wl-right flex min-w-0 flex-col lg:min-h-0 lg:pr-1">
         {/* 字幕这一块**自己收到视频下沿**（`--right-h`），滚的也是它自己。
             片 a 之前这两件事长在外面那个 div 上 —— 整个右栏就是字幕，两者是一回事；
             现在右栏底下多了三个栏目，**上限必须往里挪一层**，
             不然三个栏也被一起夹在视频下沿以上、挤成一条缝。
             创始人 2026-09-06 画的那条红线管的是**字幕**，不是"右栏里所有东西"。 */}
-        <div className="flex min-w-0 flex-col lg:h-[var(--right-h)] lg:min-h-0 lg:overflow-y-auto">
+        <div ref={capsBoxRef} className="wl-caps flex min-w-0 flex-col lg:h-[var(--right-h)] lg:min-h-0 lg:overflow-y-auto">
         {/* D4：字幕可开关、字号可调、行宽自适应 —— 视频与播客共用同一层 */}
         <CaptionLayer
           sourceId={source.id}
@@ -1990,6 +2143,9 @@ export function WatchStage({
             resumable: status === "partial",
             onRun: () => void runTranscription(),
           }}
+          // 片 g（D67）：布局选择器长在字幕栏头上。两样都是身份不变的东西 —— 不会因为它们让字幕栏多渲染一次
+          layoutStore={layoutStore}
+          onLayout={chooseLayout}
         />
         </div>
 
@@ -2000,7 +2156,8 @@ export function WatchStage({
             其中 114px 今天完全空着 —— 也就是说三个栏**没从字幕身上拿走一个像素**。
             片 g 的布局 ②③ 会把整条右栏让给它。 */}
         {isWide && (
-          <div className="mt-3 flex min-h-0 flex-1 flex-col">
+          // 片 g：`wl-rail` —— 「沉浸 · 窄」里它从右栏上沿一路竖到屏幕底（聊天变大就是这一刀）
+          <div className="wl-rail mt-3 flex min-h-0 flex-1 flex-col">
             <QaRail
               // 把 promise 原样递下去：问答栏那颗按钮等它落完才熄掉「记着…」（2026-09-13，INP —— 见 qa-chat 的 CaptureNowButton）
               onCaptureNow={captureOnly}

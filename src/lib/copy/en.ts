@@ -556,6 +556,14 @@ export const en = {
   "cap.trReload": "Reload translation",
   "cap.trPartial": (done: number, total: number) =>
     `Only ${done} of ${total} lines are translated — press ↻ (Reload translation) to finish`,
+  "cap.settings": "Caption settings (AI word marking · size · translation)",
+
+  // ── Watch page · wide-screen layouts (M3.15 g, D67) ─────────────────────
+  "layout.aria": "Watch page layout",
+  "layout.focus": "Focus captions",
+  "layout.focusHint": "captions at the top of the right column, Q&A below them (the original layout)",
+  "layout.narrow": "Immersive · narrow",
+  "layout.narrowHint": "three caption lines under the video; the whole right column goes to Q&A",
 
   // ── Watch stage ────────────────────────────────────────────────────────
   "stage.noPlayer": (kind: string) => `There's no player for this kind of content (${kind}) yet.`,

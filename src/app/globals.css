@@ -127,6 +127,83 @@ select:focus-visible {
   text-wrap: pretty;
 }
 
+/*
+ * ── M3.15 片 g：观看页宽屏的布局（D67，watch-stage.tsx 的 `.watch-grid`）────────────────────
+ * **同一棵 DOM 树，只靠 grid 上的 `data-layout` 换位置**。播放器永远在左栏（`.wl-left`）里，
+ * 切布局它一个父节点都不换 —— 换了 = YouTube iframe 重载、视频回到 0（D33 死线）。
+ * 没有 `data-layout` 规则的那一种（`focus`「专注字幕」）就是今天的样子，这里一行都不碰它。
+ * 下面的规则**不进 Tailwind 的 layer**（故意）：它们要压过元素上那几个 `lg:` 类（`mt-3`、`lg:h-[var(--right-h)]`、`flex`）。
+ */
+
+/* 「字幕在视频下面」那三行：只在「沉浸 · 窄」里露出来；其余时候一直渲染着、藏着 —— 切布局字幕栏一次都不重画 */
+.wl-three {
+  display: none;
+  /* 不出滚动条：选词时长出来的「收下 / 取消」那截，由 caption-layer 程序化地滚过去给他看 */
+  overflow: hidden;
+  /* **不许被压扁**：它在字幕栏那个 flex 列里，默认会跟着外框缩 —— 缩了以后外框量出来就「刚好放得下」，
+     视频永远不让位（片 g 第一版就栽在这儿：三行被切掉一半）。不缩，外框才量得到它本来要多高 */
+  flex-shrink: 0;
+}
+/* YouTube 那一档外框**固定高**（它算在视频的高度上限里 —— 一变视频就跟着缩放，所以不许变）：
+   正在说的那句最多两行、上下两句各一行，开了译文再各加一行译文。和 caption-layer 里 `threeRow` 的夹行是同一对数：
+   big × 1.5 ×（2 + 1 + 1）+ 译文 × small × 1.4 × 3 + 三行各 8px 内边距 + 外框 10px（p-1 + 1px 边） */
+.wl-three-fixed {
+  height: calc(var(--wl-big) * 6 + var(--wl-tr) * var(--wl-small) * 4.2 + 34px);
+}
+.wl-row-cur {
+  min-height: calc(var(--wl-big) * 3 + var(--wl-tr) * var(--wl-small) * 1.4 + 8px);
+}
+.wl-row-dim {
+  min-height: calc(var(--wl-big) * 1.5 + var(--wl-tr) * var(--wl-small) * 1.4 + 8px);
+}
+
+@media (width >= 64rem) {
+  /* ②「沉浸 · 窄」：第一行 = 视频 + 状态卡 + 捕获轴；第二行 = 字幕三行（与视频同宽）；
+     问答那三个栏**从右栏上沿一路竖到屏幕底**（创始人 2026-09-23：「现在chat聊天框看起来还是很小」） */
+  .watch-grid[data-layout="narrow"] {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .watch-grid[data-layout="narrow"] > .wl-left {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .watch-grid[data-layout="narrow"] > .wl-handle {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  /* 右栏这一层自己消失，里面的字幕框和三个栏直接落进外面的 grid —— DOM 一个节点都没挪 */
+  .watch-grid[data-layout="narrow"] > .wl-right {
+    display: contents;
+  }
+  .watch-grid[data-layout="narrow"] .wl-caps {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: start;
+    height: auto;
+    /* 播客那一档字幕不固定高：真长到放不下，就在自己框里滚，不许撑出屏幕 */
+    max-height: 100%;
+    /* 窗口太矮时这个框会滚（watch-stage 的 fitCaps 替他把正在说的那一行摆进来）—— 滚动条不露：
+       差几个像素也冒一根竖条，在视频正下方很扎眼。滚轮照样能滚 */
+    scrollbar-width: none;
+  }
+  .watch-grid[data-layout="narrow"] .wl-caps::-webkit-scrollbar {
+    display: none;
+  }
+  .watch-grid[data-layout="narrow"] .wl-rail {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    margin-top: 0;
+    /* 原来是右栏那一层的 `lg:pr-1`（那一层现在 display: contents 了，内边距跟着没了） */
+    padding-right: 0.25rem;
+  }
+  .watch-grid[data-layout="narrow"] .wl-list-only {
+    display: none;
+  }
+  .watch-grid[data-layout="narrow"] .wl-three {
+    display: block;
+  }
+}
+
 /* 技术字段：模型名、计时、响应耗时徽章 —— 等宽，数字跳动时不抖 */
 .ui-mono {
   font-family: var(--font-mono-ui);
