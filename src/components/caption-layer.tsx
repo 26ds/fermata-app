@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -11,9 +12,12 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { activeSegmentIndex, parseTranscript } from "@/lib/captions";
+import { LayoutPicker } from "@/components/layout-picker";
 import { PhraseCheck } from "@/components/phrase-line";
 import { SelectableLine, type GlossState } from "@/components/selectable-line";
 import { Toggle } from "@/components/toggle";
+import { useIsWide } from "@/components/use-wide";
+import { ViewportLayer } from "@/components/viewport-layer";
 import type { PhraseItem } from "@/lib/phrases/types";
 import { normalizeLang, sameLang } from "@/lib/lang";
 import { findTerms, type TermSpan } from "@/lib/segment";
@@ -21,6 +25,7 @@ import { putSettings } from "@/lib/settings-client";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
 import { TARGET_LANGS } from "@/lib/translate/langs";
+import type { LayoutStore, WatchLayout } from "@/lib/watch-layout";
 import { useCopy } from "@/components/copy-provider";
 
 // M1d — 字幕层（D4）：开关 + 字号 14–28px（存 localStorage）+ 行宽自适应（.caption-copy）
@@ -56,6 +61,74 @@ function YoutubeCopySteps() {
         {t("cap.ytStep3b")}
       </li>
     </ol>
+  );
+}
+
+/**
+ * M3.15 片 g —— 字幕栏头上那颗齿轮打开的浮层（「AI 标词 / 字号 / 译文」三行，宽屏专用）。
+ *
+ * 贴着齿轮摆：**下面放得下就往下开，放不下就往上开**（「沉浸 · 窄」里字幕栏在视频下面、离屏幕底很近）。
+ * 位置在出生那一帧量（layout effect，看不见"先出现在左上角再跳过去"）；窗口一变、或者外面哪一层一滚，就收起来 ——
+ * 跟着挪要一直盯着，收起来再点一下就对了，简单的那条路不会错。
+ */
+function CaptionSettingsPop({
+  anchorRef,
+  label,
+  onClose,
+  children,
+}: {
+  anchorRef: React.RefObject<HTMLButtonElement | null>;
+  label: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  // 量完**直接写 DOM**，不进 state：layout effect 在浏览器画第一帧之前跑，写进去的位置就是第一帧的位置；
+  // 进 state 还得多渲染一轮（本仓库的 lint 也拦「effect 里同步 setState」）
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const a = anchorRef.current?.getBoundingClientRect();
+    if (!box || !a) return;
+    const GAP = 6;
+    const below = window.innerHeight - a.bottom - GAP - 8;
+    const above = a.top - GAP - 8;
+    const need = box.scrollHeight;
+    box.style.right = `${Math.max(8, window.innerWidth - a.right)}px`;
+    // 下面放得下就往下；都放不下时挑空间大的那边，里面能滚
+    if (below >= need || below >= above) {
+      box.style.top = `${a.bottom + GAP}px`;
+      box.style.maxHeight = `${below}px`;
+    } else {
+      box.style.bottom = `${window.innerHeight - a.top + GAP}px`;
+      box.style.maxHeight = `${above}px`;
+    }
+  }, [anchorRef]);
+
+  useEffect(() => {
+    const bye = (e: Event) => {
+      // 浮层自己里面滚（放不下时它能滚）不算
+      if (e.target instanceof Node && boxRef.current?.contains(e.target)) return;
+      onClose();
+    };
+    window.addEventListener("resize", bye);
+    window.addEventListener("scroll", bye, true);
+    return () => {
+      window.removeEventListener("resize", bye);
+      window.removeEventListener("scroll", bye, true);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={boxRef}
+      role="dialog"
+      aria-label={label}
+      data-caption-settings=""
+      className="fixed z-[60] w-[23rem] max-w-[calc(100vw-1rem)] overflow-y-auto rounded-2xl border border-ink-700 bg-ink-900 px-3 pb-3 pt-1 shadow-lg shadow-ink-900/70"
+    >
+      {children}
+    </div>
   );
 }
 
@@ -149,6 +222,14 @@ interface CaptionLayerProps {
   onToggleAutoScan?: () => void;
   /** 正在扫。开关旁边那行小字要如实说「正在扫这一片…」，别让人以为点了没反应 */
   scanning?: boolean;
+  /**
+   * M3.15 片 g（D67）：观看页宽屏的布局仓库。**只有宽屏观看页传**。
+   * 字幕栏头上的选择器订它；切回「专注字幕」时这里要把字幕列表滚回当前行（藏起来那会儿 `scrollTop` 被浏览器清零了）。
+   * 「字幕在视频下面」那三行**一直渲染着**，显不显示由 `globals.css` 按 grid 上的 `data-layout` 决定 —— 切布局这一栏一次都不重画
+   */
+  layoutStore?: LayoutStore;
+  /** 选了一种布局（watch-stage 负责改 grid 上的属性 + 存进 user_settings） */
+  onLayout?: (next: WatchLayout) => void;
 }
 
 export function CaptionLayer({
@@ -170,6 +251,8 @@ export function CaptionLayer({
   autoScan = false,
   onToggleAutoScan,
   scanning = false,
+  layoutStore,
+  onLayout,
 }: CaptionLayerProps) {
   const t = useCopy();
   // YouTube 视频自己带 CC，用户粘贴过来免费又快；只有没 CC 的才值得花钱走 Gemini。
@@ -180,6 +263,15 @@ export function CaptionLayer({
   const [on, setOn] = useState(true);
   const [follow, setFollow] = useState(true);
   const [active, setActive] = useState(-1);
+  /**
+   * 片 g：「字幕在视频下面」那三行以哪一句为中间那行。平时就是 `active`；
+   * **正在那三行里选词 / 挂着刚收下那个词的解释时停住不动**（见 250ms 那一轮）——
+   * 不停的话，视频一播，他选到一半的那一行就被换掉了，划词等于用不了
+   */
+  const [anchor, setAnchor] = useState(-1);
+  /** 片 g：宽屏上「AI 标词 / 字号 / 译文」收进了头上那颗齿轮 —— 它开着没有 */
+  const [gearOpen, setGearOpen] = useState(false);
+  const isWide = useIsWide();
 
   const [pasting, setPasting] = useState(false);
   const [draft, setDraft] = useState("");
@@ -217,6 +309,13 @@ export function CaptionLayer({
 
   const activeRef = useRef<HTMLLIElement>(null);
   const rootRef = useRef<HTMLElement>(null);
+  /** 片 g：整份字幕那个列表（能滚的那一层）和它最后停在哪儿 —— 切去三行再切回来时要还原 */
+  const listBoxRef = useRef<HTMLDivElement>(null);
+  const listScrollRef = useRef(0);
+  /** 片 g：视频下面那三行的外框（固定高、自己不出滚动条）和里面那一层（量它长没长高） */
+  const threeRef = useRef<HTMLDivElement>(null);
+  const threeInnerRef = useRef<HTMLDivElement>(null);
+  const gearBtnRef = useRef<HTMLButtonElement>(null);
   const sliderRef = useRef<HTMLInputElement | null>(null);
   const labelRef = useRef<HTMLSpanElement>(null);
   const sizeRef = useRef(SIZE_DEFAULT);
@@ -397,9 +496,94 @@ export function CaptionLayer({
     const timer = window.setInterval(() => {
       const next = activeSegmentIndex(segments, getCurrentTime());
       setActive((prev) => (prev === next ? prev : next));
+      // 片 g：三行那边**正在选词就先别往下走**（`data-picking` 是 SelectableLine 挂的）。
+      // 收下 / 取消 / 收起解释之后，下一轮就追上当前那句
+      if (!threeRef.current?.querySelector("[data-picking]")) {
+        setAnchor((prev) => (prev === next ? prev : next));
+      }
     }, 250);
     return () => window.clearInterval(timer);
   }, [on, segments, getCurrentTime]);
+
+  /**
+   * 片 g：从「字幕在视频下面」切回「专注字幕」—— 字幕列表藏着（`display:none`）的那段时间里，
+   * 浏览器把它的 `scrollTop` 清成了 0。**跟随中**就把当前那一句摆回中间；没跟随就回到他上次停的地方。
+   *
+   * 订的是仓库的「变了」这一下，不是它的值：这一栏不为切布局重画一次（切换本身只是 grid 上一个属性，见 watch-layout.ts）。
+   * watch-stage 先写属性再改仓库，所以这里读位置的时候列表已经显示出来了。
+   */
+  const followRef = useRef(follow);
+  useEffect(() => {
+    followRef.current = follow;
+  }, [follow]);
+  useEffect(() => {
+    if (!layoutStore) return;
+    let last = layoutStore.get();
+    return layoutStore.subscribe(() => {
+      const now = layoutStore.get();
+      const from = last;
+      last = now;
+      if (now !== "focus" || from === "focus") return;
+      const box = listBoxRef.current;
+      if (!box) return;
+      const line = activeRef.current;
+      if (followRef.current && line) {
+        // 只改这一个框自己的 scrollTop —— `scrollIntoView` 会连带去滚外面那几层
+        const b = box.getBoundingClientRect();
+        const r = line.getBoundingClientRect();
+        box.scrollTop += r.top - b.top - Math.max(0, (box.clientHeight - r.height) / 2);
+      } else {
+        box.scrollTop = listScrollRef.current;
+      }
+    });
+  }, [layoutStore]);
+
+  /**
+   * 片 g：三行里一选词，那一行下面会长出「收下 / 取消」（或者解释）—— 外框是**固定高**的
+   * （它的高度算在视频的高度上限里，一变视频就跟着缩放，所以不许变），长出来的那截要**框里自己滚过去**给他看；
+   * 选完了再滚回顶上。外框不出滚动条（`overflow: hidden` 也能程序化地滚）。
+   */
+  useEffect(() => {
+    const box = threeRef.current;
+    const inner = threeInnerRef.current;
+    if (!box || !inner) return;
+    const ro = new ResizeObserver(() => {
+      const act = box.querySelector<HTMLElement>("[data-pick-actions]");
+      if (!act) {
+        box.scrollTop = 0;
+        return;
+      }
+      const b = box.getBoundingClientRect();
+      const r = act.getBoundingClientRect();
+      if (r.bottom > b.bottom) box.scrollTop += r.bottom - b.bottom + 4;
+      else if (r.top < b.top) box.scrollTop -= b.top - r.top + 4;
+    });
+    ro.observe(inner);
+    return () => ro.disconnect();
+  }, [on, segments.length]);
+
+  /** 齿轮面板：点到外面 / 按 Esc 就收起（Esc 顺手把焦点还给齿轮，键盘用户不至于迷路） */
+  useEffect(() => {
+    if (!gearOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const el = e.target as Node | null;
+      if (!el) return;
+      if (gearBtnRef.current?.contains(el)) return;
+      if ((el as Element).closest?.("[data-caption-settings]")) return;
+      setGearOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setGearOpen(false);
+      gearBtnRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [gearOpen]);
 
   useEffect(() => {
     if (!follow || active < 0) return;
@@ -560,6 +744,235 @@ export function CaptionLayer({
     </button>
   );
 
+  /**
+   * 片 g：字幕的三行设置（AI 标词 / 字号 / 译文）。**同一份 JSX，只会挂在一个地方**：
+   * 窄屏摆在字幕栏里原来的位置（一个像素不动）；宽屏收进齿轮浮层（`CaptionSettingsPop`）。
+   * 字号滑杆靠 `attachSlider` 这个 ref 回调接上，挂在哪儿都一样（它本来就是为「滑杆晚挂上」写的）。
+   */
+  const settingsRows = (
+    <>
+      {/* D45 —— AI 自动标词的开关（创始人 2026-08-02 指名放在「字幕」这儿，
+          并且要做成拨动开关的样子）。**默认关**：手动选词才是主路径，
+          一个降级成"顺带提示"的功能不该在背后自己花钱。
+          开 = 当场就把这一片扫了。关 = 只是不再自动跑，**已经标出来的不删**。 */}
+      {onToggleAutoScan && (
+        <div className="mt-2 flex items-center gap-2.5 px-1">
+          <Toggle
+            id="autoscan-toggle"
+            on={autoScan}
+            onChange={onToggleAutoScan}
+            label={autoScan ? t("cap.scanOff") : t("cap.scanOn")}
+          />
+          <label htmlFor="autoscan-toggle" className="min-w-0 text-[0.68rem] leading-4">
+            <span className="text-ink-300">{t("cap.scanLabel")}</span>
+            <span className="ml-1.5 text-ink-500">
+              {scanning
+                ? t("cap.scanRunning")
+                : autoScan
+                  ? t("cap.scanIsOn")
+                  : t("cap.scanIsOff")}
+            </span>
+          </label>
+        </div>
+      )}
+
+      <div className="mt-2 flex items-center gap-3 px-1">
+        <span className="text-[0.68rem] text-ink-500">{t("cap.size")}</span>
+        <input
+          ref={attachSlider}
+          type="range"
+          min={SIZE_MIN}
+          max={SIZE_MAX}
+          step={1}
+          defaultValue={SIZE_DEFAULT}
+          aria-label={t("cap.sizeAria")}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            applySize(next);
+            try {
+              localStorage.setItem(SIZE_KEY, String(next));
+            } catch {
+              // 存不进不致命，下次回默认字号
+            }
+          }}
+          className="h-6 flex-1 cursor-pointer appearance-none bg-transparent [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-ink-700 [&::-webkit-slider-thumb]:mt-[-0.4rem] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-400 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-teal-400 [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-ink-700"
+        />
+        <span ref={labelRef} className="ui-mono text-[0.68rem] text-ink-500">
+          {SIZE_DEFAULT}px
+        </span>
+      </div>
+
+      {/* M2.9 双语字幕：选语言（默认关闭）+ flip 对调大小 + 只当前行 + 进度 */}
+      <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-[0.68rem]">
+        <span className="text-ink-500">{t("cap.translation")}</span>
+        <select
+          value={lang}
+          onChange={(e) => pickLang(e.target.value)}
+          aria-label={t("cap.translationAria")}
+          // `lg:max-w-40`（2026-09-13）：宽屏上这一行原来刚好一行放下，加了 ↻ 就折成两行、字幕少 40px。
+          // 选择器按最长的那个选项撑到 245px，而选中后显示的只是「简体中文」这种短名 —— 收到 160px 这一行就又放得下了。
+          // 手机不设：那边这一行本来就折成两行，↻ 落在第二行里，一个像素不动（375×812 逐数量过）
+          className="h-8 rounded-lg border border-ink-700 bg-ink-900 px-2 text-ink-100 outline-none focus:border-teal-400 lg:max-w-40"
+        >
+          <option value="">{t("cap.translationOff")}</option>
+          {TARGET_LANGS.map((l) => (
+            <option key={l.code} value={l.code}>
+              {l.label}
+              {isOriginalLang(l.code) ? t("cap.sameLangSuffix") : ""}
+            </option>
+          ))}
+        </select>
+        {lang && (
+          <>
+            <button
+              type="button"
+              onClick={toggleFlip}
+              aria-label={t("cap.flipAria")}
+              className="h-8 rounded-lg px-2 text-ink-300 hover:text-teal-300"
+            >
+              {flip ? t("cap.flipToTr") : t("cap.flipToOrig")}
+            </button>
+            <button
+              type="button"
+              onClick={toggleOnlyCurrent}
+              aria-pressed={trOnlyCurrent}
+              className={`h-8 rounded-lg px-2 transition-colors ${
+                trOnlyCurrent ? "text-teal-300" : "text-ink-500 hover:text-ink-300"
+              }`}
+            >
+              {trOnlyCurrent ? t("cap.trOnlyCurrent") : t("cap.trEveryLine")}
+            </button>
+            {trRunning ? (
+              // 宽屏上这一行在齿轮里 —— 进度改由字幕栏头上那一句说（面板收着也看得见），这里不重复
+              <span className="ui-mono text-teal-300/80 lg:hidden">
+                {t("cap.translating", trPercent != null ? ` ${trPercent}%` : "…")}
+              </span>
+            ) : (
+              // 2026-09-13 创始人：「怎么翻译没了？……应该加上重新加载翻译按钮」。
+              // 那一回的根因在服务端（缓存里只存了前两分钟，见 /api/translate「缓存优先」那段），已修；
+              // 这颗是给**任何**一种没翻全 / 没翻成的情况留的人工重来（D44：花钱只由人点，代码自己不重试）。
+              // 翻译进行中不出现 —— 那时这个位置是进度，手机上这一行也就不会因为它多折一行
+              <button
+                type="button"
+                onClick={() => setTrReload((n) => n + 1)}
+                // 宽屏只露 ↻（字收进 sr-only：读屏照念，悬停有 title）—— 那一行再多几个字就折成两行、字幕少 40px（1512 宽量的）。
+                // 手机上字照常显示：那边这一行本来就是两行，它落在第二行里
+                title={t("cap.trReload")}
+                className="flex h-8 items-center gap-1 rounded-lg px-2 text-ink-500 transition-colors hover:text-teal-300"
+              >
+                <svg viewBox="0 0 12 12" className="h-3 w-3 shrink-0" aria-hidden focusable="false">
+                  <path
+                    d="M10 6a4 4 0 1 1-1.2-2.85M10 1.6v2.6H7.4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <span className="lg:sr-only">{t("cap.trReload")}</span>
+              </button>
+            )}
+          </>
+        )}
+        {/* 原来写的是调色板外的 ink「400」档 —— Tailwind 静默丢掉、字退回继承色（M3.15 日志 🐞 那一条）。
+            注释里别写那个类名的原样：日志里那条 grep 守门会把注释也当成一处错色 */}
+        {/* 宽屏上这句挪到了字幕栏头底下（面板收着也看得见，D44），这里 `lg:hidden` 免得面板打开时说两遍 */}
+        {trNote && !trRunning && <span className="text-ink-300 lg:hidden">{trNote}</span>}
+      </div>
+    </>
+  );
+
+  /**
+   * 片 g：「字幕在视频下面」那三行里的一行（`role`：cur = 正在说的那句，亮；dim = 上一句 / 下一句，灰）。
+   *
+   * 和下面整份列表里那一行**长得像、但不是同一段代码**：列表那一行一个字不动（「专注字幕」必须和今天逐像素一样），
+   * 这里另写一份，只多三样东西 ——
+   * ① **行数夹住**：YouTube 那一档外框是固定高（它的高度算在视频的高度上限里，一变视频就跟着缩放），
+   *    所以正在说的那句最多两行、另外两句各一行（生产库 10140 句 YouTube 字幕：中位 40 字、九成 ≤118 字 —— 两行装得下九成以上）。
+   *    **只夹字，不夹整块**（`textClassName`）：夹整块会把「收下 / 取消」那排按钮一起剪掉。
+   *    播客那一档不固定高（左边没有视频要让），正在说的那句整句都给。
+   * ② 行高 1.5 而不是列表的 1.85：1.85 是给手指点词留的（M3.10），这三行只在宽屏出现，鼠标点得准。
+   * ③ 字号走外框上的 `--wl-big` / `--wl-small`，固定高那个算式（globals.css）吃的是同一对数。
+   */
+  const threeRow = (i: number, role: "cur" | "dim") => {
+    const cur = role === "cur";
+    const seg = segments[i];
+    if (!seg) {
+      // 片头之前 / 片尾之后：占着位置的空行，外框高度不跟着变
+      return <div key={`pad-${role}-${i}`} className={cur ? "wl-row-cur" : "wl-row-dim"} aria-hidden />;
+    }
+    const translation = showTranslation ? tr.get(i) : undefined;
+    const rowShowsTr = !!translation && (!trOnlyCurrent || cur);
+    const phrase = highlights?.get(i);
+    const saved = !!phrase && !!savedTerms?.has(phrase.text);
+    const bigClamp = cur ? (youtube ? "line-clamp-2" : "") : youtube ? "line-clamp-1" : "line-clamp-2";
+    const smallClamp = cur && !youtube ? "" : "line-clamp-1";
+    const big = { fontSize: "var(--wl-big)", lineHeight: 1.5 };
+    const small = { fontSize: "var(--wl-small)", lineHeight: 1.4 };
+    const swapped = flip && rowShowsTr;
+    const original = (
+      <SelectableLine
+        text={seg.text}
+        i={i}
+        t={seg.start}
+        contentLang={contentLang}
+        phrase={phrase}
+        savedSpans={savedSpansByLine.get(i)}
+        onToggleTerm={onToggleTerm}
+        glosses={glosses}
+        onRetryGloss={onRetryGloss}
+        onLookup={onLookup}
+        onLookupLeave={onLookupLeave}
+        textClassName={swapped ? smallClamp : bigClamp}
+        className={swapped ? "opacity-65" : undefined}
+        style={swapped ? small : big}
+      />
+    );
+    const translated = rowShowsTr ? (
+      <span className={`block ${swapped ? bigClamp : `opacity-65 ${smallClamp}`}`} style={swapped ? big : small}>
+        {translation}
+      </span>
+    ) : null;
+    return (
+      // `flex-col justify-center`：行高是按「最多两行」留的，只有一行字时别让字贴着顶、底下空一大截
+      <div key={`${seg.start}-${i}`} className={`relative flex flex-col justify-center ${cur ? "wl-row-cur" : "wl-row-dim"}`}>
+        {/* 整行点一下 = 跳到这一句（和列表同一个手感）。上一句点一下就是「刚才那句再听一遍」 */}
+        <button
+          type="button"
+          onClick={() => onSeek(seg.start)}
+          aria-label={t("cap.jumpAria", mmss(seg.start))}
+          className={`absolute inset-0 rounded-xl transition-colors ${cur ? "bg-ink-700/60" : "hover:bg-ink-700/30"}`}
+        />
+        <div
+          className={`pointer-events-none relative flex gap-3 rounded-xl px-2 py-1 text-left ${
+            cur ? "text-ink-100" : "text-ink-500"
+          }`}
+        >
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSeek(seg.start);
+            }}
+            aria-label={t("cap.jumpAria", mmss(seg.start))}
+            className="ui-mono pointer-events-auto relative z-10 -mt-0.5 shrink-0 self-start rounded-lg px-1 py-1 text-[0.68rem] text-ink-500 transition-colors hover:bg-ink-900 hover:text-teal-300"
+          >
+            {mmss(seg.start)}
+          </button>
+          <div className="min-w-0 flex-1">
+            {swapped ? translated : original}
+            {swapped ? original : translated}
+          </div>
+          {/* 负边距：✓ 那颗 28px 高，比一行字高 —— 别让它把灰的那两行撑高、把固定高的外框撑出滚动 */}
+          <div className="-my-1 shrink-0 self-start">
+            <PhraseCheck phrase={phrase} saved={saved} onToggle={onToggleTerm} />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <section
       ref={rootRef}
@@ -582,11 +995,24 @@ export function CaptionLayer({
                 {t("cap.generating", percent != null ? ` ${percent}%` : "…")}
               </span>
             )}
+            {/* 片 g：宽屏上「AI 标词」「译文」收进了齿轮 —— **正在扫 / 正在翻的进度得露在外面**，
+                不然点完开关、面板一收，就像什么都没发生（D44）。窄屏那两行还摆在原地，这两句不出现 */}
+            {on && scanning && (
+              <span className="mr-1 hidden text-[0.62rem] text-teal-300/80 lg:inline">{t("cap.scanRunning")}</span>
+            )}
+            {on && trRunning && (
+              <span className="ui-mono mr-1 hidden text-[0.62rem] text-teal-300/80 lg:inline">
+                {t("cap.translating", trPercent != null ? ` ${trPercent}%` : "…")}
+              </span>
+            )}
+            {/* 片 g（D67）：布局选择器 —— 只在宽屏观看页出现（组件自己 `hidden lg:flex`） */}
+            {layoutStore && onLayout && <LayoutPicker store={layoutStore} onPick={onLayout} />}
+            {/* `wl-list-only`：三行那种排法里没有「跟随」这回事（永远是当前那句在中间），那时藏起来（globals.css） */}
             <button
               type="button"
               onClick={() => setFollow((v) => !v)}
               aria-pressed={follow}
-              className={`h-8 rounded-lg px-2 text-[0.68rem] transition-colors ${
+              className={`wl-list-only h-8 rounded-lg px-2 text-[0.68rem] transition-colors ${
                 follow ? "text-teal-300" : "text-ink-500 hover:text-ink-300"
               }`}
             >
@@ -600,9 +1026,48 @@ export function CaptionLayer({
             >
               {on ? t("cap.hide") : t("cap.show")}
             </button>
+            {/* 片 g：计划 §D 那笔债 —— 「AI 标词 / 字号 / 译文」是设好就不再动的东西，**宽屏上收进这颗齿轮**，
+                省出来的高度全给字幕。窄屏没有这颗（那边的几行原样摆着，改窄屏要单独立项） */}
+            {on && (
+              <button
+                ref={gearBtnRef}
+                type="button"
+                onClick={() => setGearOpen((v) => !v)}
+                aria-expanded={gearOpen}
+                aria-haspopup="dialog"
+                aria-label={t("cap.settings")}
+                title={t("cap.settings")}
+                className={`hidden h-8 w-8 items-center justify-center rounded-lg transition-colors lg:flex ${
+                  gearOpen ? "bg-ink-700 text-teal-300" : "text-ink-500 hover:text-teal-300"
+                }`}
+              >
+                {/* 和页头那颗「设置」同一个画法（settings-link.tsx）：齿压进环里，读起来才是齿轮不是太阳 */}
+                <svg viewBox="0 0 24 24" className="h-[15px] w-[15px]" aria-hidden focusable="false">
+                  {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+                    <rect
+                      key={deg}
+                      x="10.85"
+                      y="1.9"
+                      width="2.3"
+                      height="5.2"
+                      rx="0.8"
+                      fill="currentColor"
+                      transform={`rotate(${deg} 12 12)`}
+                    />
+                  ))}
+                  <circle cx="12" cy="12" r="5.1" fill="none" stroke="currentColor" strokeWidth="2.2" />
+                  <circle cx="12" cy="12" r="2.9" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                </svg>
+              </button>
+            )}
           </div>
         )}
       </div>
+      {/* 片 g：译文没翻全 / 没翻成那句话 —— 宽屏上它原来那一行收进了齿轮，**失败必须露在外面**（D44），所以在这儿再说一遍。
+          窄屏不出现（那边它还在原来那一行里） */}
+      {hasCaptions && on && trNote && !trRunning && (
+        <p className="mt-1 hidden px-1 text-[0.68rem] leading-4 text-ink-300 lg:block">{trNote}</p>
+      )}
 
       {!hasCaptions ? (
         pasting ? (
@@ -700,145 +1165,30 @@ export function CaptionLayer({
         )
       ) : !on ? null : (
         <>
-          {/* D45 —— AI 自动标词的开关（创始人 2026-08-02 指名放在「字幕」这儿，
-              并且要做成拨动开关的样子）。**默认关**：手动选词才是主路径，
-              一个降级成"顺带提示"的功能不该在背后自己花钱。
-              开 = 当场就把这一片扫了。关 = 只是不再自动跑，**已经标出来的不删**。 */}
-          {onToggleAutoScan && (
-            <div className="mt-2 flex items-center gap-2.5 px-1">
-              <Toggle
-                id="autoscan-toggle"
-                on={autoScan}
-                onChange={onToggleAutoScan}
-                label={autoScan ? t("cap.scanOff") : t("cap.scanOn")}
-              />
-              <label htmlFor="autoscan-toggle" className="min-w-0 text-[0.68rem] leading-4">
-                <span className="text-ink-300">{t("cap.scanLabel")}</span>
-                <span className="ml-1.5 text-ink-500">
-                  {scanning
-                    ? t("cap.scanRunning")
-                    : autoScan
-                      ? t("cap.scanIsOn")
-                      : t("cap.scanIsOff")}
-                </span>
-              </label>
-            </div>
-          )}
-
-          <div className="mt-2 flex items-center gap-3 px-1">
-            <span className="text-[0.68rem] text-ink-500">{t("cap.size")}</span>
-            <input
-              ref={attachSlider}
-              type="range"
-              min={SIZE_MIN}
-              max={SIZE_MAX}
-              step={1}
-              defaultValue={SIZE_DEFAULT}
-              aria-label={t("cap.sizeAria")}
-              onChange={(e) => {
-                const next = Number(e.target.value);
-                applySize(next);
-                try {
-                  localStorage.setItem(SIZE_KEY, String(next));
-                } catch {
-                  // 存不进不致命，下次回默认字号
-                }
-              }}
-              className="h-6 flex-1 cursor-pointer appearance-none bg-transparent [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-ink-700 [&::-webkit-slider-thumb]:mt-[-0.4rem] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-400 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-teal-400 [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-ink-700"
-            />
-            <span ref={labelRef} className="ui-mono text-[0.68rem] text-ink-500">
-              {SIZE_DEFAULT}px
-            </span>
-          </div>
-
-          {/* M2.9 双语字幕：选语言（默认关闭）+ flip 对调大小 + 只当前行 + 进度 */}
-          <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-[0.68rem]">
-            <span className="text-ink-500">{t("cap.translation")}</span>
-            <select
-              value={lang}
-              onChange={(e) => pickLang(e.target.value)}
-              aria-label={t("cap.translationAria")}
-              // `lg:max-w-40`（2026-09-13）：宽屏上这一行原来刚好一行放下，加了 ↻ 就折成两行、字幕少 40px。
-              // 选择器按最长的那个选项撑到 245px，而选中后显示的只是「简体中文」这种短名 —— 收到 160px 这一行就又放得下了。
-              // 手机不设：那边这一行本来就折成两行，↻ 落在第二行里，一个像素不动（375×812 逐数量过）
-              className="h-8 rounded-lg border border-ink-700 bg-ink-900 px-2 text-ink-100 outline-none focus:border-teal-400 lg:max-w-40"
-            >
-              <option value="">{t("cap.translationOff")}</option>
-              {TARGET_LANGS.map((l) => (
-                <option key={l.code} value={l.code}>
-                  {l.label}
-                  {isOriginalLang(l.code) ? t("cap.sameLangSuffix") : ""}
-                </option>
-              ))}
-            </select>
-            {lang && (
-              <>
-                <button
-                  type="button"
-                  onClick={toggleFlip}
-                  aria-label={t("cap.flipAria")}
-                  className="h-8 rounded-lg px-2 text-ink-300 hover:text-teal-300"
-                >
-                  {flip ? t("cap.flipToTr") : t("cap.flipToOrig")}
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleOnlyCurrent}
-                  aria-pressed={trOnlyCurrent}
-                  className={`h-8 rounded-lg px-2 transition-colors ${
-                    trOnlyCurrent ? "text-teal-300" : "text-ink-500 hover:text-ink-300"
-                  }`}
-                >
-                  {trOnlyCurrent ? t("cap.trOnlyCurrent") : t("cap.trEveryLine")}
-                </button>
-                {trRunning ? (
-                  <span className="ui-mono text-teal-300/80">
-                    {t("cap.translating", trPercent != null ? ` ${trPercent}%` : "…")}
-                  </span>
-                ) : (
-                  // 2026-09-13 创始人：「怎么翻译没了？……应该加上重新加载翻译按钮」。
-                  // 那一回的根因在服务端（缓存里只存了前两分钟，见 /api/translate「缓存优先」那段），已修；
-                  // 这颗是给**任何**一种没翻全 / 没翻成的情况留的人工重来（D44：花钱只由人点，代码自己不重试）。
-                  // 翻译进行中不出现 —— 那时这个位置是进度，手机上这一行也就不会因为它多折一行
-                  <button
-                    type="button"
-                    onClick={() => setTrReload((n) => n + 1)}
-                    // 宽屏只露 ↻（字收进 sr-only：读屏照念，悬停有 title）—— 那一行再多几个字就折成两行、字幕少 40px（1512 宽量的）。
-                    // 手机上字照常显示：那边这一行本来就是两行，它落在第二行里
-                    title={t("cap.trReload")}
-                    className="flex h-8 items-center gap-1 rounded-lg px-2 text-ink-500 transition-colors hover:text-teal-300"
-                  >
-                    <svg viewBox="0 0 12 12" className="h-3 w-3 shrink-0" aria-hidden focusable="false">
-                      <path
-                        d="M10 6a4 4 0 1 1-1.2-2.85M10 1.6v2.6H7.4"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.3"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                    <span className="lg:sr-only">{t("cap.trReload")}</span>
-                  </button>
-                )}
-              </>
-            )}
-            {/* 原来写的是调色板外的 ink「400」档 —— Tailwind 静默丢掉、字退回继承色（M3.15 日志 🐞 那一条）。
-                注释里别写那个类名的原样：日志里那条 grep 守门会把注释也当成一处错色 */}
-            {trNote && !trRunning && <span className="text-ink-300">{trNote}</span>}
-          </div>
+          {/* 片 g：「AI 标词 / 字号 / 译文」那三行 —— **窄屏原样摆在这儿**（改窄屏要单独立项，一个像素不许动）；
+              宽屏收进字幕栏头上的齿轮（下面那个浮层），这一份不挂载。
+              `lg:hidden` 是给水合前那一帧的：服务端不知道窗口多宽，先当窄屏渲染 —— 宽屏上它得一开始就是藏着的，不然会闪一下 */}
+          {!isWide && <div className="lg:hidden">{settingsRows}</div>}
 
           {/* M3.10 / D45：字幕列表是划词的**第二个入口** —— D39 把暂停面板收成细条，
               为的就是往回翻着划。手势不说出口就等于没做（创始人上一轮真机反馈的原话是
               「我好像没看到重新扫描在哪里」），所以这行小字必须在 */}
+          {/* `wl-list-only`（片 g）：只在「整份字幕列表」那种排法里出现；三行那种排法寸土寸金，藏起来（globals.css） */}
           {onToggleTerm && (
-            <p className="mt-2 text-[0.68rem] leading-4 text-ink-500">
+            <p className="wl-list-only mt-2 text-[0.68rem] leading-4 text-ink-500">
               {t("cap.pickHint")}
             </p>
           )}
           {/* `lg:` 那三个类：宽屏下这个框自己长满剩下的高度（`min-h-0` 不写它就不肯
-              缩到内容以下，`overflow-y-auto` 会失效）。窄屏仍是 `max-h-64` 的小窗。 */}
-          <div className="mt-2 max-h-64 overflow-y-auto rounded-2xl border border-ink-700 p-2 lg:max-h-none lg:min-h-0 lg:flex-1">
+              缩到内容以下，`overflow-y-auto` 会失效）。窄屏仍是 `max-h-64` 的小窗。
+              片 g：一路记着滚到哪儿（切去三行再切回来要还原 —— 藏着的时候浏览器会把它清零） */}
+          <div
+            ref={listBoxRef}
+            onScroll={(e) => {
+              listScrollRef.current = e.currentTarget.scrollTop;
+            }}
+            className="wl-list-only mt-2 max-h-64 overflow-y-auto rounded-2xl border border-ink-700 p-2 lg:max-h-none lg:min-h-0 lg:flex-1"
+          >
             <ul className="caption-copy flex flex-col">
               {segments.map((seg, i) => {
                 const isActive = i === active;
@@ -943,6 +1293,27 @@ export function CaptionLayer({
             </ul>
           </div>
 
+          {/* ── 片 g：「沉浸 · 窄」—— 视频下面的三行（上一句 / 正在说 / 下一句）──
+              **一直渲染着**，显不显示由 grid 上的 `data-layout` 决定（globals.css 的 `.wl-three`）：
+              切布局这一栏一次都不重画、列表和三行吃的是同一份字幕 + 同一份译文（`tr`），换了排法不会重新去翻（不花钱）。
+              `wl-three-fixed`：YouTube 那一档外框固定高（算式在 globals.css），播客那一档不固定 */}
+          <div
+            ref={threeRef}
+            className={`wl-three mt-2 rounded-2xl border border-ink-700 p-1 ${youtube ? "wl-three-fixed" : ""}`}
+            style={
+              {
+                "--wl-big": showTranslation ? "calc(var(--caption-size) * 0.87)" : "var(--caption-size)",
+                "--wl-small": "calc(var(--caption-size) * 0.61)",
+                "--wl-tr": showTranslation ? 1 : 0,
+              } as CSSProperties
+            }
+          >
+            <div ref={threeInnerRef}>
+              {threeRow(anchor - 1, "dim")}
+              {threeRow(anchor, "cur")}
+              {threeRow(anchor + 1, "dim")}
+            </div>
+          </div>
         </>
       )}
 
@@ -963,6 +1334,15 @@ export function CaptionLayer({
             {generation.error ? t("cap.retry") : t("cap.resume")}
           </button>
         </div>
+      )}
+
+      {/* 片 g：齿轮浮层。**裹在调用处**（D49：`<main class="page-enter">` 上的 transform 会让 fixed 改从 main 算起） */}
+      {isWide && gearOpen && hasCaptions && on && (
+        <ViewportLayer>
+          <CaptionSettingsPop anchorRef={gearBtnRef} label={t("cap.settings")} onClose={() => setGearOpen(false)}>
+            {settingsRows}
+          </CaptionSettingsPop>
+        </ViewportLayer>
       )}
     </section>
   );

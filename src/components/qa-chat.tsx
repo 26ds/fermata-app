@@ -630,6 +630,21 @@ export function QaChat({
     wasHiddenRef.current = hidden;
   }, [hidden]);
 
+  /**
+   * 片 g：这一栏**自己变高变矮**时（换布局 ——「沉浸 · 窄」里它一路竖到屏幕底；或者输入框多长了一行），
+   * 本来停在最底下的就继续贴着底。上面那个「跟到最新」只在有新内容时跑，光是框变了它不知道 ——
+   * 从高切回矮，最新那一轮就会掉到框外面去。藏着的时候（切到别的 tab）高度是 0，不碰它
+   */
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      if (el.clientHeight > 0 && atBottomRef.current) el.scrollTop = el.scrollHeight;
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;

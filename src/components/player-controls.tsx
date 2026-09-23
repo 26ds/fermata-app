@@ -157,8 +157,13 @@ export function PlayerControls({
           {t("play.stepChip", step)}
         </button>
 
+        {/* `lg:truncate`（M3.15 片 g）：宽屏上这句只占一行，放不下就省略、悬停看全文。
+            不然视频那一栏一窄（「沉浸 · 窄」里视频要给下面三行字幕让位），它就竖着折成六七行、把卡片撑高，
+            卡片一高视频又得再让 —— 1280×720 英文界面上一路让到 278px 的底（lab 页量到的）。窄屏不动 */}
         {!canSeek && (
-          <span className="min-w-0 text-[0.68rem] leading-4 text-ink-500">{t("play.notStarted")}</span>
+          <span title={t("play.notStarted")} className="min-w-0 text-[0.68rem] leading-4 text-ink-500 lg:truncate">
+            {t("play.notStarted")}
+          </span>
         )}
 
         {/* 右端：折叠开关（宽屏才有，它自己带 `hidden lg:inline-flex`）。

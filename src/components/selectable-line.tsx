@@ -67,6 +67,11 @@ export interface SelectableLineProps {
   canSelect?: boolean;
   className?: string;
   style?: React.CSSProperties;
+  /**
+   * M3.15 片 g：只加在**那一行字**上的类（不加在整块上）。「字幕在视频下面」那三行要 `line-clamp`，
+   * 而夹行数只能夹字 —— 夹整块会把下面「收下 / 取消」那排按钮和解释一起剪掉，划词就断了
+   */
+  textClassName?: string;
 }
 
 export function SelectableLine({
@@ -84,6 +89,7 @@ export function SelectableLine({
   canSelect = true,
   className,
   style,
+  textClassName,
 }: SelectableLineProps) {
   // ⚠️ 这个文件里翻译函数叫 `tr` 不叫 `t` —— `t` 已经被 props 里"这一行从第几秒开始"占了
   const tr = useCopy();
@@ -190,10 +196,12 @@ export function SelectableLine({
   const pickedSaved = picked ? savedSpans.some((s) => s.term === picked.text) : false;
 
   return (
-    <div className={className} style={style}>
+    // `data-picking`（片 g）：这一行正在选词 / 正挂着刚收下那个词的解释。
+    // 「字幕在视频下面」那三行靠它**停住不往下走** —— 不停的话，视频一播，他选到一半的那一行就被换掉了
+    <div className={className} style={style} data-picking={sel !== null || answer ? "" : undefined}>
       {/* whitespace-pre-wrap：每一块都是独立的 inline 元素，不这么写行首行尾的空格会被吃掉，
           "hang in there" 就会显示成 "hangin there" */}
-      <span className="whitespace-pre-wrap break-words">
+      <span className={`whitespace-pre-wrap break-words ${textClassName ?? ""}`}>
         {blocks.map((b, k) => {
           const inSel = sel !== null && k >= lo && k <= hi;
           const saved = spanAt(savedSpans, b.start, b.end);
@@ -330,7 +338,7 @@ export function SelectableLine({
       {/* D18：就地长出来的那一条。**先出现、再让他改**——第一次点完就能收，
           不必非要点满两下（"点同一个词 = 只要这一个"在这里自然成立） */}
       {picked && onToggleTerm && (
-        <div className="pointer-events-auto relative z-10 mt-1.5 flex items-center gap-1.5">
+        <div data-pick-actions="" className="pointer-events-auto relative z-10 mt-1.5 flex items-center gap-1.5">
           <button
             type="button"
             onClick={(e) => {
@@ -367,7 +375,7 @@ export function SelectableLine({
           三种状态各说各的（D44）：在查 / 查到了 / 没查到 + 一个人点的重试。
           空着不说话是这次真机反馈的原病根 —— 他连"我在查"都看不到 */}
       {answer && glosses?.get(answer) && (
-        <div className="pointer-events-auto relative z-10 mt-1.5 rounded-xl border border-teal-400/40 bg-ink-900/70 px-2.5 py-1.5">
+        <div data-pick-actions="" className="pointer-events-auto relative z-10 mt-1.5 rounded-xl border border-teal-400/40 bg-ink-900/70 px-2.5 py-1.5">
           <p className="flex items-start gap-1.5 text-[0.72rem] leading-5">
             <span className="shrink-0 text-teal-300">✓</span>
             <span className="min-w-0 flex-1 text-ink-100">

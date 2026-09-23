@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_LANG_PREFS, readLangPrefs, type LangPrefs } from "@/lib/lang";
 import { DEFAULT_PLAY_PREFS, readAutoScan, readPlayPrefs, type PlayPrefs } from "@/lib/play-prefs";
+import { DEFAULT_WATCH_LAYOUT, readWatchLayout, type WatchLayout } from "@/lib/watch-layout";
 
 // M3.7 —— 服务端读用户设置（`user_settings.settings`，迁移 0006 的表，**零新迁移**）。
 //
@@ -48,7 +49,7 @@ export async function getLangPrefs(
 export async function getWatchPrefs(
   supabase: SupabaseClient,
   userId: string,
-): Promise<{ lang: LangPrefs; play: PlayPrefs; autoScan: boolean; atHintSeen: boolean }> {
+): Promise<{ lang: LangPrefs; play: PlayPrefs; autoScan: boolean; atHintSeen: boolean; layout: WatchLayout }> {
   try {
     const settings = await getSettings(supabase, userId);
     return {
@@ -58,9 +59,11 @@ export async function getWatchPrefs(
       // M3.15 片 d（D69）：`@` 那张单子自动弹过一次了吗。**这一条和上面那个默认方向相反**：
       // 自动扫描默认关（怕花钱），这一句默认"没弹过"（它不花钱，而创始人点名要「让用户知道这个功能」）
       atHintSeen: settings.atHintSeen === true,
+      // M3.15 片 g（D67）：宽屏选的是哪种布局。跟人走（换设备还在），同一次查询取齐 —— 首屏就按它排，不先闪一下默认那种
+      layout: readWatchLayout(settings),
     };
   } catch {
     // 取不到设置就当自动扫描是关的 —— **默认必须偏向"不花钱"**（D45）
-    return { lang: DEFAULT_LANG_PREFS, play: DEFAULT_PLAY_PREFS, autoScan: false, atHintSeen: false };
+    return { lang: DEFAULT_LANG_PREFS, play: DEFAULT_PLAY_PREFS, autoScan: false, atHintSeen: false, layout: DEFAULT_WATCH_LAYOUT };
   }
 }
