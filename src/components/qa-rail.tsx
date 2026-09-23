@@ -85,6 +85,8 @@ export function QaRail({
   sourceKind,
   eventsCapped,
   eventsLoadFailed,
+  atHintSeen,
+  onAtHintSeen,
   chat,
 }: {
   /**
@@ -108,6 +110,9 @@ export function QaRail({
   sourceKind: SourceKind;
   eventsCapped: boolean;
   eventsLoadFailed: boolean;
+  /** 片 d：`@` 那张单子自动弹过一次了吗（`user_settings.atHintSeen`，**零新迁移**）。壳不用它，原样往下递 */
+  atHintSeen: boolean;
+  onAtHintSeen: () => void;
   /** 问答那一栏要的其余东西。壳不认识它们，原样往下递 */
   chat: Omit<
     ChatProps,
@@ -125,6 +130,8 @@ export function QaRail({
     | "captureError"
     | "canLook"
     | "durationS"
+    | "atHintSeen"
+    | "onAtHintSeen"
   >;
 }) {
   const t = useCopy();
@@ -290,6 +297,8 @@ export function QaRail({
         // M3.16（D75）：「看画面再答」只在 YouTube 上出现 —— 播客没有画面
         canLook={sourceKind === "youtube"}
         durationS={durationS}
+        atHintSeen={atHintSeen}
+        onAtHintSeen={onAtHintSeen}
       />
 
       {/* ② 互动记录：也**永远挂着**（各记各的滚动位置），但藏着的时候不订记录器、不每秒重画 */}

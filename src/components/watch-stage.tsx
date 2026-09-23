@@ -197,6 +197,7 @@ export function WatchStage({
   watchEvents = [],
   watchEventsTrouble = null,
   watchEventsCapped = false,
+  atHintSeen = false,
 }: {
   source: SourceRow;
   interrupts: PausePoint[];
@@ -222,6 +223,12 @@ export function WatchStage({
   watchEvents?: WatchEvent[];
   /** 首屏读互动记录失败了：`missing` = 表还不存在（迁移 0012 没跑）/ `failed` = 别的原因 */
   watchEventsTrouble?: "missing" | "failed" | null;
+  /**
+   * M3.15 片 d（D69）：`@` 那张单子**自动弹过一次了吗**（`user_settings.atHintSeen`，零新迁移）。
+   * 默认 `false` = 没弹过 —— 取不到设置时宁可多弹一次（那只是一行说明），
+   * 也好过一个点名要「让用户知道」的功能永远没人看见。
+   */
+  atHintSeen?: boolean;
   /** 记录太多、被截过 */
   watchEventsCapped?: boolean;
 }) {
@@ -347,6 +354,15 @@ export function WatchStage({
   /** 自动标词的开关（D45，默认关）。ref 给 openPanel 用 —— 那里读 state 会读到旧闭包 */
   const [autoScan, setAutoScan] = useState(autoScanInitial);
   const autoScanRef = useRef(autoScanInitial);
+  /**
+   * 片 d：`@` 那张单子自动弹过了吗。**乐观先记在本地**，再往库里写一笔 ——
+   * `putSettings` 失败不抛（记不住偏好不该拦着人看视频），最坏的结果是下次再弹一次。
+   */
+  const [atHintDone, setAtHintDone] = useState(atHintSeen);
+  const markAtHintSeen = useCallback(() => {
+    setAtHintDone(true);
+    void putSettings({ atHintSeen: true });
+  }, []);
   /** D42：内容不是他母语、又没问过 —— 有值时面板上弹那一句问询。答完即定 */
   const [needTargetLang, setNeedTargetLang] = useState("");
   /** 已收进词库的：词组原文 → atom id（取消勾选要用 id） */
@@ -2001,6 +2017,8 @@ export function WatchStage({
               sourceKind={source.kind}
               eventsCapped={watchEventsCapped}
               eventsLoadFailed={watchEventsTrouble === "failed"}
+              atHintSeen={atHintDone}
+              onAtHintSeen={markAtHintSeen}
               chat={{
                 pauseVideo: () => handleRef.current?.pause(),
                 createPoint: createPointForAsk,
