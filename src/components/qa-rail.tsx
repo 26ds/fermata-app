@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityPanel } from "@/components/activity-panel";
 import { useCopy } from "@/components/copy-provider";
 import type { PausePoint } from "@/components/pause-list";
@@ -63,6 +63,117 @@ function BackArrow() {
 }
 
 type ChatProps = React.ComponentProps<typeof QaChat>;
+
+// ── 片 g3：问答栏的字号（「字体 − +」）────────────────────────────────────
+//
+// 创始人 2026-09-23：「在对话栏加一个可以调整聊天界面大小的按钮，加或者减，上面写着"字体"……放到这个聊天栏的右上角吧（Takeaway 的最右边）」。
+// 管的是**消息流里的字**（提问气泡、回答、概述卡、角标、答完那排按钮）—— 那一层的字号全写成 em、挂在 `--chat-fs` 上（qa-chat.tsx）。
+// tab 这一行和底下的输入框不跟着变：它们是按钮，不是要读的东西。
+//
+// 按设备记（localStorage），和字幕字号同一个脾气：字号是「这块屏幕上看着舒服」的事，换台电脑本来就该重调。
+// 走模块级小仓库 + `useSyncExternalStore`（和 watch-stage 的「播放控制条收起」同一个写法）：
+// 服务端渲染不出 localStorage，走 state 就是一次必然的水合不一致。
+const CHAT_SIZE_KEY = "fermata.chat.size";
+/**
+ * 默认 15px（片 g3 之前是 14px 的 `text-sm`）：换成衬线之后，同样 14px 看着小一圈 ——
+ * Source Serif 的小写字母比 Inter 矮约一成，宋体的字面也比苹方小。大 1px 是为了**看着和原来一样大**，不是为了更大
+ */
+const CHAT_SIZE_DEFAULT = 15;
+const CHAT_SIZE_MIN = 12;
+const CHAT_SIZE_MAX = 22;
+let chatSize = CHAT_SIZE_DEFAULT;
+let chatSizeLoaded = false;
+const chatSizeListeners = new Set<() => void>();
+
+function getChatSize(): number {
+  if (!chatSizeLoaded) {
+    chatSizeLoaded = true;
+    try {
+      const v = Number(window.localStorage.getItem(CHAT_SIZE_KEY));
+      // 存坏了 / 别的版本存的越界值 → 当没存过
+      if (Number.isInteger(v) && v >= CHAT_SIZE_MIN && v <= CHAT_SIZE_MAX) chatSize = v;
+    } catch {
+      // Safari 无痕模式下 localStorage 会抛。记不住比崩了强
+    }
+  }
+  return chatSize;
+}
+const getChatSizeOnServer = () => CHAT_SIZE_DEFAULT;
+
+function subscribeChatSize(cb: () => void): () => void {
+  chatSizeListeners.add(cb);
+  return () => {
+    chatSizeListeners.delete(cb);
+  };
+}
+
+function setChatSize(next: number) {
+  const v = Math.max(CHAT_SIZE_MIN, Math.min(CHAT_SIZE_MAX, next));
+  if (v === chatSize) return;
+  chatSize = v;
+  try {
+    window.localStorage.setItem(CHAT_SIZE_KEY, String(v));
+  } catch {
+    // 同上：存不下就只在这一次观看里有效
+  }
+  for (const cb of chatSizeListeners) cb();
+}
+
+/** − / + 的小图标。画出来而不是打字：两个字符在不同字体里粗细对不齐 */
+function StepIcon({ plus }: { plus: boolean }) {
+  return (
+    <svg viewBox="0 0 12 12" className="h-3 w-3" aria-hidden focusable="false">
+      <path d={plus ? "M2.5 6h7M6 2.5v7" : "M2.5 6h7"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/**
+ * 「字体 − +」。**点一下只重画这颗按钮**：字号写成外面那一层的 CSS 变量（直接改 DOM），
+ * 问答栏整条不重画（修补轮的 INP 教训 —— 攒了几十轮问答时，整条重画是看得出的卡）。
+ * 到头了那一边变灰、点不动（D44：「点了没反应」要看得出是到头了，不是坏了）
+ */
+function ChatTextSize({ targetRef }: { targetRef: React.RefObject<HTMLElement | null> }) {
+  const t = useCopy();
+  const size = useSyncExternalStore(subscribeChatSize, getChatSize, getChatSizeOnServer);
+  useEffect(() => {
+    targetRef.current?.style.setProperty("--chat-fs", `${size}px`);
+  }, [size, targetRef]);
+  const btn =
+    "flex h-7 w-7 items-center justify-center text-ink-300 transition-colors enabled:hover:bg-ink-700 enabled:hover:text-teal-300 disabled:opacity-35";
+  return (
+    <div
+      role="group"
+      aria-label={t("watch.rail.fontAria", size)}
+      className="ml-auto flex shrink-0 items-center overflow-hidden rounded-lg border border-ink-700"
+    >
+      <button
+        type="button"
+        onClick={() => setChatSize(size - 1)}
+        disabled={size <= CHAT_SIZE_MIN}
+        aria-label={t("watch.rail.fontSmaller")}
+        title={`${t("watch.rail.fontSmaller")} · ${size}px`}
+        className={btn}
+      >
+        <StepIcon plus={false} />
+      </button>
+      {/* 「字体」两个字（他点名要写上的）。这一栏太窄时收起来、只留 − +（读屏照样念得到组名） */}
+      <span aria-hidden className="select-none px-1 text-[0.68rem] text-ink-500 @max-[20rem]:hidden">
+        {t("watch.rail.font")}
+      </span>
+      <button
+        type="button"
+        onClick={() => setChatSize(size + 1)}
+        disabled={size >= CHAT_SIZE_MAX}
+        aria-label={t("watch.rail.fontLarger")}
+        title={`${t("watch.rail.fontLarger")} · ${size}px`}
+        className={btn}
+      >
+        <StepIcon plus />
+      </button>
+    </div>
+  );
+}
 
 /**
  * ③ Takeaway 自己记自己的滚动位置（片 a 的交付判据之一：三个栏各记各的）。
@@ -144,6 +255,8 @@ export function QaRail({
    */
   const [tab, setTab] = useState<QaTab>("chat");
   const bodyRef = useRef<HTMLDivElement>(null);
+  /** 片 g3：「字体 − +」把字号写在这一层（`--chat-fs`），消息流从这儿继承 */
+  const sectionRef = useRef<HTMLElement>(null);
   const takeawayScrollRef = useRef(0);
 
   useLayoutEffect(() => {
@@ -238,8 +351,10 @@ export function QaRail({
     // `min-h-0` 就不肯缩到内容以下，overflow 永远触发不了（和右栏同一条老规矩）。
     // `@container`：tab 条按**这一栏自己有多宽**收紧，不按窗口 —— 见下面那段
     <section
+      ref={sectionRef}
       aria-label={t("watch.rail.aria")}
       className="@container flex min-h-0 flex-1 flex-col rounded-2xl border border-ink-700"
+      style={{ "--chat-fs": `${CHAT_SIZE_DEFAULT}px` } as React.CSSProperties}
     >
       {/* 三个 tab。用 role=tablist 而不是三颗光秃秃的按钮：读屏的人要听得出
           「三选一」和「当前是第几个」，那是 aria-selected 才给得了的信息。
@@ -248,34 +363,39 @@ export function QaRail({
           英文的 `Ask · Questions 5 · Takeaway` **今天就已经挤出去 45px**，换成 `Activity 5` 也还差 31px
           （中文 `问答 · 互动记录 5 · Takeaway` 刚好 0px 放下）。所以这一栏窄于 13.5rem 时才把内边距收紧：
           平时的样子一个像素不动，只有最窄那一档变紧。 */}
-      <div
-        role="tablist"
-        aria-label={t("watch.rail.aria")}
-        className="flex shrink-0 items-center gap-1 border-b border-ink-700 px-2 py-1.5 @max-[13.5rem]:gap-0.5 @max-[13.5rem]:px-1"
-      >
-        {TABS.map(({ id, label }) => {
-          const active = id === tab;
-          return (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              id={`qa-tab-${id}`}
-              aria-selected={active}
-              aria-controls={PANEL_ID[id]}
-              onClick={() => switchTo(id)}
-              className={`h-8 rounded-lg px-2.5 text-[0.72rem] transition-colors @max-[13.5rem]:px-1.5 ${
-                active ? "bg-ink-700/60 text-teal-300" : "text-ink-500 hover:text-ink-300"
-              }`}
-            >
-              {t(label)}
-              {/* 互动记录那一颗顺带报个数 = 捕获点个数 —— 捕获轴上已经有这个数（「5 个」），两处对得上才不让人犯嘀咕 */}
-              {id === "activity" && pointCount > 0 ? (
-                <span className="ui-mono ml-1 text-[0.62rem] text-ink-500">{pointCount}</span>
-              ) : null}
-            </button>
-          );
-        })}
+      {/* 片 g3：tab 那一行最右边多了「字体 − +」—— 它不是 tab，所以 `role="tablist"` 往里挪了一层（tablist 里只许放 tab）。
+          `flex-wrap`：右栏拖到最窄（1024 宽、中缝 78% ≈ 187px）时它折到第二行，不许挤出这一栏 */}
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-ink-700 px-2 py-1.5 @max-[13.5rem]:gap-0.5 @max-[13.5rem]:px-1">
+        <div
+          role="tablist"
+          aria-label={t("watch.rail.aria")}
+          className="flex items-center gap-1 @max-[13.5rem]:gap-0.5"
+        >
+          {TABS.map(({ id, label }) => {
+            const active = id === tab;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                id={`qa-tab-${id}`}
+                aria-selected={active}
+                aria-controls={PANEL_ID[id]}
+                onClick={() => switchTo(id)}
+                className={`h-8 rounded-lg px-2.5 text-[0.72rem] transition-colors @max-[13.5rem]:px-1.5 ${
+                  active ? "bg-ink-700/60 text-teal-300" : "text-ink-500 hover:text-ink-300"
+                }`}
+              >
+                {t(label)}
+                {/* 互动记录那一颗顺带报个数 = 捕获点个数 —— 捕获轴上已经有这个数（「5 个」），两处对得上才不让人犯嘀咕 */}
+                {id === "activity" && pointCount > 0 ? (
+                  <span className="ui-mono ml-1 text-[0.62rem] text-ink-500">{pointCount}</span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+        <ChatTextSize targetRef={sectionRef} />
       </div>
 
       {/* ① 问答：**永远挂着**，切走只是 hidden（正在流式的答案不能被卸载打断）。

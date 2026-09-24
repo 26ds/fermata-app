@@ -55,13 +55,13 @@ const REPEAT_LABEL_GAP_S = 30;
  * `[overflow-wrap:anywhere]`：一长串网址也得在气泡里折行，不许把这一栏撑出横向滚动条。
  */
 const BUBBLE =
-  "min-w-0 whitespace-pre-wrap rounded-2xl rounded-br-md bg-ink-700 px-3 py-1.5 text-sm leading-6 text-ink-100 [overflow-wrap:anywhere]";
+  "font-chat min-w-0 whitespace-pre-wrap rounded-2xl rounded-br-md bg-ink-700 px-3 py-1.5 text-[1em] leading-[1.7143] text-ink-100 [overflow-wrap:anywhere]";
 
 /**
  * 答案头上的小角标（「短版」、D75 的「看了画面 · 02:45–02:57」/「只看了字幕」）。
  * 灰底不用青色：青色在这一页只答「能点 / 是个捕获点」，角标两样都不是
  */
-const TAG = "inline-block rounded bg-ink-700/70 px-1.5 py-0.5 text-[0.62rem] text-ink-300";
+const TAG = "inline-block rounded bg-ink-700/70 px-1.5 py-0.5 text-[0.7086em] text-ink-300";
 
 /** 输入框最多长到这么高（和它的 `max-h-24` 同一个数），再多才出滚动条 */
 const INPUT_MAX_PX = 96;
@@ -266,7 +266,8 @@ function CaptureNowButton({
         }
       }}
       disabled={busy}
-      className="min-h-[42px] shrink-0 rounded-xl border border-ink-700 px-2.5 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:pointer-events-none disabled:opacity-50"
+      // `@max-[20rem]:flex-1`：问答栏很窄时输入框独占一排，这颗和「发送」挤在第二排 —— 它让出宽度、字折成两行（片 g3）
+      className="min-h-[42px] shrink-0 rounded-xl border border-ink-700 px-2.5 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:pointer-events-none disabled:opacity-50 @max-[20rem]:flex-1 @max-[20rem]:shrink"
     >
       {busy ? busyLabel : label}
     </button>
@@ -925,11 +926,14 @@ export function QaChat({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="min-h-0 flex-1 overflow-y-auto px-3"
+        // 片 g3：这一栏里的字号**全按 `--chat-fs` 走**（tab 那一行右边的「字体 − +」，见 qa-rail 的 ChatTextSize）。
+        // 里面每一处都写成 em（相对这一层），比例照抄原来的 Tailwind 类（按 14px 算：text-sm = 1em、text-xs = 0.8571em……），
+        // 所以字号一变，角标、卡片、按钮一起按比例缩放，谁也不会突然比别人大一截
+        className="min-h-0 flex-1 overflow-y-auto px-3 text-[length:var(--chat-fs,15px)]"
       >
         <div className="py-3">
           {rows.length === 0 && (
-            <p className="text-sm leading-6 text-ink-500">{t("watch.rail.empty.chat")}</p>
+            <p className="text-[1em] leading-[1.7143] text-ink-500">{t("watch.rail.empty.chat")}</p>
           )}
 
           {rows.map((r, i) => {
@@ -940,8 +944,8 @@ export function QaChat({
                   {/* 老记录只在**第一条**头上说一次来历，别每条都挂一顶帽子 */}
                   {first && (
                     <div className="mb-2 border-b border-ink-700 pb-1.5">
-                      <p className="text-xs font-semibold text-ink-300">{t("watch.qa.oldTitle")}</p>
-                      <p className="mt-0.5 text-[0.7rem] leading-4 text-ink-500">{t("watch.qa.oldHint")}</p>
+                      <p className="text-[0.8571em] font-semibold text-ink-300">{t("watch.qa.oldTitle")}</p>
+                      <p className="mt-0.5 text-[0.8em] leading-[1.4286] text-ink-500">{t("watch.qa.oldHint")}</p>
                     </div>
                   )}
                   {/* 老记录也照新规矩：提问装进气泡、回答不套框，只是整体淡一档 = 只读 */}
@@ -952,7 +956,7 @@ export function QaChat({
                   ) : (
                     <div className="mt-1.5 opacity-60">
                       {toSegments(r.text).map((s, j) => (
-                        <p key={j} className="text-sm leading-6 text-ink-300">
+                        <p key={j} className="font-chat text-[1em] leading-[1.7143] text-ink-300">
                           {s}
                         </p>
                       ))}
@@ -998,7 +1002,7 @@ export function QaChat({
                     type="button"
                     onClick={() => jumpTo(r.tS)}
                     aria-label={t("watch.qa.jumpTo", mmss(r.tS))}
-                    className="ui-mono mb-1 rounded px-1 py-0.5 text-[0.7rem] text-teal-300 transition-colors hover:bg-ink-700 hover:text-teal-100"
+                    className="ui-mono mb-1 rounded px-1 py-0.5 text-[0.8em] text-teal-300 transition-colors hover:bg-ink-700 hover:text-teal-100"
                   >
                     @{mmss(r.tS)}
                   </button>
@@ -1013,13 +1017,13 @@ export function QaChat({
                 <div className="mt-2">
                   {r.error ? (
                     <div role="alert">
-                      <p className="text-xs leading-5 text-amber-300/90">{r.error}</p>
+                      <p className="text-[0.8571em] leading-[1.6667] text-amber-300/90">{r.error}</p>
                       {r.id && (
                         <button
                           type="button"
                           onClick={() => void send(r.question, r.id!)}
                           disabled={sending}
-                          className="mt-1 h-8 rounded-lg border border-ink-700 px-2.5 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+                          className="mt-1 h-8 rounded-lg border border-ink-700 px-2.5 text-[0.8571em] text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
                         >
                           {t("watch.qa.retry")}
                         </button>
@@ -1043,7 +1047,7 @@ export function QaChat({
                             <button
                               type="button"
                               onClick={() => flipBasis(r.id!)}
-                              className="rounded px-1 py-0.5 text-[0.62rem] text-ink-300 underline decoration-ink-500 underline-offset-2 transition-colors hover:text-teal-300"
+                              className="rounded px-1 py-0.5 text-[0.7086em] text-ink-300 underline decoration-ink-500 underline-offset-2 transition-colors hover:text-teal-300"
                             >
                               {basis === "visual" ? t("watch.qa.lookShowCaptions") : t("watch.qa.lookShowVisual")}
                             </button>
@@ -1051,7 +1055,7 @@ export function QaChat({
                         </div>
                       )}
                       {toSegments(body).map((s, j) => (
-                        <p key={j} className="text-sm leading-6 text-ink-100">
+                        <p key={j} className="font-chat text-[1em] leading-[1.7143] text-ink-100">
                           {s}
                         </p>
                       ))}
@@ -1072,18 +1076,18 @@ export function QaChat({
                 {/* D75：看画面那一趟的下落，跟着**这一轮**走（不跟着最后一轮那排按钮）——
                     看砸了说是哪一种；答案到了但没存上，这一次观看里一直挂着说（D44） */}
                 {look?.error ? (
-                  <p role="alert" className="mt-1.5 text-[0.7rem] leading-4 text-amber-300/90">
+                  <p role="alert" className="mt-1.5 text-[0.8em] leading-[1.4286] text-amber-300/90">
                     {look.error}
                   </p>
                 ) : null}
                 {look?.note ? (
-                  <p role="status" className="mt-1.5 text-[0.7rem] leading-4 text-amber-300/90">
+                  <p role="status" className="mt-1.5 text-[0.8em] leading-[1.4286] text-amber-300/90">
                     {look.note}
                   </p>
                 ) : null}
                 {/* 这一轮的回答没存上（片 c 起服务端会说，D44）—— 和上面那句同一个样子 */}
                 {saveNote ? (
-                  <p role="status" className="mt-1.5 text-[0.7rem] leading-4 text-amber-300/90">
+                  <p role="status" className="mt-1.5 text-[0.8em] leading-[1.4286] text-amber-300/90">
                     {saveNote}
                   </p>
                 ) : null}
@@ -1097,7 +1101,7 @@ export function QaChat({
                       type="button"
                       onClick={() => void send(t("watch.qa.whyQ"))}
                       disabled={sending}
-                      className="h-8 rounded-full border border-ink-700 px-3 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+                      className="h-8 rounded-full border border-ink-700 px-3 text-[0.8571em] text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
                     >
                       {t("watch.qa.why")}
                     </button>
@@ -1105,7 +1109,7 @@ export function QaChat({
                       type="button"
                       onClick={() => void send(t("watch.qa.relationQ"))}
                       disabled={sending}
-                      className="h-8 rounded-full border border-ink-700 px-3 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+                      className="h-8 rounded-full border border-ink-700 px-3 text-[0.8571em] text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
                     >
                       {t("watch.qa.relation")}
                     </button>
@@ -1114,7 +1118,7 @@ export function QaChat({
                       onClick={() => void toggleBrief(r.id!, r.question, basis)}
                       // 看画面那一趟还在流的时候先别写短版：那会儿显示的是哪一版还没定
                       disabled={Boolean(brief?.busy) || lookBusy}
-                      className="h-8 rounded-full border border-ink-700 px-3 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+                      className="h-8 rounded-full border border-ink-700 px-3 text-[0.8571em] text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
                     >
                       {brief?.busy
                         ? t("watch.qa.shorterGoing")
@@ -1130,7 +1134,7 @@ export function QaChat({
                         onClick={() => void lookAgain(r.id!, r.question)}
                         disabled={lookBusy}
                         title={t("watch.qa.lookTitle")}
-                        className="h-8 rounded-full border border-ink-700 px-3 text-xs text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
+                        className="h-8 rounded-full border border-ink-700 px-3 text-[0.8571em] text-ink-300 transition-colors hover:border-teal-400 hover:text-teal-300 disabled:opacity-50"
                       >
                         {lookBusy && look ? (
                           <Elapsed since={look.since} render={(s) => t("watch.qa.lookGoing", s)} />
@@ -1140,7 +1144,7 @@ export function QaChat({
                       </button>
                     )}
                     {brief?.error && (
-                      <p role="alert" className="w-full text-[0.7rem] leading-4 text-amber-300/90">
+                      <p role="alert" className="w-full text-[0.8em] leading-[1.4286] text-amber-300/90">
                         {brief.error}
                       </p>
                     )}
@@ -1254,7 +1258,10 @@ export function QaChat({
           </div>
         )}
 
-        <div className="flex items-end gap-1.5">
+        {/* 片 g3：中缝在每种布局里都能拖了，右栏能窄到 183px（1024 宽、拖到 78%）—— 英文那一排
+            「输入框 + Just mark this moment + Send」要 313px 才放得下，**Send 被切掉半截**（lab 页量到的；① 拖到头本来就这样，只是以前少有人拖）。
+            这一栏窄于 20rem 时折成两排：输入框占满第一排，两颗按钮在第二排（「只记下这一刻」让出宽度、字折行）。宽的时候一个像素不变 */}
+        <div className="flex flex-wrap items-end gap-1.5">
           <textarea
             ref={inputRef}
             value={input}
@@ -1276,7 +1283,9 @@ export function QaChat({
             rows={1}
             placeholder={t("watch.qa.placeholder")}
             // 高度由上面那个 layout effect 按字数撑（到 INPUT_MAX_PX 为止）；`overflow-hidden` 是默认，长过上限才打开滚动
-            className="max-h-24 min-h-[42px] min-w-0 flex-1 resize-none overflow-hidden rounded-xl border border-ink-700 bg-ink-900 px-3 py-2 text-sm leading-6 text-ink-100 placeholder:text-ink-500 focus:border-teal-400 focus:outline-none"
+            // `placeholder:truncate`（片 g2）：栏窄时占位符折成两三行，第二行的上半截从框的下内边距里露出来（1280 宽的 ① 上量到：
+            // 框 40px 高、占位符 88px）。一行放不下就省略号收住。框只有一行高是片 d 定的（占位符不许把空输入框撑成两行）
+            className="max-h-24 min-h-[42px] min-w-0 flex-1 resize-none overflow-hidden rounded-xl border border-ink-700 bg-ink-900 px-3 py-2 text-sm leading-6 text-ink-100 placeholder:truncate placeholder:text-ink-500 focus:border-teal-400 focus:outline-none @max-[20rem]:basis-full"
           />
           {/* 「只记下这一刻」**搬到输入框边上了**（片 a 把它临时摆在空态里，§F 说的家就是这儿）。
               它是悬浮球在宽屏上的替身：先记下来，待会儿再问 —— 记完点点条上当场多一个点。 */}

@@ -12,7 +12,6 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import { activeSegmentIndex, parseTranscript } from "@/lib/captions";
-import { LayoutPicker } from "@/components/layout-picker";
 import { PhraseCheck } from "@/components/phrase-line";
 import { SelectableLine, type GlossState } from "@/components/selectable-line";
 import { Toggle } from "@/components/toggle";
@@ -25,7 +24,7 @@ import { putSettings } from "@/lib/settings-client";
 import { mmss } from "@/lib/time";
 import type { TranscriptSegment } from "@/lib/types";
 import { TARGET_LANGS } from "@/lib/translate/langs";
-import type { LayoutStore, WatchLayout } from "@/lib/watch-layout";
+import type { LayoutStore } from "@/lib/watch-layout";
 import { useCopy } from "@/components/copy-provider";
 
 // M1d — 字幕层（D4）：开关 + 字号 14–28px（存 localStorage）+ 行宽自适应（.caption-copy）
@@ -136,6 +135,14 @@ const SIZE_KEY = "fermata.captions.size";
 const SIZE_MIN = 14;
 const SIZE_MAX = 28;
 const SIZE_DEFAULT = 18;
+/**
+ * M3.15 片 g2 —— ③「沉浸 · 宽」**自己的字号**（计划 §D 第 3 条 / D67：「进③时字号自动上调一档（字号滑块本来就在，他还能自己再调）」）。
+ * 「一档」= 4px（计划没写死数，这是我定的：默认 18 → 22px；要改只改 `WIDE_BUMP`）。
+ * 在 ③ 里拖滑杆改的是 ③ 这一个（另存一个键）—— 回到 ①② 还是原来的字号，来回切也不会越切越大。
+ * 没在 ③ 里调过，就一直是「①② 的字号 + 一档」。
+ */
+const SIZE_WIDE_KEY = "fermata.captions.sizeWide";
+const WIDE_BUMP = 4;
 
 // M2.9 双语字幕的三个偏好。
 // **M3.7 / D42：译文语言搬进后台**（`user_settings.captionLang`）—— 存 localStorage
@@ -224,12 +231,11 @@ interface CaptionLayerProps {
   scanning?: boolean;
   /**
    * M3.15 片 g（D67）：观看页宽屏的布局仓库。**只有宽屏观看页传**。
-   * 字幕栏头上的选择器订它；切回「专注字幕」时这里要把字幕列表滚回当前行（藏起来那会儿 `scrollTop` 被浏览器清零了）。
-   * 「字幕在视频下面」那三行**一直渲染着**，显不显示由 `globals.css` 按 grid 上的 `data-layout` 决定 —— 切布局这一栏一次都不重画
+   * 切回「专注字幕」时这里要把字幕列表滚回当前行（藏起来那会儿 `scrollTop` 被浏览器清零了）；进出 ③ 时字号跟着换一档。
+   * 「字幕在视频下面」那三行**一直渲染着**，显不显示由 `globals.css` 按 grid 上的 `data-layout` 决定 —— 切布局这一栏一次都不重画。
+   * （片 g3：选择器从这一栏头上搬进了页头 —— 创始人要它「一直固定在右上角那一个位置」，见 layout-picker.tsx）
    */
   layoutStore?: LayoutStore;
-  /** 选了一种布局（watch-stage 负责改 grid 上的属性 + 存进 user_settings） */
-  onLayout?: (next: WatchLayout) => void;
 }
 
 export function CaptionLayer({
@@ -252,7 +258,6 @@ export function CaptionLayer({
   onToggleAutoScan,
   scanning = false,
   layoutStore,
-  onLayout,
 }: CaptionLayerProps) {
   const t = useCopy();
   // YouTube 视频自己带 CC，用户粘贴过来免费又快；只有没 CC 的才值得花钱走 Gemini。
@@ -319,6 +324,9 @@ export function CaptionLayer({
   const sliderRef = useRef<HTMLInputElement | null>(null);
   const labelRef = useRef<HTMLSpanElement>(null);
   const sizeRef = useRef(SIZE_DEFAULT);
+  /** 片 g2：①② 的字号 / ③ 自己的字号（null = 没在 ③ 里调过 → 跟着 ①② 的大一档）。眼下用的是哪个在 `sizeRef` */
+  const baseSizeRef = useRef(SIZE_DEFAULT);
+  const wideSizeRef = useRef<number | null>(null);
 
   // 服务端数据变了（贴完字幕 router.refresh 之后）就跟着换。渲染期校正，不用 effect
   const [seen, setSeen] = useState(transcript);
@@ -347,17 +355,42 @@ export function CaptionLayer({
     sliderRef.current = el;
     if (el) el.value = String(sizeRef.current);
   }, []);
+  /**
+   * 旁边那个「22px」的读数也一样：它只在 `applySize` 时被改写，**晚挂上的那一份会一直显示 JSX 里写死的 18px**。
+   * 片 g 起齿轮浮层每开一次就重挂一次 —— 于是他把字号调到 24、关上再打开，滑块在 24、读数写着 18（片 g2 在 ③ 里量到的）
+   */
+  const attachLabel = useCallback((el: HTMLSpanElement | null) => {
+    labelRef.current = el;
+    if (el) el.textContent = `${sizeRef.current}px`;
+  }, []);
+
+  /**
+   * 片 g2：眼下该用哪个字号 —— 宽屏上选的是 ③ 就用 ③ 自己的，其余一律 ①② 那个。
+   * `isWide` 也要看：窄屏上没有布局这回事（grid 规则都在 `lg` 里），就算他在电脑上选的是 ③，手机 / 窄窗口里也不许变大
+   */
+  const inWide = useCallback(() => isWide && layoutStore?.get() === "wide", [isWide, layoutStore]);
+  const currentSize = useCallback(
+    () => (inWide() ? (wideSizeRef.current ?? Math.min(SIZE_MAX, baseSizeRef.current + WIDE_BUMP)) : baseSizeRef.current),
+    [inWide],
+  );
 
   useEffect(() => {
-    let stored = SIZE_DEFAULT;
     try {
       const raw = Number(localStorage.getItem(SIZE_KEY));
-      if (raw >= SIZE_MIN && raw <= SIZE_MAX) stored = raw;
+      if (raw >= SIZE_MIN && raw <= SIZE_MAX) baseSizeRef.current = raw;
+      const wide = Number(localStorage.getItem(SIZE_WIDE_KEY));
+      if (wide >= SIZE_MIN && wide <= SIZE_MAX) wideSizeRef.current = wide;
     } catch {
       // 隐私模式读不到：用默认字号，不影响看字幕
     }
-    applySize(stored);
-  }, [applySize]);
+    applySize(currentSize());
+  }, [applySize, currentSize]);
+
+  // 片 g2：换了布局（进 / 出 ③）就换字号。订的是仓库的「变了」这一下 —— 这一栏不为切布局重画
+  useEffect(() => {
+    if (!layoutStore) return;
+    return layoutStore.subscribe(() => applySize(currentSize()));
+  }, [layoutStore, applySize, currentSize]);
 
   // 挂载后读回 flip / 只当前行（纯显示口味，留在本机）
   useEffect(() => {
@@ -788,16 +821,20 @@ export function CaptionLayer({
           aria-label={t("cap.sizeAria")}
           onChange={(e) => {
             const next = Number(e.target.value);
+            // 片 g2：在 ③ 里调的只算 ③ 的（见 SIZE_WIDE_KEY）
+            const wide = inWide();
+            if (wide) wideSizeRef.current = next;
+            else baseSizeRef.current = next;
             applySize(next);
             try {
-              localStorage.setItem(SIZE_KEY, String(next));
+              localStorage.setItem(wide ? SIZE_WIDE_KEY : SIZE_KEY, String(next));
             } catch {
               // 存不进不致命，下次回默认字号
             }
           }}
           className="h-6 flex-1 cursor-pointer appearance-none bg-transparent [&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full [&::-webkit-slider-runnable-track]:bg-ink-700 [&::-webkit-slider-thumb]:mt-[-0.4rem] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-teal-400 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-teal-400 [&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-full [&::-moz-range-track]:bg-ink-700"
         />
-        <span ref={labelRef} className="ui-mono text-[0.68rem] text-ink-500">
+        <span ref={attachLabel} className="ui-mono text-[0.68rem] text-ink-500">
           {SIZE_DEFAULT}px
         </span>
       </div>
@@ -960,7 +997,8 @@ export function CaptionLayer({
           >
             {mmss(seg.start)}
           </button>
-          <div className="min-w-0 flex-1">
+          {/* `wl-three-text`：③「沉浸 · 宽」里居中（globals.css） */}
+          <div className="wl-three-text min-w-0 flex-1">
             {swapped ? translated : original}
             {swapped ? original : translated}
           </div>
@@ -982,6 +1020,9 @@ export function CaptionLayer({
       // 手机上字幕本来就是视频下面的一个 256px 小窗，那样是对的。
       className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col"
       style={{ "--caption-size": `${SIZE_DEFAULT}px` } as CSSProperties}
+      // 片 g4：点了「隐藏」—— 宽屏 ① 里字幕那一块收成只剩标题一行、问答往上顶满右栏（globals.css 的 `:has([data-caps-off])`）。
+      // 创始人 2026-09-24 的截图：原来点完「隐藏」右栏上半截空着一大块
+      data-caps-off={hasCaptions && !on ? "" : undefined}
     >
       <div className="flex items-center justify-between px-1">
         <p id="captions-title" className="eyebrow">
@@ -1005,19 +1046,20 @@ export function CaptionLayer({
                 {t("cap.translating", trPercent != null ? ` ${trPercent}%` : "…")}
               </span>
             )}
-            {/* 片 g（D67）：布局选择器 —— 只在宽屏观看页出现（组件自己 `hidden lg:flex`） */}
-            {layoutStore && onLayout && <LayoutPicker store={layoutStore} onPick={onLayout} />}
-            {/* `wl-list-only`：三行那种排法里没有「跟随」这回事（永远是当前那句在中间），那时藏起来（globals.css） */}
-            <button
-              type="button"
-              onClick={() => setFollow((v) => !v)}
-              aria-pressed={follow}
-              className={`wl-list-only h-8 rounded-lg px-2 text-[0.68rem] transition-colors ${
-                follow ? "text-teal-300" : "text-ink-500 hover:text-ink-300"
-              }`}
-            >
-              {follow ? t("cap.follow") : t("cap.noFollow")}
-            </button>
+            {/* `wl-list-only`：三行那种排法里没有「跟随」这回事（永远是当前那句在中间），那时藏起来（globals.css）。
+                片 g4：字幕藏起来的时候也不露 —— 没有字幕可跟（他 2026-09-24 的截图上「Following」孤零零挂在空栏顶上） */}
+            {on && (
+              <button
+                type="button"
+                onClick={() => setFollow((v) => !v)}
+                aria-pressed={follow}
+                className={`wl-list-only h-8 rounded-lg px-2 text-[0.68rem] transition-colors ${
+                  follow ? "text-teal-300" : "text-ink-500 hover:text-ink-300"
+                }`}
+              >
+                {follow ? t("cap.follow") : t("cap.noFollow")}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setOn((v) => !v)}

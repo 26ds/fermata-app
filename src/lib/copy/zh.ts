@@ -73,6 +73,11 @@ export const zh = {
   // 悬浮球在宽屏上的替身（计划 §F）。**先不问、只记下这一刻**
   "watch.rail.capture": "只记下这一刻",
   "watch.rail.capturing": "记着…",
+  // M3.15 片 g3：tab 那一行最右边的「字体 − +」（创始人 2026-09-23 点名要写「字体」两个字）。只管消息流里的字
+  "watch.rail.font": "字体",
+  "watch.rail.fontAria": (px: number) => `问答栏字号，现在 ${px}px`,
+  "watch.rail.fontSmaller": "字小一点",
+  "watch.rail.fontLarger": "字大一点",
 
   // ── 观看页 · 右栏第一栏「问答」的本体（M3.15 片 b，D61/D62）──────────────
   // 只在宽屏出现。**手机上一个字都没变** —— 那边照旧走暂停面板 + 沉浸聊天两条路。
@@ -626,6 +631,9 @@ export const zh = {
   "layout.focusHint": "字幕在右栏上半，问答在它下面（原来的样子）",
   "layout.narrow": "沉浸 · 窄",
   "layout.narrowHint": "字幕缩成三行放到视频下面，右栏整条给问答",
+  // 片 g2：③ —— 字号大一档是计划 §D 第 3 条（行太长的解药是字更大）
+  "layout.wide": "沉浸 · 宽",
+  "layout.wideHint": "字幕放大成三行，横跨整个屏幕的下面；问答在视频右边",
 
   // ── 观看页舞台（watch-stage）────────────────────────────────────────────
   "stage.noPlayer": (kind: string) => `这类内容（${kind}）的播放器还没做。`,
@@ -638,6 +646,10 @@ export const zh = {
   "stage.capPending": "字幕待生成",
   "stage.positionAria": "播放位置",
   "stage.splitterAria": "拖动调整视频与学习区的宽度，双击复位",
+  // M3.15 片 g4：缝正中那颗 i 的说明（创始人 2026-09-24：要让用户知道双击是干什么的）
+  "stage.splitHint": "拖动：调整左右宽度（三种布局各记各的）· 双击：恢复默认 · 选中后键盘 ← → 也能调",
+  "stage.capsSplitAria": "拖动调整字幕和问答的高度，双击复位",
+  "stage.capsSplitHint": "拖动：调整字幕和问答各占多高 · 双击：恢复默认（字幕到视频下沿）· 选中后键盘 ↑ ↓ 也能调",
   // 各种失败（D44：每条对应一个真起因，别压成一句"出错了"）
   "stage.captureFailed": "没记下来，请重试",
   "stage.captureLost": "没记下这一刻，稍后再问一次",

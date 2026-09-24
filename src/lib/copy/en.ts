@@ -59,6 +59,11 @@ export const en = {
     "Key points from each answer show up here; tick one to add it to your notes. Generated only when you open this tab, so ignoring it costs nothing (not built yet).",
   "watch.rail.capture": "Just mark this moment",
   "watch.rail.capturing": "Marking…",
+  // M3.15 slice g3: the “Font − +” at the right end of the tab row. Only the conversation text follows it
+  "watch.rail.font": "Font",
+  "watch.rail.fontAria": (px: number) => `Chat text size, now ${px}px`,
+  "watch.rail.fontSmaller": "Smaller text",
+  "watch.rail.fontLarger": "Larger text",
 
   // ── Watch page · the Ask rail itself (M3.15 slice b, D61/D62) ──────────
   "watch.qa.placeholder": "Ask about this moment… (type @ for another timestamp)",
@@ -564,6 +569,8 @@ export const en = {
   "layout.focusHint": "captions at the top of the right column, Q&A below them (the original layout)",
   "layout.narrow": "Immersive · narrow",
   "layout.narrowHint": "three caption lines under the video; the whole right column goes to Q&A",
+  "layout.wide": "Immersive · wide",
+  "layout.wideHint": "three larger caption lines across the full width at the bottom; Q&A beside the video",
 
   // ── Watch stage ────────────────────────────────────────────────────────
   "stage.noPlayer": (kind: string) => `There's no player for this kind of content (${kind}) yet.`,
@@ -576,6 +583,10 @@ export const en = {
   "stage.capPending": "Subtitles not made yet",
   "stage.positionAria": "Playback position",
   "stage.splitterAria": "Drag to resize video and study area; double-click to reset",
+  // M3.15 slice g4: the “i” in the middle of each draggable line
+  "stage.splitHint": "Drag to change the widths (each layout remembers its own) · Double-click to reset · Or focus it and use ← →",
+  "stage.capsSplitAria": "Drag to resize captions and chat; double-click to reset",
+  "stage.capsSplitHint": "Drag to share the height between captions and chat · Double-click to reset (captions end at the video's bottom edge) · Or focus it and use ↑ ↓",
   "stage.captureFailed": "That wasn't saved. Please try again.",
   "stage.captureLost": "This moment wasn't saved — ask again in a second",
   "stage.answerFailed": "No answer came back. Try again shortly.",

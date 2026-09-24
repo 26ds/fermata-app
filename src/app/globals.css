@@ -34,6 +34,12 @@
   --font-quote: var(--font-instrument), Georgia, "Songti SC", "Noto Serif SC", serif;
   --font-mono-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo,
     monospace;
+  /* 片 g3：问答栏里要读的那些字（提问气泡、回答、概述卡）—— 创始人 2026-09-23：「聊天框的那个地方稍微和这个界面的字体区分一下，
+     换一种比较好看的、舒服的字体」。界面是无衬线（Inter + 苹方），问答换成**衬线 = 书本的样子**：英文 Source Serif 4（next/font 注入），
+     中文宋体 —— Mac 自带的「宋体-简」（和标题衬线 --font-quote 用的是同一个）；Linux 常见的思源宋体；
+     Windows 自带的宋体（SimSun）14px 上发虚，所以那边退到微软雅黑（舒服比统一要紧） */
+  --font-chat: var(--font-chat-latin), "Songti SC", "Noto Serif SC", "Noto Serif CJK SC", "Source Han Serif SC",
+    "Microsoft YaHei", serif;
 }
 
 body {
@@ -135,7 +141,7 @@ select:focus-visible {
  * 下面的规则**不进 Tailwind 的 layer**（故意）：它们要压过元素上那几个 `lg:` 类（`mt-3`、`lg:h-[var(--right-h)]`、`flex`）。
  */
 
-/* 「字幕在视频下面」那三行：只在「沉浸 · 窄」里露出来；其余时候一直渲染着、藏着 —— 切布局字幕栏一次都不重画 */
+/* 「三行字幕」：只在 ②「沉浸 · 窄」和 ③「沉浸 · 宽」里露出来；其余时候一直渲染着、藏着 —— 切布局字幕栏一次都不重画 */
 .wl-three {
   display: none;
   /* 不出滚动条：选词时长出来的「收下 / 取消」那截，由 caption-layer 程序化地滚过去给他看 */
@@ -158,6 +164,22 @@ select:focus-visible {
 }
 
 @media (width >= 64rem) {
+  /* 片 g4：点了字幕的「隐藏」—— 字幕那一块收成只剩标题那一行，下面的问答往上顶满（① 里它原来是按视频下沿定死的高，
+     藏了字幕那一截就空着；创始人 2026-09-24 截图）。②③ 里那一块本来就是 `height: auto`，这一条等于没写。
+     横缝跟着藏起来：字幕都没了，没有东西可分 */
+  .watch-grid .wl-caps:has([data-caps-off]) {
+    height: auto;
+  }
+  .watch-grid .wl-right:has([data-caps-off]) > .wl-hsplit {
+    display: none;
+  }
+  /* ①「专注字幕」才有字幕和问答之间那道横缝：② 的右栏整条是问答，③ 的问答在视频旁边。
+     这两种里右栏那一层是 `display: contents`，不藏的话这道缝会变成 grid 里一个乱跑的格子 */
+  .watch-grid[data-layout="narrow"] .wl-hsplit,
+  .watch-grid[data-layout="wide"] .wl-hsplit {
+    display: none;
+  }
+
   /* ②「沉浸 · 窄」：第一行 = 视频 + 状态卡 + 捕获轴；第二行 = 字幕三行（与视频同宽）；
      问答那三个栏**从右栏上沿一路竖到屏幕底**（创始人 2026-09-23：「现在chat聊天框看起来还是很小」） */
   .watch-grid[data-layout="narrow"] {
@@ -201,6 +223,70 @@ select:focus-visible {
   }
   .watch-grid[data-layout="narrow"] .wl-three {
     display: block;
+  }
+
+  /* ③「沉浸 · 宽」（片 g2，D67）：第一行 = 视频那一栏 + 右边三个栏，**右栏收在视频那一栏的下沿**（不往下倒 —— 下面是整幅字幕）；
+     第二行 = 字幕三行**横跨整幅**、居中（字号自动大一档，见 caption-layer 的 `WIDE_BUMP`）。中缝只管第一行。
+     片 g3（中缝在每种布局里都能拖）：第二行**贴着屏幕底**，第一行吃掉其余的 ——
+     视频是自动大小时两种写法一个样（视频的高度上限就是按「刚好放满」算的）；他把视频拖小了，省出来的高度归右边的问答，
+     不再在屏幕底下留一条空带、问答反倒跟着视频一起变矮（g2 的 `auto minmax(0, 1fr)` 就是那样）。
+     第一行至少装得下左栏（`min-content`）：窗口太矮时让位的是第二行 —— 三行在自己框里滚（fitCaps），和 g2 一样 */
+  .watch-grid[data-layout="wide"] {
+    grid-template-rows: minmax(min-content, 1fr) minmax(0, auto);
+  }
+  .watch-grid[data-layout="wide"] > .wl-left {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .watch-grid[data-layout="wide"] > .wl-handle {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .watch-grid[data-layout="wide"] > .wl-right {
+    display: contents;
+  }
+  .watch-grid[data-layout="wide"] .wl-rail {
+    grid-column: 3;
+    grid-row: 1;
+    margin-top: 0;
+    padding-right: 0.25rem;
+    /* 第一行多高**只听左栏的**：问答攒了几十轮，消息流的内容不许把第一行撑高、把字幕挤出屏幕。
+       `contain: size` = 这一格里装了什么不参与算尺寸；它自己照样被拉到整行那么高，里面照常滚 */
+    contain: size;
+  }
+  .watch-grid[data-layout="wide"] .wl-caps {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    align-self: start;
+    height: auto;
+    /* 和 ② 同一个脾气：窗口太矮、视频已经让到底了，三行就在自己框里滚（fitCaps 把正在说的那行摆进来），不许撑出屏幕 */
+    max-height: 100%;
+    scrollbar-width: none;
+  }
+  .watch-grid[data-layout="wide"] .wl-caps::-webkit-scrollbar {
+    display: none;
+  }
+  .watch-grid[data-layout="wide"] .wl-list-only {
+    display: none;
+  }
+  .watch-grid[data-layout="wide"] .wl-three {
+    display: block;
+  }
+  /* 「跨整幅居中」（计划 §D 的表）：字居中；行首时间和行尾 ✓ 留在两头 */
+  .watch-grid[data-layout="wide"] .wl-three-text {
+    text-align: center;
+  }
+  /* 一行有一千多 px 宽：选词长出来的「收下 / 取消」和词义解释框（selectable-line 的 `data-pick-actions`）别跟着拉满整幅
+     —— 拉满就是一条一千三百 px 的绿按钮（lab 页量到的）。收成一栏、居中；解释是一段话，照常靠左读 */
+  .watch-grid[data-layout="wide"] .wl-three [data-pick-actions] {
+    max-width: 36rem;
+    margin-inline: auto;
+    text-align: left;
+  }
+  /* 没有视频的那几档（播客）：左栏只有一张 137px 的控制卡 —— 右边三个栏靠上面那条「第一行吃掉其余的」撑满（g2 时这里单独倒过来排过，
+     片 g3 起视频那一档也是这么排，这一条只剩下限高）。字幕不固定高：最多半屏，长句在自己框里滚 */
+  .watch-grid[data-layout="wide"]:not([data-video]) .wl-caps {
+    max-height: 45dvh;
   }
 }
 
