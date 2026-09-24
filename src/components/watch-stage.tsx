@@ -40,6 +40,7 @@ import type {
 import { KEEPS_BACK_CARD, type SeekVia, type WatchEvent } from "@/lib/watch-events";
 import { WATCH_LAYOUTS, type WatchLayout } from "@/lib/watch-layout";
 import { useWatchLayout } from "@/components/layout-picker";
+import { SplitHint } from "@/components/split-hint";
 import { WatchRecorder } from "@/lib/watch-recorder";
 
 /** 进度回写节流：播放中最快 10 秒存一次，别把网络当秒表用 */
@@ -206,6 +207,41 @@ function writeSplit(kind: "video" | "podcast", layout: WatchLayout | null, pct: 
     else window.localStorage.setItem(key, String(Math.round(pct * 10) / 10));
   } catch {
     // 同上：存不下就只在这一次观看里有效
+  }
+}
+
+// ── 片 g4：①「专注字幕」右栏里，字幕和问答之间的横缝 ─────────────────────────
+//
+// 创始人 2026-09-24（① 的截图）：「应该在ask和字幕中间也加一条线让他可以拖动ask聊天框和字幕之间的大小调整」。
+// 只有 ① 有 —— ② 的右栏整条是问答、③ 的问答在视频旁边，都没有「字幕在上、问答在下」这回事。
+// 没动过 =「自动」：字幕收到视频下沿（`--right-h`，创始人 2026-09-06 画的那条线）；拖过 = 字幕占右栏高度的百分之几。
+// 和中缝一样按设备记、视频和播客分开记；**不分布局**（只有 ① 用得上）。
+const CAPS_KEY = "fermata.watch.capsPct";
+/** 字幕那一块最矮：标题一行 + 提示一行 + 一句字幕 */
+const CAPS_MIN_PX = 120;
+/** 问答那一栏最矮：tab 一行 + 输入框一排 + 四五行消息 */
+const RAIL_MIN_PX = 220;
+/** 两块之间那道缝（就是问答栏的 `mt-3`） */
+const CAPS_GAP_PX = 12;
+/** 键盘 ↑ ↓ 一下挪多少（占右栏高度的百分比） */
+const CAPS_STEP = 3;
+
+function readCapsPct(kind: "video" | "podcast"): number | null {
+  try {
+    const pct = Number(window.localStorage.getItem(`${CAPS_KEY}.${kind}`));
+    return Number.isFinite(pct) && pct > 0 && pct < 100 ? pct : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCapsPct(kind: "video" | "podcast", pct: number | null) {
+  try {
+    const key = `${CAPS_KEY}.${kind}`;
+    if (pct == null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, String(Math.round(pct * 10) / 10));
+  } catch {
+    // 存不下就只在这一次观看里有效
   }
 }
 
@@ -519,7 +555,8 @@ export function WatchStage({
   const manualSplitRef = useRef<Partial<Record<WatchLayout, number>>>({});
   /** 片 g3 之前存下的那个比例（那时它是「专注字幕」自动那一档的目标比例）。照旧只给 ① 用 —— 老用户的 ① 一个像素不变 */
   const legacySplitRef = useRef<number | null>(null);
-  const [dragging, setDragging] = useState(false);
+  /** 正在拖哪一道缝：`col` = 中缝（左右），`row` = ① 右栏里字幕和问答之间那道（上下）。只用来盖遮罩、给线上色 */
+  const [dragging, setDragging] = useState<"col" | "row" | null>(null);
 
   /** 这一刻左栏占 grid 的百分之几 = **眼睛看到的那个数**（读屏报的、方向键从哪儿起步的，都是它） */
   const actualSplit = useCallback(() => {
@@ -628,21 +665,20 @@ export function WatchStage({
   }, [splitKind, applySplitFor, layoutStore]);
 
   /**
-   * 按住缝开始拖。监听挂在 **window** 上而不是那条缝上 —— 指针一动就滑出那 24px 了。
+   * 按住一道缝开始拖（中缝 / ① 的横缝共用）。监听挂在 **window** 上而不是那条缝上 —— 指针一动就滑出那 24px 了。
    *
    * 挂载与拆除都在这个函数里就地做完（不走 `useEffect` + state）：
    * 一次拖动只有"越过门槛"和"松手"两次 setState，而且那两次都只影响遮罩和线的颜色。
    * 拆到一半就卸载的情况由下面那个 effect 兜底。
    */
   const teardownDragRef = useRef<(() => void) | null>(null);
-  const startDrag = useCallback(
-    (e: React.PointerEvent) => {
+  const beginDrag = useCallback(
+    (e: React.PointerEvent, axis: "col" | "row", move: (ev: PointerEvent) => void, commit: () => void) => {
       // 只认主键。右键 / 中键按下去不该开始拖
       if (e.pointerType === "mouse" && e.button !== 0) return;
       teardownDragRef.current?.();
-      const startX = e.clientX;
-      // 片 g3：按下的那一点离左栏右沿多远 —— 拖的时候保持这个距离。原来左栏右沿一动就「跳」到指针上（最多跳一整条沟，24px）
-      const grab = e.clientX - (leftColRef.current?.getBoundingClientRect().right ?? e.clientX);
+      const along = (ev: { clientX: number; clientY: number }) => (axis === "col" ? ev.clientX : ev.clientY);
+      const start = along(e);
       // 片 g3：**按下去那一刻**就让视频（YouTube 的 iframe）不吃指针。下面那层遮罩要等挪过 3px、再等 React 画出来 ——
       // 这中间指针一掠进视频，事件就被跨源 iframe 吞了，缝卡在原地、松手也收不到（②③ 里缝就贴着视频，往左一甩就是这样；
       // lab 页上一口气往左拖 200px 真卡住过）。直接改 DOM、不走 state；双击复位的两下都落在缝上，跟视频无关，照样凑得成 dblclick
@@ -651,17 +687,17 @@ export function WatchStage({
       let moved = false;
       const onMove = (ev: PointerEvent) => {
         if (!moved) {
-          if (Math.abs(ev.clientX - startX) < DRAG_THRESHOLD_PX) return;
+          if (Math.abs(along(ev) - start) < DRAG_THRESHOLD_PX) return;
           moved = true;
-          setDragging(true); // 真的动了才盖遮罩 —— 见 DRAG_THRESHOLD_PX 上的说明
+          setDragging(axis); // 真的动了才盖遮罩 —— 见 DRAG_THRESHOLD_PX 上的说明
         }
-        dragTo(ev.clientX - grab);
+        move(ev);
       };
       const stop = () => {
         teardownDragRef.current?.();
         if (!moved) return; // 只是点了一下（多半是双击的前半程），什么都别改、更别存
-        setDragging(false);
-        commitSplit();
+        setDragging(null);
+        commit();
       };
       const teardown = () => {
         teardownDragRef.current = null;
@@ -675,10 +711,115 @@ export function WatchStage({
       window.addEventListener("pointerup", stop);
       window.addEventListener("pointercancel", stop);
     },
-    [dragTo, commitSplit],
+    [],
   );
   // 拖到一半整页被换掉（返回 / 换片）：把监听收干净，别留一个指向已卸载组件的闭包
   useEffect(() => () => teardownDragRef.current?.(), []);
+
+  /** 中缝。片 g3：按下的那一点离左栏右沿多远 —— 拖的时候保持这个距离（原来左栏右沿一动就「跳」到指针上，最多跳一整条沟，24px） */
+  const startDrag = useCallback(
+    (e: React.PointerEvent) => {
+      const grab = e.clientX - (leftColRef.current?.getBoundingClientRect().right ?? e.clientX);
+      beginDrag(e, "col", (ev) => dragTo(ev.clientX - grab), commitSplit);
+    },
+    [beginDrag, dragTo, commitSplit],
+  );
+
+  // ── 片 g4：① 右栏里字幕和问答之间的横缝（见文件顶上 CAPS_KEY 那段）──
+  const rightColRef = useRef<HTMLDivElement>(null);
+  const capsSplitElRef = useRef<HTMLDivElement>(null);
+  /** 字幕占右栏高度的百分之几；null =「自动」（收到视频下沿） */
+  const capsPctRef = useRef<number | null>(null);
+
+  const clampCapsPx = useCallback(
+    (px: number, colH: number) => Math.max(CAPS_MIN_PX, Math.min(colH - CAPS_GAP_PX - RAIL_MIN_PX, px)),
+    [],
+  );
+
+  const syncCapsAria = useCallback(() => {
+    const box = capsBoxRef.current?.getBoundingClientRect();
+    const col = rightColRef.current?.getBoundingClientRect();
+    if (box && col && col.height > 0) {
+      capsSplitElRef.current?.setAttribute("aria-valuenow", String(Math.round((box.height / col.height) * 100)));
+    }
+  }, []);
+
+  /**
+   * 把记着的比例换成 px 写到 grid 上（`--caps-h`，字幕那一块的高度 = `var(--caps-h, var(--right-h))`）。
+   * 窗口一变高矮就重算一次（`measure` 里调）。**值没变就不写** —— 字幕那一块被 ResizeObserver 盯着，写一次就再量一次
+   */
+  const applyCapsHeight = useCallback(() => {
+    const grid = gridRef.current;
+    if (!grid) return;
+    const pct = capsPctRef.current;
+    if (pct == null) {
+      if (grid.style.getPropertyValue("--caps-h")) grid.style.removeProperty("--caps-h");
+      return;
+    }
+    // ②③ 里右栏那一层是 `display: contents`，量出来是 0 —— 那时这道缝不存在，别动
+    const colH = rightColRef.current?.getBoundingClientRect().height ?? 0;
+    if (colH <= 0) return;
+    const next = `${Math.round(clampCapsPx((pct / 100) * colH, colH))}px`;
+    if (grid.style.getPropertyValue("--caps-h") !== next) grid.style.setProperty("--caps-h", next);
+  }, [clampCapsPx]);
+
+  /** 把字幕那一块的下沿拖到某个纵坐标 */
+  const dragCapsTo = useCallback(
+    (y: number) => {
+      const box = capsBoxRef.current?.getBoundingClientRect();
+      const colH = rightColRef.current?.getBoundingClientRect().height ?? 0;
+      if (!box || colH <= 0) return;
+      capsPctRef.current = (clampCapsPx(y - box.top, colH) / colH) * 100;
+      applyCapsHeight();
+      syncCapsAria();
+    },
+    [applyCapsHeight, clampCapsPx, syncCapsAria],
+  );
+
+  const commitCaps = useCallback(() => writeCapsPct(splitKind, capsPctRef.current), [splitKind]);
+
+  /** 双击 / Home：回到「自动」—— 字幕收到视频下沿 */
+  const resetCaps = useCallback(() => {
+    capsPctRef.current = null;
+    applyCapsHeight();
+    writeCapsPct(splitKind, null);
+    requestAnimationFrame(syncCapsAria);
+  }, [applyCapsHeight, splitKind, syncCapsAria]);
+
+  const startCapsDrag = useCallback(
+    (e: React.PointerEvent) => {
+      // 按下的那一点离字幕那一块的下沿多远 —— 拖的时候保持这个距离
+      const grab = e.clientY - (capsBoxRef.current?.getBoundingClientRect().bottom ?? e.clientY);
+      beginDrag(e, "row", (ev) => dragCapsTo(ev.clientY - grab), commitCaps);
+    },
+    [beginDrag, commitCaps, dragCapsTo],
+  );
+
+  const onCapsKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Home") {
+        e.preventDefault();
+        resetCaps();
+        return;
+      }
+      const dir = e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0;
+      if (!dir) return;
+      e.preventDefault();
+      const box = capsBoxRef.current?.getBoundingClientRect();
+      const colH = rightColRef.current?.getBoundingClientRect().height ?? 0;
+      if (!box || colH <= 0) return;
+      // 从眼睛看到的高度起步（「自动」那一档记着的是 null）
+      dragCapsTo(box.top + box.height + (dir * CAPS_STEP * colH) / 100);
+      commitCaps();
+    },
+    [commitCaps, dragCapsTo, resetCaps],
+  );
+
+  // 上次拖到哪儿就从哪儿开始。和中缝一样：在 effect 里直改 DOM，不 setState
+  useEffect(() => {
+    capsPctRef.current = readCapsPct(splitKind);
+    applyCapsHeight();
+  }, [splitKind, applyCapsHeight]);
 
   /**
    * 片 g：选了一种布局。**先写 grid 上的属性、再改仓库**：仓库一改，字幕栏会去把整份字幕列表滚回当前行 ——
@@ -864,6 +1005,9 @@ export function WatchStage({
       const card = stageRef.current?.getBoundingClientRect();
       const video = videoWrapRef.current?.getBoundingClientRect();
       measureRightH(video);
+      // 片 g4：① 的横缝拖过的话，字幕那一块的高度按右栏的高矮重算（窗口变矮时别把问答挤没了）；读屏报的比例跟着对一下
+      applyCapsHeight();
+      syncCapsAria();
       if (!card) return;
       const vh = window.innerHeight;
       const seamVideo = video ? Math.max(0, Math.round(video.bottom)) : 0;
@@ -903,7 +1047,7 @@ export function WatchStage({
       window.clearInterval(t);
       window.clearTimeout(stop);
     };
-  }, [capsHeight, syncSplitAria, layoutStore]);
+  }, [capsHeight, syncSplitAria, layoutStore, applyCapsHeight, syncCapsAria]);
 
   // 服务端数据变了（router.refresh 之后）就跟着换。渲染期校正，不用 effect
   const [seen, setSeen] = useState(interrupts);
@@ -2162,19 +2306,26 @@ export function WatchStage({
         aria-valuemax={SPLIT_MAX}
         aria-valuenow={Math.round(defaultSplit)}
         tabIndex={0}
+        aria-describedby="split-hint"
         onPointerDown={startDrag}
         onDoubleClick={resetSplit}
         onKeyDown={onHandleKeyDown}
-        className={`wl-handle group hidden select-none touch-none lg:flex lg:cursor-col-resize lg:items-center lg:justify-center ${
-          dragging ? "" : "focus-visible:outline-none"
+        className={`wl-handle group relative hidden select-none touch-none lg:flex lg:cursor-col-resize lg:items-center lg:justify-center ${
+          dragging === "col" ? "" : "focus-visible:outline-none"
         }`}
       >
         <span
           aria-hidden
           className={`h-full w-px rounded-full transition-colors ${
-            dragging ? "bg-teal-400" : "bg-ink-700 group-hover:bg-teal-400 group-focus-visible:bg-teal-400"
+            dragging === "col" ? "bg-teal-400" : "bg-ink-700 group-hover:bg-teal-400 group-focus-visible:bg-teal-400"
           }`}
         />
+        {/* 片 g4：创始人 2026-09-24「应该有一个 i，鼠标浮在上面或者点击就会让用户知道双击的作用」—— 缝的正中间一颗 i。
+            `z-[60]` 不能省：`translate` 让这一层自成一个叠放层，不给层级的话它按 DOM 顺序排在右栏**下面**，
+            说明框被右栏里的字幕压住、字透过来（lab 页截图上真这样） */}
+        <span className="absolute left-1/2 top-1/2 z-[60] -translate-x-1/2 -translate-y-1/2">
+          <SplitHint id="split-hint" text={t("stage.splitHint")} side="right" />
+        </span>
       </div>
 
       {/* ── 右栏：字幕（选词 / 查词的主战场）。**整页只有这一栏会滚。** ──
@@ -2187,13 +2338,14 @@ export function WatchStage({
           照它收字幕等于把主战场砍没了）。 */}
       {/* 片 g：`wl-right` 在「沉浸 · 窄」里变成 `display: contents` —— 自己这一层消失，里面的字幕框和三个栏
           各自直接落进外面那个 grid（字幕去视频下面、三个栏整条竖下来）。**DOM 一个节点都没挪** */}
-      <div className="wl-right flex min-w-0 flex-col lg:min-h-0 lg:pr-1">
+      <div ref={rightColRef} className="wl-right flex min-w-0 flex-col lg:min-h-0 lg:pr-1">
         {/* 字幕这一块**自己收到视频下沿**（`--right-h`），滚的也是它自己。
             片 a 之前这两件事长在外面那个 div 上 —— 整个右栏就是字幕，两者是一回事；
             现在右栏底下多了三个栏目，**上限必须往里挪一层**，
             不然三个栏也被一起夹在视频下沿以上、挤成一条缝。
             创始人 2026-09-06 画的那条红线管的是**字幕**，不是"右栏里所有东西"。 */}
-        <div ref={capsBoxRef} className="wl-caps flex min-w-0 flex-col lg:h-[var(--right-h)] lg:min-h-0 lg:overflow-y-auto">
+        {/* 片 g4：高度 = `--caps-h`（① 的横缝拖过）或 `--right-h`（自动：收到视频下沿）。点了「隐藏」就只剩标题那一行（globals.css 的 `:has([data-caps-off])`） */}
+        <div ref={capsBoxRef} className="wl-caps flex min-w-0 flex-col lg:h-[var(--caps-h,var(--right-h))] lg:min-h-0 lg:overflow-y-auto">
         {/* D4：字幕可开关、字号可调、行宽自适应 —— 视频与播客共用同一层 */}
         <CaptionLayer
           sourceId={source.id}
@@ -2226,6 +2378,45 @@ export function WatchStage({
           layoutStore={layoutStore}
         />
         </div>
+
+        {/* ── 片 g4：① 里字幕和问答之间的横缝（创始人 2026-09-24「在ask和字幕中间也加一条线让他可以拖动」）──
+            一个 0 高的壳，里面那条 12px 的命中区**正好盖在问答栏的 `mt-3` 那道缝上** —— 加了它，① 的样子一个像素不变。
+            ②③ 没有它（右栏整条是问答 / 字幕在视频下面，globals.css 里 `display: none`）；点了「隐藏」字幕也没有它（没得分了）。
+            看得见的是正中一小截把手 + 一颗 i；悬停整条变青，和中缝一个脾气 */}
+        {isWide && (
+          <div className="wl-hsplit relative hidden h-0 lg:block">
+            <div
+              ref={capsSplitElRef}
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label={t("stage.capsSplitAria")}
+              aria-describedby="caps-split-hint"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              tabIndex={0}
+              onPointerDown={startCapsDrag}
+              onDoubleClick={resetCaps}
+              onKeyDown={onCapsKeyDown}
+              className="group absolute inset-x-0 top-0 z-10 flex h-3 cursor-row-resize touch-none select-none items-center justify-center focus-visible:outline-none"
+            >
+              <span
+                aria-hidden
+                className={`absolute inset-x-4 top-1/2 h-px -translate-y-1/2 rounded-full transition-colors ${
+                  dragging === "row" ? "bg-teal-400" : "bg-transparent group-hover:bg-teal-400 group-focus-visible:bg-teal-400"
+                }`}
+              />
+              <span className="relative flex items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className={`h-[3px] w-9 rounded-full transition-colors ${
+                    dragging === "row" ? "bg-teal-400" : "bg-ink-500/70 group-hover:bg-teal-400"
+                  }`}
+                />
+                <SplitHint id="caps-split-hint" text={t("stage.capsSplitHint")} side="top" />
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* ── M3.15 片 a：三个栏目（① 问答 ② 互动记录 ③ Takeaway，D61；②片 c0 起由「问题列表」改成「互动记录」，D71）──
             **只在宽屏挂载**。手机上右栏就是字幕本身，塞第三条问答路进去正是
@@ -2275,7 +2466,10 @@ export function WatchStage({
           z-[80]：连词卡（z-[70]）都要压住 —— 拖动过程中不该有任何东西还能抢指针。 */}
       {dragging && (
         <ViewportLayer>
-          <div className="fixed inset-0 z-[80] cursor-col-resize select-none" aria-hidden />
+          <div
+            className={`fixed inset-0 z-[80] select-none ${dragging === "row" ? "cursor-row-resize" : "cursor-col-resize"}`}
+            aria-hidden
+          />
         </ViewportLayer>
       )}
 

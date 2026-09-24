@@ -583,6 +583,10 @@ export const en = {
   "stage.capPending": "Subtitles not made yet",
   "stage.positionAria": "Playback position",
   "stage.splitterAria": "Drag to resize video and study area; double-click to reset",
+  // M3.15 slice g4: the “i” in the middle of each draggable line
+  "stage.splitHint": "Drag to change the widths (each layout remembers its own) · Double-click to reset · Or focus it and use ← →",
+  "stage.capsSplitAria": "Drag to resize captions and chat; double-click to reset",
+  "stage.capsSplitHint": "Drag to share the height between captions and chat · Double-click to reset (captions end at the video's bottom edge) · Or focus it and use ↑ ↓",
   "stage.captureFailed": "That wasn't saved. Please try again.",
   "stage.captureLost": "This moment wasn't saved — ask again in a second",
   "stage.answerFailed": "No answer came back. Try again shortly.",

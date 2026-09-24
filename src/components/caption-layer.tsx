@@ -1020,6 +1020,9 @@ export function CaptionLayer({
       // 手机上字幕本来就是视频下面的一个 256px 小窗，那样是对的。
       className="lg:flex lg:min-h-0 lg:flex-1 lg:flex-col"
       style={{ "--caption-size": `${SIZE_DEFAULT}px` } as CSSProperties}
+      // 片 g4：点了「隐藏」—— 宽屏 ① 里字幕那一块收成只剩标题一行、问答往上顶满右栏（globals.css 的 `:has([data-caps-off])`）。
+      // 创始人 2026-09-24 的截图：原来点完「隐藏」右栏上半截空着一大块
+      data-caps-off={hasCaptions && !on ? "" : undefined}
     >
       <div className="flex items-center justify-between px-1">
         <p id="captions-title" className="eyebrow">
@@ -1043,17 +1046,20 @@ export function CaptionLayer({
                 {t("cap.translating", trPercent != null ? ` ${trPercent}%` : "…")}
               </span>
             )}
-            {/* `wl-list-only`：三行那种排法里没有「跟随」这回事（永远是当前那句在中间），那时藏起来（globals.css） */}
-            <button
-              type="button"
-              onClick={() => setFollow((v) => !v)}
-              aria-pressed={follow}
-              className={`wl-list-only h-8 rounded-lg px-2 text-[0.68rem] transition-colors ${
-                follow ? "text-teal-300" : "text-ink-500 hover:text-ink-300"
-              }`}
-            >
-              {follow ? t("cap.follow") : t("cap.noFollow")}
-            </button>
+            {/* `wl-list-only`：三行那种排法里没有「跟随」这回事（永远是当前那句在中间），那时藏起来（globals.css）。
+                片 g4：字幕藏起来的时候也不露 —— 没有字幕可跟（他 2026-09-24 的截图上「Following」孤零零挂在空栏顶上） */}
+            {on && (
+              <button
+                type="button"
+                onClick={() => setFollow((v) => !v)}
+                aria-pressed={follow}
+                className={`wl-list-only h-8 rounded-lg px-2 text-[0.68rem] transition-colors ${
+                  follow ? "text-teal-300" : "text-ink-500 hover:text-ink-300"
+                }`}
+              >
+                {follow ? t("cap.follow") : t("cap.noFollow")}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setOn((v) => !v)}

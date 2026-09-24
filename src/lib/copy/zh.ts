@@ -646,6 +646,10 @@ export const zh = {
   "stage.capPending": "字幕待生成",
   "stage.positionAria": "播放位置",
   "stage.splitterAria": "拖动调整视频与学习区的宽度，双击复位",
+  // M3.15 片 g4：缝正中那颗 i 的说明（创始人 2026-09-24：要让用户知道双击是干什么的）
+  "stage.splitHint": "拖动：调整左右宽度（三种布局各记各的）· 双击：恢复默认 · 选中后键盘 ← → 也能调",
+  "stage.capsSplitAria": "拖动调整字幕和问答的高度，双击复位",
+  "stage.capsSplitHint": "拖动：调整字幕和问答各占多高 · 双击：恢复默认（字幕到视频下沿）· 选中后键盘 ↑ ↓ 也能调",
   // 各种失败（D44：每条对应一个真起因，别压成一句"出错了"）
   "stage.captureFailed": "没记下来，请重试",
   "stage.captureLost": "没记下这一刻，稍后再问一次",
