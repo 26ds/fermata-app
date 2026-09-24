@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AtPicker } from "@/components/at-picker";
 import { useCopy } from "@/components/copy-provider";
+import { KindTags, type Tagging } from "@/components/kind-tags";
 import type { PausePoint } from "@/components/pause-list";
 import { RefCards } from "@/components/ref-cards";
 import { type AnswerRef, readRefs, splitAnswer } from "@/lib/answer-refs";
 import { type AtRead, atEntries, isTypingAt, notPinned, readAt, rewindTo, withAt, withoutAt } from "@/lib/at-time";
 import { toSegments } from "@/lib/chat-text";
 import { lookClip } from "@/lib/look";
+import { readKinds } from "@/lib/question-kinds";
 import { hms, mmss } from "@/lib/time";
+import type { QuestionKind } from "@/lib/types";
 
 // M3.15 片 b —— 右栏第一栏「问答」的**本体**（计划 §B，D61 / D62 / D63 / D56）。
 //
@@ -92,6 +95,8 @@ type Row =
       refs: AnswerRef[] | null;
       /** 0 = 母问题，1 = 追问（缩进一格 + 细线；读屏另说一声「追问」） */
       depth: 0 | 1;
+      /** 片 d 的另一半（D65）：这一问的标签，**原样**（`points[].kinds`，没过 `readKinds`）—— 标签那一格靠它的身份认「变没变」 */
+      kinds: unknown;
       /** 正在流式作答 */
       live: boolean;
       error: string;
@@ -121,12 +126,18 @@ function FermataDots() {
  *
  * `on.warn`：答案到了、但服务端有话要说（这一版**没存上** —— D44，答案照给、事情照说）。
  * `on.refs`：概述卡（片 c）。服务端保证它排在 `done` 前面 —— done 带来的全文末尾那几行字要靠它才拆得掉。
+ * `on.kinds`：问题分类（片 d 的另一半，D65）。也排在 `done` 前面 —— 答完那一拍标签就跟着这一轮一起进 `points`。
  */
 async function streamAsk(
   body: { interruptId: string; question: string; brief?: boolean; look?: boolean; cards?: boolean },
   onPiece: (fullSoFar: string) => void,
   fallbackError: string,
-  on?: { warn?: (message: string) => void; refs?: (refs: AnswerRef[]) => void },
+  on?: {
+    warn?: (message: string) => void;
+    refs?: (refs: AnswerRef[]) => void;
+    /** 片 d 的另一半（D65）：这个问题的分类。服务端和卡片一样排在 done 前面推；模型没写那一行就不推 */
+    kinds?: (kinds: QuestionKind[]) => void;
+  },
 ): Promise<string> {
   const res = await fetch("/api/ask", {
     method: "POST",
@@ -151,7 +162,7 @@ async function streamAsk(
       const raw = buf.slice(0, nl).trim();
       buf = buf.slice(nl + 1);
       if (!raw) continue;
-      let ev: { type?: string; text?: string; answer?: string; message?: string; refs?: unknown };
+      let ev: { type?: string; text?: string; answer?: string; message?: string; refs?: unknown; kinds?: unknown };
       try {
         ev = JSON.parse(raw);
       } catch {
@@ -162,6 +173,8 @@ async function streamAsk(
         onPiece(full);
       } else if (ev.type === "refs") {
         on?.refs?.(readRefs(ev.refs) ?? []);
+      } else if (ev.type === "kinds") {
+        on?.kinds?.(readKinds(ev.kinds) ?? []);
       } else if (ev.type === "done") {
         if (typeof ev.answer === "string") full = ev.answer;
         onPiece(full);
@@ -297,6 +310,7 @@ export function QaChat({
   durationS,
   atHintSeen,
   onAtHintSeen,
+  tagging,
 }: {
   /** 切到别的 tab 了。**不卸载、只 hidden** —— 见下面滚动位置那段 */
   hidden: boolean;
@@ -317,8 +331,11 @@ export function QaChat({
    * `pinned` = 这一问用 `@` 指定了时间点（🐞6）—— 记录器据此让这一问和下一问的 `@` 标注都重新算
    */
   createPoint: (tS: number, parentId: string | null, pinned: boolean) => Promise<string>;
-  /** 一轮答完，把问题、答案（和片 c 的概述卡）回填进那份 `points`（点点条 / 问题列表吃的是同一份） */
-  onAnswered: (id: string, question: string, answer: string, refs: AnswerRef[] | null) => void;
+  /**
+   * 一轮答完，把问题、答案（和片 c 的概述卡、片 d 的分类）回填进那份 `points`（点点条 / 问题列表吃的是同一份）。
+   * `kinds` 不传 = 服务端这一趟没推分类（模型没写那一行）
+   */
+  onAnswered: (id: string, question: string, answer: string, refs: AnswerRef[] | null, kinds?: QuestionKind[]) => void;
   /**
    * 播放器**播起来过几次**。追问的判据（计划 §B.4）写死成
    * 「发送时，距上一轮答完之间播放器**有没有播过**」——
@@ -351,6 +368,8 @@ export function QaChat({
   atHintSeen: boolean;
   /** 自动弹的那一次被关掉了 —— 记下来，以后不再自动弹（计划 §J「怎么让用户知道」⒝） */
   onAtHintSeen: () => void;
+  /** 片 d 的另一半（D65）：他那句问题下面的标签 —— 显示哪几类、改了怎么存、哪一问没存上（watch-stage 造、两个栏共用） */
+  tagging: Tagging;
 }) {
   const t = useCopy();
 
@@ -530,6 +549,7 @@ export function QaChat({
         visual: p.ai_answer_visual ?? "",
         refs: readRefs(p.refs),
         depth: p.parent_id ? 1 : 0,
+        kinds: p.kinds ?? null,
         live: false,
         error: "",
       });
@@ -547,6 +567,8 @@ export function QaChat({
         visual: "",
         refs: flight.refs,
         depth: flight.parentId ? 1 : 0,
+        // 正在问的这一轮还没有标签：答完那一拍它进了 `points`，才以落好的那一轮的身份带着标签出现
+        kinds: null,
         live: !flight.error,
         error: flight.error,
       });
@@ -747,7 +769,7 @@ export function QaChat({
       }
 
       // 回调里收到的东西先放在这儿（不用 `let`：TS 看不见回调里的赋值，会把它当成永远是初值）
-      const got: { refs: AnswerRef[] | null; note: string } = { refs: null, note: "" };
+      const got: { refs: AnswerRef[] | null; note: string; kinds?: QuestionKind[] } = { refs: null, note: "" };
       try {
         // `cards`：「视频别处还讲到」要成概述卡（片 c）—— 服务端核对原句、在 done 之前把卡片推过来
         const full = await streamAsk(
@@ -764,6 +786,9 @@ export function QaChat({
             warn: (message) => {
               got.note = message;
             },
+            kinds: (kinds) => {
+              got.kinds = kinds;
+            },
           },
         );
         // 答完了：交给上面那份 points（点点条 / 问题列表吃同一份），本地这条就退场
@@ -776,7 +801,7 @@ export function QaChat({
           else next.delete(id!);
           return next;
         });
-        onAnswered(id!, question, full, got.refs);
+        onAnswered(id!, question, full, got.refs, got.kinds);
         setFlight(null);
       } catch (e) {
         // ⚠️ **点留着，问题文字只活在这一次观看里**：`/api/ask` 一直是"答完整才落库"
@@ -1013,6 +1038,20 @@ export function QaChat({
                 <div className="flex justify-end pl-8">
                   <p className={BUBBLE}>{r.question}</p>
                 </div>
+
+                {/* 片 d 的另一半（D65）：这一问的标签，挂在他那句问题下面、靠右 —— **答完那一拍出现**（正在问的那一行没有）。
+                    小、灰，不抢答案的戏；点一下展开成开关，当场存（`kind-tags.tsx`）。字号按这一栏的 em 走（「− 字体 +」一起缩放） */}
+                {r.id && r.key !== "flight" && (
+                  <div className="mt-1 flex justify-end pl-8">
+                    <KindTags
+                      kinds={r.kinds}
+                      showLanguage={tagging.showLanguage}
+                      onChange={(next) => tagging.onSet(r.id!, next)}
+                      error={tagging.errors.get(r.id)}
+                      className="text-[0.7086em] leading-[1.45]"
+                    />
+                  </div>
+                )}
 
                 <div className="mt-2">
                   {r.error ? (

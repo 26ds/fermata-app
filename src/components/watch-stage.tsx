@@ -16,7 +16,7 @@ import { ViewportLayer } from "@/components/viewport-layer";
 import { isWideNow, useIsWide } from "@/components/use-wide";
 import { useWordLookup } from "@/components/word-lookup";
 import type { AnswerRef } from "@/lib/answer-refs";
-import { DEFAULT_LANG_PREFS, type LangPrefs } from "@/lib/lang";
+import { DEFAULT_LANG_PREFS, normalizeLang, type LangPrefs } from "@/lib/lang";
 import {
   isPhraseScan,
   resolvePhrases,
@@ -25,12 +25,14 @@ import {
   type PhraseScan,
 } from "@/lib/phrases/types";
 import { DEFAULT_PLAY_PREFS, type PlayPrefs } from "@/lib/play-prefs";
+import { readKinds } from "@/lib/question-kinds";
 import { findTerms } from "@/lib/segment";
 import { putSettings } from "@/lib/settings-client";
 import { playerFor } from "@/lib/sources/players";
 import type { PlayerHandle } from "@/lib/sources/types";
 import { mmss } from "@/lib/time";
 import type {
+  QuestionKind,
   QuestionMode,
   SourceKind,
   SourceRow,
@@ -1585,23 +1587,92 @@ export function WatchStage({
    * 一轮答完，把问题与答案补进这份 `points`。
    * **点点条、问题列表、`/library/[id]` 吃的是同一份** —— 不在这儿补，
    * 刚问完的那一条在点点条上还是个"只是停了一下"的空点，得刷新页面才对得上。
+   * 片 d 的另一半（D65）：分类也跟着这一拍补上 —— 标签在「答完那一刻」挂到他那句问题下面。
+   * `kinds` 没传 = 这一趟服务端没推分类（模型没写那一行）：原样不动，和库里一个口径（那一列服务端也没碰）
    */
-  const onQaAnswered = useCallback((id: string, question: string, answer: string, refs: AnswerRef[] | null) => {
-    setPoints((prev) =>
-      prev.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              question,
-              ai_answer: answer,
-              question_mode: p.question_mode ?? "free",
-              // 片 c 概述卡跟着答案一起换（重试时旧答案的卡片不许挂到新答案下面；这一趟没推卡片 = 没有卡片）
-              refs,
-            }
-          : p,
-      ),
-    );
-  }, []);
+  const onQaAnswered = useCallback(
+    (id: string, question: string, answer: string, refs: AnswerRef[] | null, kinds?: QuestionKind[]) => {
+      setPoints((prev) =>
+        prev.map((p) =>
+          p.id === id
+            ? {
+                ...p,
+                question,
+                ai_answer: answer,
+                question_mode: p.question_mode ?? "free",
+                // 片 c 概述卡跟着答案一起换（重试时旧答案的卡片不许挂到新答案下面；这一趟没推卡片 = 没有卡片）
+                refs,
+                ...(kinds ? { kinds } : {}),
+              }
+            : p,
+        ),
+      );
+    },
+    [],
+  );
+
+  /**
+   * 片 d 的另一半（D65）：他点了问题下面的标签开关。**先改界面、再存**；存不上就改回**库里真有的那一组**，并当场说（D44）。
+   *
+   * 连点几下时两件事要对：
+   * ① 一个问题的几次保存**排队一个个发**，发的都是「改完之后的整组」—— 后到的永远是他最后看到的那一组，不会被早发的盖掉；
+   * ② 只有**最新那一次**失败才往回改，改回的是最后一次**存上**的那一组（不是点之前那一眼 —— 那一眼可能本身就没存上）。
+   * `points` 在 transition 里改：一点就整页重画（字幕、捕获轴、两个栏）会卡住按键那一拍（修补轮的 INP），
+   * 那一小格自己先变（`kind-tags.tsx`），这里慢半拍跟上不碍事。
+   */
+  const kindSyncRef = useRef(new Map<string, { chain: Promise<void>; seq: number; saved: QuestionKind[] | null }>());
+  const [kindErrors, setKindErrors] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const setQuestionKinds = useCallback(
+    (id: string, next: QuestionKind[]) => {
+      let sync = kindSyncRef.current.get(id);
+      if (!sync) {
+        sync = { chain: Promise.resolve(), seq: 0, saved: readKinds(pointsRef.current.find((p) => p.id === id)?.kinds) };
+        kindSyncRef.current.set(id, sync);
+      }
+      const s = sync;
+      const seq = ++s.seq;
+      startTransition(() => {
+        setPoints((prev) => prev.map((p) => (p.id === id ? { ...p, kinds: next } : p)));
+      });
+      setKindErrors((m) => {
+        if (!m.has(id)) return m;
+        const out = new Map(m);
+        out.delete(id);
+        return out;
+      });
+      s.chain = s.chain.then(async () => {
+        try {
+          const res = await fetch(`/api/interrupts/${id}`, {
+            method: "PATCH",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ kinds: next }),
+          });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(typeof body.error === "string" && body.error ? body.error : t("kinds.saveFailedGeneric"));
+          }
+          s.saved = next;
+        } catch (e) {
+          if (seq !== s.seq) return; // 后面还有一次在排队：由它说了算
+          // 断网时 fetch 抛的是 TypeError（「Failed to fetch」）—— 那句不是人话，换成「网络或服务器出了问题」
+          const why = e instanceof Error && e.message && !(e instanceof TypeError) ? e.message : t("kinds.saveFailedGeneric");
+          const back = s.saved;
+          startTransition(() => {
+            setPoints((prev) => prev.map((p) => (p.id === id ? { ...p, kinds: back } : p)));
+          });
+          setKindErrors((m) => new Map(m).set(id, t("kinds.saveFailed", why)));
+        }
+      });
+    },
+    [t],
+  );
+  /** D65 选 A：设了想学的语言（`target_lang` 非空）才露「语言」这一类 */
+  const showLanguage = Boolean(normalizeLang(prefs.targetLang));
+  /** 问答栏和互动记录两处的标签共用这一套（同一份 `points`、同一个存法、同一份「没存上」） */
+  const tagging = useMemo(
+    () => ({ showLanguage, onSet: setQuestionKinds, errors: kindErrors }),
+    [showLanguage, setQuestionKinds, kindErrors],
+  );
 
   const getPlayTick = useCallback(() => playTickRef.current, []);
 
@@ -2446,6 +2517,7 @@ export function WatchStage({
               eventsLoadFailed={watchEventsTrouble === "failed"}
               atHintSeen={atHintDone}
               onAtHintSeen={markAtHintSeen}
+              tagging={tagging}
               chat={{
                 pauseVideo: () => handleRef.current?.pause(),
                 createPoint: createPointForAsk,

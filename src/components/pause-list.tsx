@@ -3,7 +3,7 @@
 import { useId, useMemo, useState } from "react";
 import { firstSentence, segmentsInWindow } from "@/lib/captions";
 import { mmss } from "@/lib/time";
-import type { InterruptRow, TranscriptSegment } from "@/lib/types";
+import type { InterruptRow, QuestionKind, TranscriptSegment } from "@/lib/types";
 import { useCopy } from "@/components/copy-provider";
 import type { Translate } from "@/lib/copy";
 
@@ -41,6 +41,11 @@ export type PausePoint = Pick<
    * 只有宽屏问答栏画它；这一页（历史页）照旧只显示 `ai_answer` 全文 —— 全文末尾本来就留着一份文字版
    */
   refs?: unknown;
+  /**
+   * M3.15 片 d 的另一半（D65）：问题分类（`interrupts.kinds`，迁移 0011 的列）。null / 没有 = 没标过。
+   * 读的地方一律过 `readKinds`（库里躺着什么别全信）；只有宽屏问答栏和互动记录画它，这一页照旧不画
+   */
+  kinds?: QuestionKind[] | null;
 };
 
 /** 「那一刻的字幕」取这一刻前后各几秒。够唤起记忆即可，多了会把每行撑成一段文章 */

@@ -122,6 +122,9 @@ export async function POST(request: Request) {
   const { interruptId, question, brief, look, cards } = parsed.data;
   // 这一趟出概述卡吗：只有「按卡片问」的正经一问才出（短版不写第②段；看画面那版的卡片已经在只看字幕那版上）
   const withRefs = Boolean(cards) && !brief && !look;
+  // 片 d 的另一半（D65）：问题分类跟着**同一趟**出、同一句 update 落库。只有正经一问标 ——
+  // 「说短一点」「看画面再答」问的还是那个问题，标签早就有了（他改过的更不能被重答一次冲掉）；手机暂停面板不带 `cards`，一个字不变
+  const withKinds = withRefs;
   // 宽屏问答栏来的吗：正经一问带 `cards`、「说短一点」带 `brief`、「看画面再答」带 `look` —— 手机暂停面板三样都不带，
   // 它的请求和以前逐字节相同。只有这一路带上之前的对话（D77）、立「不许猜是谁说的」（D76）
   const fromRail = Boolean(cards || brief || look);
@@ -182,8 +185,8 @@ export async function POST(request: Request) {
         }
       };
 
-      // 按卡片问的那两趟（正经一问 / 看画面）：指路那一段（`[[REFS]]` 起）**不上屏** ——
-      // 它会变成卡片；看画面那趟本来就叫模型别写，万一写了也不让它漏出去
+      // 按卡片问的那两趟（正经一问 / 看画面）：指路那一段（`[[REFS]]` 起）和最后那行分类（`[[KINDS]]`，片 d）**不上屏** ——
+      // 它们会变成卡片和标签；看画面那趟本来就叫模型别写，万一写了也不让它漏出去
       const splitter = cards ? refsStream((text) => push({ type: "chunk", text })) : null;
 
       try {
@@ -216,6 +219,7 @@ export async function POST(request: Request) {
                 }
               : undefined,
           cards,
+          kinds: withKinds,
           history: history?.turns,
           noSpeakerGuess: fromRail,
           onChunk: async (text) => (splitter ? splitter.push(text) : push({ type: "chunk", text })),
@@ -223,9 +227,12 @@ export async function POST(request: Request) {
         await splitter?.end();
 
         // 片 c：拆出指路 → 拿原句去字幕里核对、吸附（D64）→ 要落库的全文 = 正文 + 每张卡一行字。
-        // 核对用的是上面喂给模型的**同一份**字幕（D50 字形转换过的），否则简体问句引繁体字幕永远核不上
+        // 核对用的是上面喂给模型的**同一份**字幕（D50 字形转换过的），否则简体问句引繁体字幕永远核不上。
+        // 片 d：最后那行分类（`[[KINDS]]`）也在这儿摘掉 —— 它进 `kinds` 那一列，答案全文里一个字不留
         const settled = withRefs ? settleAnswer(raw, segments, source.duration_s) : null;
         const answer = settled ? settled.stored : cards ? splitRefsBlock(raw).body : raw;
+        // `null` = 模型这一趟没写分类那一行：那一列不碰（新问题本来就是空的，界面显示「＋ 标签」让他自己点）
+        const kinds = withKinds && settled ? settled.kinds : null;
 
         // 答完整才落库：写回这条打断点的问题与答案，复习时要用（WORKORDER 283）。
         // question_mode 之前空着的话，标成 free（自由提问）。
@@ -258,6 +265,8 @@ export async function POST(request: Request) {
               ai_answer: answer,
               question_mode: interrupt.question_mode ?? "free",
               ...(settled ? { refs: settled.refs } : {}),
+              // 片 d（D65）：和答案同一句写 —— 要么一起存上、要么一起没存上（没存上下面那句 warn 照说）
+              ...(kinds ? { kinds } : {}),
             })
             .eq("id", interruptId)
             .eq("user_id", user.id);
@@ -274,6 +283,8 @@ export async function POST(request: Request) {
 
         // 概述卡排在 done 前面：界面收到 done 时手里已经有卡片，全文末尾那几行字才拆得掉（`splitAnswer`）
         if (settled) push({ type: "refs", refs: settled.refs });
+        // 分类也排在 done 前面：问答栏在「答完那一拍」把标签挂到他那句问题下面（D65）
+        if (kinds) push({ type: "kinds", kinds });
         push({ type: "done", answer });
       } catch (e) {
         // 看画面那一趟撞上「视频读不了」：说的是**这一种**，而且告诉他只看字幕那版还在（D75）——

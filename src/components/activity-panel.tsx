@@ -1,16 +1,20 @@
 "use client";
 
-import { memo, useCallback, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { CoverageBar, TIER_SWATCH } from "@/components/coverage-track";
 import { useCopy, useUiLang } from "@/components/copy-provider";
+import { KindTags, type Tagging } from "@/components/kind-tags";
 import type { Translate } from "@/lib/copy";
+import type { CopyKey } from "@/lib/copy/keys";
+import { shownKinds, visibleKinds } from "@/lib/question-kinds";
 import { hms, mmss } from "@/lib/time";
-import type { SourceKind } from "@/lib/types";
+import type { QuestionKind, SourceKind } from "@/lib/types";
 import {
   READ_CAP,
   buildActivity,
   coverageSegments,
   coverageSummary,
+  questionList,
   questionMoments,
   questionSessions,
   type ActivityGroup,
@@ -402,18 +406,24 @@ function Segmented<T extends string>({
 /**
  * 「只看提问」的一串串：时间只写一次，问题平铺在它右边（D72：不按追问缩进）。
  * 两种排法都用它 —— 「按提问先后」里同一个时间点可能出现两次（隔开问的），所以 key 用那一串第一句的 id，不用时间。
+ * 片 d 的另一半（D65）：每一问后面跟着它的标签（和问答栏里同一个组件、同一份数据，这里改了那边也变）。
  */
 function MomentList({
   moments,
   t,
   onJump,
   onOpenTurn,
+  tagging,
+  onEditing,
   className = "",
 }: {
   moments: readonly QuestionMoment[];
   t: Translate;
   onJump: (s: number) => void;
   onOpenTurn: (id: string) => void;
+  tagging: Tagging;
+  /** 哪一问的标签正展开着改 —— 按标签筛着的时候它不许一去掉标签就从列表里消失 */
+  onEditing: (id: string, open: boolean) => void;
   className?: string;
 }) {
   return (
@@ -434,12 +444,73 @@ function MomentList({
                 >
                   {q.question}
                 </button>
+                <KindTags
+                  kinds={q.kinds}
+                  showLanguage={tagging.showLanguage}
+                  onChange={(next) => tagging.onSet(q.id, next)}
+                  error={tagging.errors.get(q.id)}
+                  align="start"
+                  onOpenChange={(open) => onEditing(q.id, open)}
+                  className="ml-1.5 align-middle text-[0.9em] leading-[1.4]"
+                />
               </li>
             ))}
           </ul>
         </li>
       ))}
     </ul>
+  );
+}
+
+const KIND_LABEL: Record<QuestionKind, CopyKey> = {
+  language: "kinds.language",
+  knowledge: "kinds.knowledge",
+  misheard: "kinds.misheard",
+};
+
+/**
+ * 「只看提问」顶上那一排：按标签筛（片 d 的另一半，D65）。点一个只看那一类，再点一下回到全部。
+ * 一律灰（标签的颜色，见 `kind-tags.tsx`）；每一格带个数，一问都没有的那一类按不动（选中的除外 —— 得能点回来）。
+ * 「语言」只在设了想学的语言时露面（D65 选 A）。
+ */
+function KindFilter({
+  value,
+  onPick,
+  counts,
+  showLanguage,
+  t,
+}: {
+  value: QuestionKind | null;
+  onPick: (k: QuestionKind | null) => void;
+  counts: Readonly<Record<QuestionKind, number>>;
+  showLanguage: boolean;
+  t: Translate;
+}) {
+  return (
+    // 外框和右边那颗「按提问先后 / 按视频时间」同一个样子 —— 一眼看得出这一排是能点的开关，不是一行说明
+    <div
+      role="group"
+      aria-label={t("act.kindFilterAria")}
+      className="flex min-w-0 flex-wrap items-center gap-0.5 rounded-lg border border-ink-700 p-0.5"
+    >
+      {visibleKinds(showLanguage).map((k) => {
+        const on = value === k;
+        return (
+          <button
+            key={k}
+            type="button"
+            aria-pressed={on}
+            disabled={!on && counts[k] === 0}
+            onClick={() => onPick(on ? null : k)}
+            className={`h-6 rounded-md px-1.5 text-[0.62rem] transition-colors disabled:opacity-40 ${
+              on ? "bg-ink-700 text-ink-100" : "text-ink-500 hover:text-ink-300"
+            }`}
+          >
+            {t(KIND_LABEL[k])} <span className="ui-mono">{counts[k]}</span>
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -454,6 +525,7 @@ export function ActivityPanel({
   loadFailed,
   onJump,
   onOpenTurn,
+  tagging,
 }: {
   /** 切到别的 tab 了：不卸载、只 hidden，而且**不订**记录器（藏着的时候不每秒重画） */
   hidden: boolean;
@@ -472,6 +544,8 @@ export function ActivityPanel({
   onJump: (s: number) => void;
   /** 点问题文字：切到「问答」、滚到那一轮、闪一下 */
   onOpenTurn: (interruptId: string) => void;
+  /** 片 d 的另一半（D65）：「只看提问」里每一问的标签 + 顶上按标签筛（和问答栏同一套） */
+  tagging: Tagging;
 }) {
   const t = useCopy();
   const when = useWhen();
@@ -507,10 +581,34 @@ export function ActivityPanel({
     () => (liveGroup ? [...closedGroups.filter((g) => !g.current), liveGroup] : closedGroups),
     [closedGroups, liveGroup],
   );
+  // ── 片 d 的另一半（D65）：按标签筛 ──
+  // 筛的状态**只活在这一次观看里**（不记进 localStorage）：下次进来还停在「只看知识」，会以为别的问题没了
+  const { showLanguage } = tagging;
+  const [kindPick, setKindPick] = useState<QuestionKind | null>(null);
+  // 「语言」那一格藏起来了（想学的语言被清掉）就当没筛
+  const kindFilter = kindPick && visibleKinds(showLanguage).includes(kindPick) ? kindPick : null;
+  /** 正展开着改标签的那一问：筛着的时候它照样留在列表里，去掉标签不会当场消失（收起之后再按筛选走） */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const onEditing = useCallback((id: string, open: boolean) => {
+    setEditingId((cur) => (open ? id : cur === id ? null : cur));
+  }, []);
+  const asked = useMemo(() => questionList(points), [points]);
+  const kindCounts = useMemo(() => {
+    const c: Record<QuestionKind, number> = { language: 0, knowledge: 0, misheard: 0 };
+    for (const q of asked) for (const k of shownKinds(q.kinds, showLanguage)) c[k] += 1;
+    return c;
+  }, [asked, showLanguage]);
+  const askPoints = useMemo(
+    () =>
+      kindFilter
+        ? points.filter((p) => p.id === editingId || shownKinds(p.kinds, showLanguage).includes(kindFilter))
+        : points,
+    [points, kindFilter, editingId, showLanguage],
+  );
   // D72：「只看提问」按时间点分组、组里平铺（片 c0 是按提问先后排、追问缩进）
-  const moments = useMemo(() => questionMoments(points), [points]);
+  const moments = useMemo(() => questionMoments(askPoints), [askPoints]);
   // 2026-09-18：另一种排法 —— 按提问的真实先后，隔了半小时以上另起一段
-  const sessions = useMemo(() => (order === "asked" ? questionSessions(points) : []), [order, points]);
+  const sessions = useMemo(() => (order === "asked" ? questionSessions(askPoints) : []), [order, askPoints]);
   const segs = useMemo(() => coverageSegments(cover, durationS), [cover, durationS]);
   const summary = useMemo(() => coverageSummary(segs, durationS), [segs, durationS]);
 
@@ -628,13 +726,15 @@ export function ActivityPanel({
       {/* ── 时间线（或「只看提问」）── */}
       <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-3 pb-3">
         {filter === "asks" ? (
-          moments.length === 0 ? (
+          asked.length === 0 ? (
             <p className="pt-3 text-xs leading-5 text-ink-500">{t("act.emptyAsks")}</p>
           ) : (
             <>
               {/* D74（2026-09-18）：「1:33 那两个问题其实是我在 1:34、2:55 后面问的」—— 两种顺序都有用，给一个开关，默认按提问先后。
-                  开关上写着现在是哪一种顺序，这件事本身就把他那次的疑惑答掉了 */}
-              <div className="flex justify-end pt-2">
+                  开关上写着现在是哪一种顺序，这件事本身就把他那次的疑惑答掉了。
+                  片 d 的另一半（D65）：左边是按标签筛（「知识 3」「没听清 1」…），放不下时折到上一行 */}
+              <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 pt-2">
+                <KindFilter value={kindFilter} onPick={setKindPick} counts={kindCounts} showLanguage={showLanguage} t={t} />
                 <Segmented
                   value={order}
                   onPick={orderPref.set}
@@ -645,9 +745,19 @@ export function ActivityPanel({
                   ]}
                 />
               </div>
-              {order === "video" ? (
+              {kindFilter && moments.length === 0 ? (
+                <p className="pt-3 text-xs leading-5 text-ink-500">{t("act.kindEmpty", t(KIND_LABEL[kindFilter]))}</p>
+              ) : order === "video" ? (
                 // D72：同一个时间点问的归成一组，组与组按视频里的时间排
-                <MomentList moments={moments} t={t} onJump={onJump} onOpenTurn={onOpenTurn} className="pt-1" />
+                <MomentList
+                  moments={moments}
+                  t={t}
+                  onJump={onJump}
+                  onOpenTurn={onOpenTurn}
+                  tagging={tagging}
+                  onEditing={onEditing}
+                  className="pt-1"
+                />
               ) : (
                 // 按提问先后：隔了半小时以上另起一段，段头写那一刻的日期时间（和「全部」里每一次观看的段头同一个样子）
                 sessions.map((s) => (
@@ -657,7 +767,14 @@ export function ActivityPanel({
                         {when(s.at)}
                       </h3>
                     ) : null}
-                    <MomentList moments={s.moments} t={t} onJump={onJump} onOpenTurn={onOpenTurn} />
+                    <MomentList
+                      moments={s.moments}
+                      t={t}
+                      onJump={onJump}
+                      onOpenTurn={onOpenTurn}
+                      tagging={tagging}
+                      onEditing={onEditing}
+                    />
                   </section>
                 ))
               )}
