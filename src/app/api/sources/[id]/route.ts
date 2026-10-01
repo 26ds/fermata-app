@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
-import { putCachedTranscript } from "@/lib/transcript/cache";
 import { getLangPrefs } from "@/lib/settings";
 import { conformSegments } from "@/lib/zh-convert";
 import { captionScriptFor } from "@/lib/zh-script";
@@ -143,22 +142,13 @@ export async function PATCH(
     if (watchError) watchHistory = false;
   }
 
-  // 用户手动粘贴的字幕，也回填跨用户缓存（D31）—— 桌面用户从 YouTube「显示转录」
-  // 粘一次，手机用户打开同一支就直接白拿。字幕是公共内容，共享无隐私顾虑。
-  if (patch.transcript) {
-    const { data: row } = await supabase
-      .from("sources")
-      .select("external_id, kind")
-      .eq("id", id)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (row?.external_id) {
-      await putCachedTranscript(supabase, row.external_id, row.kind, patch.transcript);
-    }
-  }
+  // 用户手动粘贴的字幕**只归他自己**，不回填跨用户缓存（2026-09-26，D31 补记 · 创始人选 B）。
+  // 以前是「粘一次，别人打开同一支直接白拿」—— 可那也意味着谁都能贴一份假字幕，
+  // 塞给之后打开同一支视频的所有人。共享缓存从此只收机器转写（`/api/transcript`）；
+  // 由粘贴字幕翻出来的译文同样不进共享缓存（`/api/translate` + `lib/transcript/shared.ts`）。
 
-  // D50：他贴进来的可能是繁体、而他母语是简体（反之亦然）。库里存**原样**（那是底本，
-  // 还要回填跨用户缓存），**回给浏览器的这一份转成他的字形** —— 转换在服务端，
+  // D50：他贴进来的可能是繁体、而他母语是简体（反之亦然）。库里存**原样**（那是底本），
+  // **回给浏览器的这一份转成他的字形** —— 转换在服务端，
   // 客户端不背那 1MB 词库。
   const screenTranscript = patch.transcript
     ? conformSegments(patch.transcript, captionScriptFor(await getLangPrefs(supabase, user.id)))
