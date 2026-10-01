@@ -4,6 +4,8 @@ import { langLabel, normalizeLang } from "@/lib/lang";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { getCachedTranslation, putCachedTranslation } from "@/lib/translate/cache";
+import { getCachedTranscript } from "@/lib/transcript/cache";
+import { sameTranscript } from "@/lib/transcript/shared";
 import {
   translateSegments,
   TranslateError,
@@ -270,9 +272,14 @@ export async function POST(request: Request) {
           },
         });
 
-        // 翻完整了才写回缓存，给后来人白拿（半截的会坑下一个人）
+        // 翻完整了才写回缓存，给后来人白拿（半截的会坑下一个人）。
+        // 而且只收**共享那份字幕**翻出来的（D31 补记 · 粘贴选 B）：他这份要是自己粘贴的，
+        // 译文照样给他，只是不进共享缓存 —— 见 `lib/transcript/shared.ts`
         if (result.complete && contentKey) {
-          await putCachedTranslation(supabase, contentKey, targetLang, result.translations, sourceLang);
+          const shared = await getCachedTranscript(supabase, contentKey);
+          if (shared && sameTranscript(segments, shared.segments)) {
+            await putCachedTranslation(supabase, contentKey, targetLang, result.translations, sourceLang);
+          }
         }
         push({
           type: "done",

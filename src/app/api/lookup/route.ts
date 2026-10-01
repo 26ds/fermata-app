@@ -5,6 +5,7 @@ import { PhraseError } from "@/lib/phrases/gemini-phrases";
 import { lookupTerm } from "@/lib/senses/gemini-senses";
 import { readSenses, senseKey, type Lookup, type Sense } from "@/lib/senses/types";
 import { getLangPrefs } from "@/lib/settings";
+import { sharedCacheWriter } from "@/lib/supabase/cache-writer";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import type { SourceRow } from "@/lib/types";
@@ -149,8 +150,9 @@ export async function POST(request: Request) {
       // 一个稳定的否定答案，白付一辈子的钱
       // 表是迁移 0008 建的。**没跑迁移就静静地存不进去**（Supabase 返回 error 而不是抛），
       // 功能照常可用，只是每次都要重新问一遍模型 —— 缓存是省钱的，不是能不能用的前提
+      // 写走 `sharedCacheWriter`（服务端 service role）—— 迁移 0014 起登录用户对这张表只剩读
       if (supportLang && contentLang) {
-        await supabase
+        await sharedCacheWriter(supabase)
           .from("word_senses")
           .upsert(
             { term: key, content_lang: contentLang, support_lang: supportLang, senses },

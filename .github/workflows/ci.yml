@@ -1,0 +1,33 @@
+name: CI
+
+# 每次推到 main、每个 PR：类型检查 → lint → 单元测试 → 构建（2026-09-26，plans/公开仓库-2026-09-26.md）。
+# 只是提醒：红了不挡合并，也不影响 Vercel 部署。构建不需要任何密钥。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"

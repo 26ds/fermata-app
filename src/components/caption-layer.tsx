@@ -395,6 +395,7 @@ export function CaptionLayer({
   // 挂载后读回 flip / 只当前行（纯显示口味，留在本机）
   useEffect(() => {
     try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 故意挂载后才读：服务端没有 localStorage，放进初始 state 会水合对不上
       if (localStorage.getItem(FLIP_KEY) === "1") setFlip(true);
       if (localStorage.getItem(TRONLY_KEY) === "1") setTrOnlyCurrent(true);
     } catch {
@@ -422,6 +423,7 @@ export function CaptionLayer({
   // 换语言 / 组件卸载时中断上一次请求，避免旧译文覆盖新译文。
   useEffect(() => {
     if (!lang) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 关掉译文时清空上一轮的译文状态；原样保留，不改时序
       setTr(new Map());
       setTrRunning(false);
       setTrNote("");

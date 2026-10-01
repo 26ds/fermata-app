@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { TranslatedSegment } from "./gemini-translate";
 import { MAX_SEGMENTS } from "@/lib/captions";
+import { sharedCacheWriter } from "@/lib/supabase/cache-writer";
 
 // M2.9 跨用户「译文」缓存。译文对 (同一支内容, 同一种目标语言) 是一样的，跟谁看无关 ——
 // 按 (content_key, target_lang) 去重，第一个翻的人填，后面的人（含手机）白拿。
@@ -33,6 +34,7 @@ export async function getCachedTranslation(
  * 把**翻完整**的译文写回缓存，给后来人复用。
  * 只在 `complete` 时写 —— 半截的写进去会让下一个打开的人看到缺行。
  * 写失败（表没建 / 权限）静默吞掉：缓存是加分项，绝不能挡住这一次已经给到用户的译文。
+ * 写走 `sharedCacheWriter`（服务端 service role）—— 迁移 0014 起登录用户对这张表只剩读。
  */
 export async function putCachedTranslation(
   supabase: SupabaseClient,
@@ -43,7 +45,7 @@ export async function putCachedTranslation(
 ): Promise<void> {
   if (!key || translations.length === 0) return;
   try {
-    await supabase.from("translation_cache").upsert(
+    await sharedCacheWriter(supabase).from("translation_cache").upsert(
       {
         content_key: key,
         target_lang: targetLang,

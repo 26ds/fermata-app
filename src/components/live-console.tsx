@@ -692,9 +692,6 @@ export function LiveConsole({ geminiConfigured }: { geminiConfigured: boolean })
                 </select>
               </label>
             </div>
-            <p className="mt-1.5 rounded-xl border border-dashed border-ink-500/50 px-3 py-1.5 text-center text-[0.7rem] text-ink-500">
-              Upload your favorite voice — coming soon
-            </p>
             <button
               type="button"
               onClick={connect}
