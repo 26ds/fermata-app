@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { normalizeKinds, QUESTION_KINDS } from "@/lib/question-kinds";
 import { supabaseConfigured } from "@/lib/supabase/config";
 import { createClient } from "@/lib/supabase/server";
 import { getT } from "@/lib/ui-lang";
@@ -8,10 +9,19 @@ import { tMaybeKey } from "@/lib/copy";
 // M1c — 给已记下的打断点补一个"卡在哪"的类型。
 // 点球 = 先把这一刻记下来（POST），面板里选 chip = 回头补类型（这里）。
 // 1c 只写 question_mode，不请求 AI；M3 再往同一行写 question / ai_answer。
+//
+// M3.15 片 d 的另一半（D65）：宽屏上点问题下面的标签，**改的也是这一行** —— 送来的是**改完之后的整组**标签
+// （不是「加一个 / 去一个」），连点几下谁先到都不会拼出一组他没点过的。一个都不剩也存（`[]` = 他自己全去掉了，和「没标过」的 null 分开）。
+// 手机那一路（`questionMode`）请求和回的东西都和以前一模一样。
 
-const patchSchema = z.object({
-  questionMode: z.enum(["word", "concept", "voice", "free"]),
-});
+const patchSchema = z.union([
+  z.object({
+    questionMode: z.enum(["word", "concept", "voice", "free"]),
+  }),
+  z.object({
+    kinds: z.array(z.enum(QUESTION_KINDS)).max(QUESTION_KINDS.length * 2),
+  }),
+]);
 
 export async function PATCH(
   request: Request,
@@ -47,13 +57,23 @@ export async function PATCH(
     return NextResponse.json({ error: t("err.badFormat") }, { status: 400 });
   }
 
-  const { data, error } = await supabase
-    .from("interrupts")
-    .update({ question_mode: body.questionMode })
-    .eq("id", id)
-    .eq("user_id", user.id) // RLS 之外再加一道，别人的行改不动
-    .select("id, t_s, question_mode")
-    .maybeSingle();
+  const { data, error } =
+    "kinds" in body
+      ? await supabase
+          .from("interrupts")
+          // 去重 + 按界面顺序排，同一组标签不管怎么点出来的，库里都长一个样
+          .update({ kinds: normalizeKinds(body.kinds) })
+          .eq("id", id)
+          .eq("user_id", user.id) // RLS 之外再加一道，别人的行改不动
+          .select("id, kinds")
+          .maybeSingle()
+      : await supabase
+          .from("interrupts")
+          .update({ question_mode: body.questionMode })
+          .eq("id", id)
+          .eq("user_id", user.id) // RLS 之外再加一道，别人的行改不动
+          .select("id, t_s, question_mode")
+          .maybeSingle();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

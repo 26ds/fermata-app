@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ActivityPanel } from "@/components/activity-panel";
 import { useCopy } from "@/components/copy-provider";
+import type { Tagging } from "@/components/kind-tags";
 import type { PausePoint } from "@/components/pause-list";
 import { QaChat } from "@/components/qa-chat";
 import type { CopyKey } from "@/lib/copy/keys";
@@ -198,6 +199,7 @@ export function QaRail({
   eventsLoadFailed,
   atHintSeen,
   onAtHintSeen,
+  tagging,
   chat,
 }: {
   /**
@@ -224,6 +226,8 @@ export function QaRail({
   /** 片 d：`@` 那张单子自动弹过一次了吗（`user_settings.atHintSeen`，**零新迁移**）。壳不用它，原样往下递 */
   atHintSeen: boolean;
   onAtHintSeen: () => void;
+  /** 片 d 的另一半（D65）：问题标签那一套。问答栏（他那句问题下面）和互动记录（「只看提问」）两处都用，原样往下递 */
+  tagging: Tagging;
   /** 问答那一栏要的其余东西。壳不认识它们，原样往下递 */
   chat: Omit<
     ChatProps,
@@ -243,6 +247,7 @@ export function QaRail({
     | "durationS"
     | "atHintSeen"
     | "onAtHintSeen"
+    | "tagging"
   >;
 }) {
   const t = useCopy();
@@ -419,6 +424,7 @@ export function QaRail({
         durationS={durationS}
         atHintSeen={atHintSeen}
         onAtHintSeen={onAtHintSeen}
+        tagging={tagging}
       />
 
       {/* ② 互动记录：也**永远挂着**（各记各的滚动位置），但藏着的时候不订记录器、不每秒重画 */}
@@ -434,6 +440,7 @@ export function QaRail({
         loadFailed={eventsLoadFailed}
         onJump={jumpFromRecord}
         onOpenTurn={openTurn}
+        tagging={tagging}
       />
 
       {/* ③ Takeaway 还是空态 —— 片 e 的活 */}

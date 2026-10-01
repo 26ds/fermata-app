@@ -155,6 +155,20 @@ export const zh = {
   "watch.at.forward": "只能往回倒（@-13 = 往回 13 秒）—— 要问后面某一秒，直接写那个时间，比如 @12:34",
   "watch.at.outOfRange": (len: string) => `这支内容只有 ${len} 长，没有那一秒`,
 
+  // ── 问题三分类（M3.15 片 d 的另一半，D65）—— 问答栏里他那句问题下面、互动记录「只看提问」里 ──
+  // 「语言」只在设了想学的语言时才露面（D65 选 A）。小、灰：不许抢答案的戏
+  "kinds.language": "语言",
+  "kinds.knowledge": "知识",
+  "kinds.misheard": "没听清",
+  "kinds.add": "＋ 标签",
+  // 收着的那一行整行是一颗按钮：读屏要知道现在是什么、点了会怎样
+  "kinds.editAria": (list: string) => (list ? `这个问题的标签：${list}。点一下改` : "这个问题还没有标签。点一下加"),
+  "kinds.groupAria": "改这个问题的标签：点一个就加上或去掉，点别处收起",
+  "kinds.listSep": "、",
+  // D44：没存上要说，而且说清楚已经改回去了（界面上的样子 = 库里的样子）
+  "kinds.saveFailed": (why: string) => `标签没存上，已经改回去了：${why}`,
+  "kinds.saveFailedGeneric": "网络或服务器出了问题",
+
   // ── 观看页 · 右栏第二栏「互动记录」（M3.15 片 c0，D71）──────────────────────
   // 播了一段 / 停住 / 离开页面 / 跳（从哪到哪、怎么跳的）/ 问 / 记点，按真实先后。只在宽屏出现。
   // 时间一律 mm:ss（位置）；「看了多久」这类时长走 `act.dur`。
@@ -180,6 +194,9 @@ export const zh = {
   "act.orderAria": "问题怎么排",
   "act.order.video": "按视频时间",
   "act.order.asked": "按提问先后",
+  // 片 d 的另一半（D65）：「只看提问」顶上按标签筛 —— 点一个只看那一类，再点一下回到全部
+  "act.kindFilterAria": "按标签筛选问题（再点一下回到全部）",
+  "act.kindEmpty": (label: string) => `没有标着「${label}」的问题。`,
   "act.visitNow": "这一次",
   // 上线之前就有的点和问题：库里知道什么时候记的，但那一次怎么播、怎么跳，没人记过
   "act.earlier": "更早 · 那时还没有观看记录",

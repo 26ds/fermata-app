@@ -1,6 +1,8 @@
 // M3.15 片 c —— D64 的闸：模型说「视频别处还讲到」，**必须连原句一起给**；服务端拿原句去字幕里找，
 // 找得到就把秒数吸附到那一句真正开始的地方，找不到就照登、灰着、说「没核对上」（卡片不可点）。
 //
+// 片 d 的另一半（D65）起还管答案**最后一行**的问题分类 `[[KINDS]] …`：流式时和指路那一段一起挡在屏幕外、答完摘出来存进 `interrupts.kinds`。
+//
 // 纯函数（不 import server-only）：Node 直接跑得了单元测试（工具箱第 5 / 8 节的办法）。
 // 读的是 `/api/ask` 喂给模型的**同一份**字幕（已经过 D50 字形转换）—— 否则简体问句引繁体字幕，永远核不上。
 //
@@ -12,10 +14,102 @@
 
 import type { AnswerRef } from "@/lib/answer-refs";
 import { refsText } from "@/lib/answer-refs";
-import type { TranscriptSegment } from "@/lib/types";
+import { normalizeKinds } from "@/lib/question-kinds";
+import type { QuestionKind, TranscriptSegment } from "@/lib/types";
 
 /** 模型在正文后面写的那一行记号。容错：一对或两对方括号、中间空格、markdown 加粗、大小写 */
 const MARKER = /\**[ \t]*\[\[?[ \t]*REFS[ \t]*\]\]?[ \t]*\**/i;
+
+/**
+ * 片 d 的另一半（D65）：答案**最后一行**的问题分类 `[[KINDS]] knowledge, language`。
+ * 容错比 REFS 再宽一点：`KINDS` 后面紧跟收尾的方括号**或者冒号**都算 —— 模型偶尔会写成 `[[KINDS: knowledge]]`，
+ * 那种要是认不出来，整行就原样漏到屏幕上（界面上多出一句「[[KINDS: knowledge]]」）。
+ * 但**不许光凭 `[kinds` 就算**：正文里写一句「[kinds of jets]」，后面半截答案会被当成记号吞掉。
+ */
+const KINDS_MARKER = String.raw`\**[ \t]*\[\[?[ \t]*KINDS[ \t]*(?:\]\]?|(?=[:：]))[ \t]*\**[ \t]*[:：]?`;
+
+/** 流式时挡哪几种记号：两种都是「从这儿往后不上屏」 */
+const TAIL_MARKER = new RegExp(`${MARKER.source}|${KINDS_MARKER}`, "i");
+
+// ── 〇、问题分类那一行（D65）─────────────────────────────────────────────────
+
+/** 模型可能写成的样子 → 三类之一。它被叫去写英文词，但中文答案里偶尔会顺手翻成中文 */
+const KIND_WORDS: Readonly<Record<string, QuestionKind>> = {
+  language: "language",
+  languages: "language",
+  lang: "language",
+  linguistic: "language",
+  语言: "language",
+  語言: "language",
+  knowledge: "knowledge",
+  content: "knowledge",
+  知识: "knowledge",
+  知識: "knowledge",
+  misheard: "misheard",
+  mishear: "misheard",
+  missed: "misheard",
+  没听清: "misheard",
+  沒聽清: "misheard",
+};
+
+/** 「一类都不沾」的写法 —— 认得它，才分得清「标签就是没有」和「这一行根本不是标签」 */
+const NONE_WORDS = new Set(["none", "null", "nil", "na", "-", "—", "无", "無", "没有", "沒有"]);
+
+function kindTokens(s: string): string[] {
+  return s
+    .replace(/[[\]"'`*「」“”‘’(){}<>.。!！]/g, " ")
+    .toLowerCase()
+    .split(/[\s,，、;；/|·+&]+/)
+    .filter(Boolean);
+}
+
+/** 读一段字里的标签。`pure` = 这一段**只有**标签词（或者「无」），没夹别的话 */
+function readKindText(s: string): { kinds: QuestionKind[]; pure: boolean; empty: boolean } {
+  const toks = kindTokens(s);
+  const kinds: QuestionKind[] = [];
+  let pure = true;
+  for (const tok of toks) {
+    const k = KIND_WORDS[tok];
+    if (k) kinds.push(k);
+    else if (!NONE_WORDS.has(tok)) pure = false;
+  }
+  return { kinds: normalizeKinds(kinds), pure, empty: toks.length === 0 };
+}
+
+/**
+ * 把答案里的 `[[KINDS]] …` 那一行摘出来。**`kinds === null` = 这一趟压根没写那一行**（和「写了、一类都不沾」的 `[]` 分开）。
+ *
+ * 认的写法：`[[KINDS]] knowledge, language` / `**[[KINDS]]** Knowledge.` / `[KINDS]: 知识` / `[[KINDS: misheard]]` /
+ * 记号单独一行、类别写在下一行（下一行**只有**标签词才算，免得把 `[[REFS]]` 或正文吞掉）/ 只有记号（= 一类都不沾）。
+ * 写了好几行就合起来。摘掉的只是这几行，前后的正文、`[[REFS]]` 那一段原样留着给后面拆。
+ */
+export function takeKinds(text: string): { rest: string; kinds: QuestionKind[] | null } {
+  const re = new RegExp(KINDS_MARKER, "gi");
+  let kinds: QuestionKind[] | null = null;
+  let rest = "";
+  let from = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const markEnd = m.index + m[0].length;
+    const nl = text.indexOf("\n", markEnd);
+    let end = nl < 0 ? text.length : nl;
+    let got = readKindText(text.slice(markEnd, end));
+    if (got.empty && nl >= 0) {
+      // 记号单独一行：看下一行非空的是不是一行纯标签
+      const next = /^\n[ \t]*\n?([^\n]*)/.exec(text.slice(end));
+      const cand = next ? readKindText(next[1]) : null;
+      if (next && cand && !cand.empty && cand.pure && !TAIL_MARKER.test(next[1])) {
+        got = cand;
+        end += next[0].length;
+      }
+    }
+    kinds = normalizeKinds([...(kinds ?? []), ...got.kinds]);
+    rest += text.slice(from, m.index);
+    from = end;
+    re.lastIndex = Math.max(end, markEnd + 1);
+  }
+  if (kinds === null) return { rest: text, kinds: null };
+  return { rest: rest + text.slice(from), kinds };
+}
 
 /** 最多收几张卡。提示词里说 3；多给的收到 5 为止 —— 防一堵卡片墙 */
 export const MAX_REFS = 5;
@@ -33,30 +127,38 @@ const JSON_LINE = /^\s*(?:[-*•]|\d+[.)])?\s*\{\s*"t"\s*:/;
 /**
  * 正文和指路那一段的分界。标准写法是单独一行 `[[REFS]]`；模型偶尔漏写记号、直接在末尾列 JSON ——
  * 那种也认（末尾连着几行都以 `{"t"` 开头）。
+ * 片 d 起先把最后那行问题分类（`[[KINDS]]`，D65）摘出来 —— 它排在指路那一段后面，不摘掉的话「末尾连着几行 JSON」就认不出了；
+ * 顺带也保证看画面那一趟（它只拿 `body`）万一写了分类，也不会存进答案里。
  */
-export function splitRefsBlock(text: string): { body: string; block: string | null } {
-  const m = MARKER.exec(text);
-  if (m) return { body: text.slice(0, m.index).trim(), block: text.slice(m.index + m[0].length) };
+export function splitRefsBlock(text: string): { body: string; block: string | null; kinds: QuestionKind[] | null } {
+  const { rest, kinds } = takeKinds(text);
+  const m = MARKER.exec(rest);
+  if (m) return { body: rest.slice(0, m.index).trim(), block: rest.slice(m.index + m[0].length), kinds };
   // 没有记号：从末尾往回数，连着几行都是 `{"t": …}`（中间夹空行也算）就当它是指路那一段
-  const lines = text.trimEnd().split("\n");
+  const lines = rest.trimEnd().split("\n");
   let i = lines.length;
   while (i > 0 && (JSON_LINE.test(lines[i - 1]) || (i < lines.length && !lines[i - 1].trim()))) i--;
   if (i < lines.length && lines.slice(i).some((l) => JSON_LINE.test(l))) {
-    return { body: lines.slice(0, i).join("\n").trim(), block: lines.slice(i).join("\n") };
+    return { body: lines.slice(0, i).join("\n").trim(), block: lines.slice(i).join("\n"), kinds };
   }
-  return { body: text.trim(), block: null };
-}
-
-/** 剩下的尾巴会不会是记号的开头（`[`、`[[RE`、`**[`、一个空格）——是就先扣着，等下一块来了再说 */
-function couldBeMarkerStart(tail: string): boolean {
-  const s = tail.replace(/[\s*]/g, "").toUpperCase();
-  return s === "" || "[[REFS]]".startsWith(s) || "[REFS]".startsWith(s);
+  return { body: rest.trim(), block: null, kinds };
 }
 
 /**
- * 流式时把指路那一段挡在界面外：**记号之前的字照常一块块吐，记号和它后面的一个字都不吐**。
+ * 剩下的尾巴会不会是记号的开头（`[`、`[[RE`、`[[KIN`、`**[`、一个空格）——是就先扣着，等下一块来了再说。
+ * 片 d 起多认一种：`[[KINDS`（问题分类那一行）—— **它和 `[[REFS]]` 谁先来都得挡住**：
+ * 模型这一问没写指路（别处没讲到）时，分类那一行就紧跟在正文后面；只认 REFS 的话它会原样漏上屏
+ */
+function couldBeMarkerStart(tail: string): boolean {
+  const s = tail.replace(/[\s*]/g, "").toUpperCase();
+  return s === "" || ["[[REFS]]", "[REFS]", "[[KINDS", "[KINDS"].some((marker) => marker.startsWith(s));
+}
+
+/**
+ * 流式时把指路那一段（和片 d 的分类那一行）挡在界面外：**记号之前的字照常一块块吐，记号和它后面的一个字都不吐**。
  * 记号可能被切在两块中间（`…\n\n[[RE` + `FS]]\n{…`），所以末尾像记号开头的那一小截先扣着。
  * `end()` 时如果从头到尾没出现记号，扣着的那一截照吐（那只是正文末尾的一个空格或方括号）。
+ * 两种记号谁先来就从谁那儿截：提示词要分类在最后一行，但模型把它写在 `[[REFS]]` 前面也不许漏。
  */
 export function refsStream(emit: (text: string) => void | Promise<void>) {
   let full = "";
@@ -66,7 +168,7 @@ export function refsStream(emit: (text: string) => void | Promise<void>) {
     async push(piece: string) {
       full += piece;
       if (cut) return;
-      const m = MARKER.exec(full);
+      const m = TAIL_MARKER.exec(full);
       if (m) {
         cut = true;
         if (m.index > sent) await emit(full.slice(sent, m.index));
@@ -326,13 +428,15 @@ export function verifyRefs(
 /**
  * 一趟答完之后：拆出指路那一段 → 核对 → 拼成要落库的全文（正文 + 每张卡一行，见 `answer-refs.ts` 文件头）。
  * 模型这次没写指路 → `refs = []`（和 null 不一样：[] = 按卡片问过、别处没讲到；null = 老数据 / 手机）。
+ * 片 d：顺带交出最后那行问题分类（D65）。`kinds === null` = 这一趟没写那一行（库里那一列就别碰）；
+ * **分类不进 `stored`** —— 它存在 `interrupts.kinds`，答案全文里一个字都不留（历史页、D77 喂回给模型的都是 `stored`）。
  */
 export function settleAnswer(
   raw: string,
   segments: readonly TranscriptSegment[],
   durationS: number | null,
-): { body: string; refs: AnswerRef[]; stored: string } {
-  const { body, block } = splitRefsBlock(raw);
+): { body: string; refs: AnswerRef[]; stored: string; kinds: QuestionKind[] | null } {
+  const { body, block, kinds } = splitRefsBlock(raw);
   const refs = block ? verifyRefs(parseRefsBlock(block), segments, durationS) : [];
-  return { body, refs, stored: refs.length ? `${body}\n\n${refsText(refs)}` : body };
+  return { body, refs, stored: refs.length ? `${body}\n\n${refsText(refs)}` : body, kinds };
 }

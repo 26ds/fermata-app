@@ -118,6 +118,18 @@ export const en = {
   "watch.at.forward": "Only going back works (@-13 = 13 seconds back) — for a later moment, type the time itself, like @12:34",
   "watch.at.outOfRange": (len: string) => `This one is only ${len} long — there is no such second`,
 
+  // ── Question tags (M3.15 slice d, second half — D65) ────────────────────
+  "kinds.language": "Language",
+  "kinds.knowledge": "Knowledge",
+  "kinds.misheard": "Missed it",
+  "kinds.add": "+ Tag",
+  "kinds.editAria": (list: string) =>
+    list ? `Tags for this question: ${list}. Click to change` : "This question has no tags yet. Click to add one",
+  "kinds.groupAria": "Change this question's tags: click one to add or remove it, click elsewhere to close",
+  "kinds.listSep": ", ",
+  "kinds.saveFailed": (why: string) => `Tag not saved — changed back: ${why}`,
+  "kinds.saveFailedGeneric": "a network or server problem",
+
   // ── Watch page · the “Activity” tab (M3.15 slice c0, D71) ─────────────
   "act.watched": (watched: string, total: string, pct: number) => `Watched ${watched} of ${total} (${pct}%)`,
   "act.watchedUnknown": "Watched: duration not known yet",
@@ -138,6 +150,8 @@ export const en = {
   "act.orderAria": "Order questions",
   "act.order.video": "By video time",
   "act.order.asked": "By time asked",
+  "act.kindFilterAria": "Filter questions by tag (click again to show all)",
+  "act.kindEmpty": (label: string) => `No questions tagged “${label}”.`,
   "act.visitNow": "this visit",
   "act.earlier": "Earlier · before activity was recorded",
   "act.watchedFor": (d: string) => `watched ${d}`,

@@ -318,6 +318,8 @@ export interface PointLite {
   question: string | null;
   parent_id?: string | null;
   created_at?: string | null;
+  /** 片 d 的另一半（D65）：问题分类，原样递过去（`interrupts.kinds`，读的地方过 `readKinds`） */
+  kinds?: unknown;
 }
 
 interface PlayRow {
@@ -562,6 +564,11 @@ export interface QuestionItem {
   followUp: boolean;
   /** 什么时候问的（`interrupts.created_at`）—— 「按提问先后」分段、段头的日期时间都用它 */
   at: string | null;
+  /**
+   * 片 d 的另一半（D65）：这一问的分类，**原样**（没过 `readKinds`）——
+   * 这份列表每多一个点就整个重算一遍，原样递下去，标签那一格才认得出「这一问的标签其实没变」
+   */
+  kinds: unknown;
 }
 
 export function questionList(points: readonly PointLite[]): QuestionItem[] {
@@ -574,6 +581,7 @@ export function questionList(points: readonly PointLite[]): QuestionItem[] {
       question: (p.question ?? "").trim(),
       followUp: Boolean(p.parent_id),
       at: p.created_at ?? null,
+      kinds: p.kinds ?? null,
     }));
 }
 
